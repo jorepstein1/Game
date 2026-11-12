@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthold — a medieval idle city builder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>⚜ Hearthold</h1>
+  <span id="subtitle"></span>
+</header>
+<div id="res"></div>
+<main>
+  <section id="left">
+    <div id="mapwrap">
+      <div id="map"></div>
+      <button id="merchant" hidden title="A travelling merchant!">🐪</button>
+    </div>
+    <button id="clicker">💰 Collect Taxes <small id="clickval"></small></button>
+  </section>
+  <aside>
+    <div id="inspector"></div>
+    <nav id="tabs"></nav>
+    <div id="panel"></div>
+  </aside>
+</main>
+<div id="toasts"></div>
+<div id="modal" hidden><div id="modalbox"></div></div>
+<script src="game.js"></script>
+</body>
+</html>
