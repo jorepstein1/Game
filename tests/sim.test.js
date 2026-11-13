@@ -23,29 +23,45 @@ function town(sim, levels) {
   return free;
 }
 
-test('crownsFor: fourth root of lifetime gold / 500, floored', sim => {
-  assert.strictEqual(sim.crownsFor(0), 0);
-  assert.strictEqual(sim.crownsFor(-5), 0);
-  assert.strictEqual(sim.crownsFor(499), 0);
-  assert.strictEqual(sim.crownsFor(500), 1);
-  assert.strictEqual(sim.crownsFor(500 * 16), 2);
-  assert.strictEqual(sim.crownsFor(1.36e6), 7);
-  assert.strictEqual(sim.crownsFor(500 * 10 ** 4), 10);
-  assert.ok(sim.crownsFor(1e12) - sim.crownsFor(1e11) < sim.crownsFor(1e11), 'diminishing: 10× the gold less than doubles the Crowns');
+test('crownsFor: log scale on the gold earned this reign, with a threshold that rises with Crowns held', sim => {
+  assert.strictEqual(sim.crownsFor(0, 0), 0);
+  assert.strictEqual(sim.crownsFor(-5, 0), 0);
+  assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD, 0), 0);
+  assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD * 10, 0), sim.CROWN_RATE, 'ten times the threshold');
+  assert.strictEqual(sim.crownsFor(1.3e6, 0), 10, 'a first Castle (about 1.3M gold) offers 10 Crowns');
+  assert.strictEqual(sim.crownsFor(1.3e9, 0), 22, 'a thousand times the gold only adds 12 more');
+  assert.ok(sim.crownsFor(1.3e6, 10) < 10 && sim.crownsFor(1.3e6, 30) < sim.crownsFor(1.3e6, 10), 'the same reign is worth less once Crowns are held');
+  for (const held of [0, 10, 40]) for (const n of [1, 5, 10, 20]) {
+    const g = sim.goldForCrowns(n, held);
+    assert.strictEqual(sim.crownsFor(g * 1.0001, held), n, `goldForCrowns(${n}, ${held})`); assert.strictEqual(sim.crownsFor(g * 0.999, held), n - 1);
+  }
+  assert.strictEqual(sim.crownMult(10), 1.5);
 });
 
-test('pendingCrowns: lifetime-based, minus Crowns already awarded, plus Monuments', sim => {
-  sim.state.meta.stats.totalGold = 1.36e6;
-  assert.strictEqual(sim.pendingCrowns(), 7);
+test('pendingCrowns and abdication: Crowns banked, Monuments counted, head start granted', sim => {
+  sim.state.run.gold = 1.3e6; sim.state.meta.stats.totalGold = 1.3e6;
+  assert.strictEqual(sim.pendingCrowns(), 10);
   assert.strictEqual(sim.canPrestige(), false, 'needs a Castle');
   sim.state.run.tiles[sim.HALL_KEY].level = 4; sim.state.run.repeatables.monument = 2;
-  assert.strictEqual(sim.pendingCrowns(), 9);
+  assert.strictEqual(sim.pendingCrowns(), 12);
   const r = sim.prestige();
-  assert.ok(r.ok); assert.strictEqual(r.crowns, 9);
-  assert.strictEqual(sim.state.meta.crowns, 9); assert.strictEqual(sim.state.meta.bonusCrowns, 2);
-  assert.strictEqual(sim.pendingCrowns(), 0, 'the same lifetime gold is not paid twice');
+  assert.ok(r.ok); assert.strictEqual(r.crowns, 12);
+  assert.strictEqual(sim.state.meta.crowns, 12); assert.strictEqual(sim.state.meta.bonusCrowns, 2);
+  assert.strictEqual(sim.pendingCrowns(), 0, 'a new reign starts from nothing on offer');
   assert.strictEqual(sim.hallLevel(), 1); assert.strictEqual(Object.keys(sim.state.run.tiles).length, 1);
-  assert.strictEqual(sim.state.meta.stats.totalGold, 1.36e6, 'meta survives abdication');
+  assert.strictEqual(sim.state.meta.stats.totalGold, 1.3e6, 'meta survives abdication');
+  assert.deepStrictEqual(plain(sim.state.run.res), { gold: 50 + 12 * sim.HEAD_START.gold, food: 30 + 12 * sim.HEAD_START.food, wood: 30 + 12 * sim.HEAD_START.wood, stone: 12 * sim.HEAD_START.stone, iron: 0 });
+  assert.deepStrictEqual(plain(sim.newRun(1).res), plain(sim.START_RES), 'a first kingdom gets no head start');
+});
+
+test('high levels cost extra, linear buildings are exempt', sim => {
+  const up = (id, level) => sim.upgradeCost({ kind: 'building', id, level });
+  const step = (id, level) => Object.values(up(id, level + 1))[0] / Object.values(up(id, level))[0];
+  near(step('smith', 5), sim.UPGRADE_GROWTH, 0.01, 'below the creep');
+  near(step('smith', sim.UPGRADE_CREEP_FROM), sim.UPGRADE_GROWTH * sim.UPGRADE_CREEP, 0.01, 'first creeping level');
+  assert.ok(step('smith', 14) > step('smith', 10) && step('smith', 10) > step('smith', 8), 'each level steeper than the last');
+  near(step('cottage', 14), sim.LINEAR_UPGRADE_GROWTH, 0.01, 'cottage');
+  assert.ok(Number.isFinite(up('guild', sim.MAX_LEVEL - 1).gold) || up('guild', sim.MAX_LEVEL - 1).gold === Infinity);
 });
 
 test('creditAway: caps at 8h, 24h with Stewardship; reports the cap', sim => {
@@ -133,7 +149,7 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   const { state: s, notes } = sim.sanitizeSave(v1, 1000);
   assert.strictEqual(s.v, 2); assert.strictEqual(s.last, 900);
   assert.strictEqual(s.meta.decree, 'dynasty', 'index 19 of the old order');
-  assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 19 - sim.crownsFor(1.02e7));
+  assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 0);
   assert.deepStrictEqual(plain(s.run.tiles), { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'cottage', level: 8 },
     '4,5': { kind: 'building', id: 'farm', level: 6 }, '6,5': { kind: 'building', id: 'smith', level: 3 } });
   const fresh = plain(sim.genTerrain(12345)), got = plain(s.run.terrain);
@@ -142,7 +158,7 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   assert.strictEqual(s.run.buffUntil, 0, 'wall-clock festival times are dropped');
   assert.strictEqual(s.run.gold, 3e6); assert.deepStrictEqual(plain(s.run.research), { axes: 1, tithes: 1 });
   assert.ok(notes.some(n => /predates the rebalance/.test(n)) && notes.some(n => /1 building in this save was not recognised/.test(n)), notes.join('|'));
-  sim.setState(s); assert.strictEqual(sim.pendingCrowns(), 0);
+  sim.setState(s); assert.strictEqual(sim.pendingCrowns(), sim.crownsFor(3e6, 19));
   assert.strictEqual(sim.sanitizeSave({ seed: 1, res: {}, tiles: {}, quest: 24 }, 1000).state.meta.decree, null, 'a finished v1 chain stays finished');
 });
 

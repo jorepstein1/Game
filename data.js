@@ -19,7 +19,7 @@ const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the
   { gold: 500, wood: 300, stone: 100 }, { gold: 6000, wood: 3000, stone: 2000 },
   { gold: 1.2e5, stone: 4e4, iron: 5000 }, { gold: 2e6, stone: 5e5, iron: 8e4 },
 ];
-const HALL_GROWTH = 25;
+const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
 const HALL_FORAGE = 0.5;         // food per second per hall level
 const HALL_BONUS = 0.25;         // all production per hall level above 1
@@ -33,6 +33,7 @@ const CLEAR_GROWTH = 2;           // each clearing costs this many times the las
 
 // ── Balance ──
 const START_RES = { gold: 50, food: 30, wood: 30, stone: 0, iron: 0 };
+const HEAD_START = { gold: 100, wood: 100, food: 30, stone: 30 }; // extra starting stock per Crown held: a new kingdom skips the slow first minutes
 const START_POP = 3;
 const FOOD_PER_POP = 0.08;       // base food upkeep per villager per second
 const FOOD_CROWD = 200;          // upkeep per villager is multiplied by 1 + (population / FOOD_CROWD)^2
@@ -43,11 +44,20 @@ const BUILD_GROWTH = 1.18;       // default cost growth per copy of a building a
 const UPGRADE_BASE = 1.5;        // upgrade cost = base cost × UPGRADE_BASE × UPGRADE_GROWTH^level
 const UPGRADE_GROWTH = 3.2;        // default; a building's own upgradeGrowth overrides it
 const LINEAR_UPGRADE_GROWTH = 2.5; // buildings that gain a flat amount per level get cheaper steps
+// High levels cost extra: above UPGRADE_CREEP_FROM the price is also multiplied by UPGRADE_CREEP^(levels above)^2,
+// so a single reign slows down late instead of doubling forever (linear buildings are exempt).
+const UPGRADE_CREEP_FROM = 6;
+const UPGRADE_CREEP = 1.1;
 const MAX_LEVEL = 300;           // keeps every cost and rate a finite number
 const REFUND_SHARE = 0.5;        // share of build + upgrade costs returned on demolition
 const CROWN_BONUS = 0.05;        // production bonus per Crown
-const CROWN_GOLD = 500;          // Crowns from gold = (lifetime gold / CROWN_GOLD) ^ CROWN_EXP
-const CROWN_EXP = 0.25;
+// Crowns offered for abdicating = CROWN_RATE × log10(gold earned this reign / threshold), where the threshold is
+// CROWN_GOLD × (Crown multiplier ^ CROWN_STEEPEN). A logarithm means a reign's first hour earns most of its
+// Crowns, so starting over pays; the rising threshold keeps later reigns from being farmed in minutes.
+const CROWN_RATE = 4;
+const CROWN_GOLD = 4000;
+const CROWN_STEEPEN = 3;
+const CROWN_GOAL = 10;           // Crowns on offer at which the game suggests abdicating
 const CLICK_SHARE = 0.004;       // each hand collection adds this share of base gold/s (×5 with Royal Seal = 2%)
 const FESTIVAL_MULT = 3, FESTIVAL_SECONDS = 60;
 const MERCHANT_SECONDS = 120;    // merchant gifts are worth this many seconds of base income
@@ -112,8 +122,8 @@ const RESEARCH = [
 const REPEATABLES = [
   { id: 'food', name: 'Granaries', desc: 'Food production +10% per level', hall: 3, cost: { gold: 1e4 }, growth: 2, per: 0.1 },
   { id: 'housing', name: 'Town Planning', desc: 'Housing +10% per level', hall: 3, cost: { gold: 2e4 }, growth: 2, per: 0.1 },
-  { id: 'prod', name: 'Royal Roads', desc: 'All production +5% per level', hall: 4, cost: { gold: 2e5 }, growth: 2, per: 0.05 },
-  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 1e8 }, growth: 3, per: 1 },
+  { id: 'prod', name: 'Royal Roads', desc: 'All production +5% per level', hall: 4, cost: { gold: 2e5 }, growth: 2.5, per: 0.05 },
+  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 1e8 }, growth: 4, per: 1 },
 ];
 const MAX_REPEATABLE = 500;
 
@@ -145,7 +155,7 @@ const DECREES = [
   { id: 'palace', title: 'Crown Jewel', desc: 'Raise a Palace.', done: () => hallLevel() >= 5, reward: { gold: 5e6 } },
   { id: 'metropolis', title: 'Metropolis', desc: 'Reach a population of 2,000.', progress: () => [state.run.pop, 2000], reward: { gold: 2e7 } },
   { id: 'golden', title: 'Golden Age', desc: 'Earn 1M gold per second.', progress: () => [calc.base.gold, 1e6], reward: { gold: 1e9 } },
-  { id: 'legend', title: 'Legend', desc: 'Hold 25 Crowns.', progress: () => [state.meta.crowns, 25], reward: { gold: 1e11 } },
+  { id: 'legend', title: 'Legend', desc: 'Hold 50 Crowns.', progress: () => [state.meta.crowns, 50], reward: { gold: 1e9 } },
 ];
 // Version-1 saves stored the decree as an index into this (the original) order.
 const LEGACY_DECREE_ORDER = ['roof', 'timber', 'bread', 'hamlet', 'land', 'bedrock', 'learned', 'manor', 'market', 'grist', 'builders',

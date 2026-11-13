@@ -14,10 +14,11 @@ let state, calc;
 
 // ───────────────────────── State ─────────────────────────
 function newMeta(now) {
-  return { crowns: 0, bonusCrowns: 0, decree: DECREES[0].id,
+  return { crowns: 0, bonusCrowns: 0 /* how many of the Crowns came from Monuments */, decree: DECREES[0].id,
     stats: { clicks: 0, totalGold: 0, merchants: 0, prestiges: 0, built: 0, started: now || 0 } };
 }
-function newRun(seed) {
+// `crowns` held give the new city a head start in resources (none for a first kingdom).
+function newRun(seed, crowns) {
   if (seed === undefined) seed = (Math.random() * 2 ** 31) | 0;
   const run = { seed, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
     research: {}, repeatables: {}, cleared: 0, starving: false,
@@ -25,6 +26,7 @@ function newRun(seed) {
     buffUntil: 0,   // festival end, on the run clock
     gold: 0 };      // gold earned this run
   run.tiles[HALL_KEY] = { kind: 'hall', id: 'hall', level: 1 };
+  for (const r in HEAD_START) run.res[r] += HEAD_START[r] * (crowns || 0);
   return run;
 }
 function newState(now) { return { v: SAVE_VERSION, last: now || 0, meta: newMeta(now), run: newRun() }; }
@@ -104,9 +106,10 @@ const TILE_KINDS = {
     icon: t => BUILDINGS[t.id].icon,
     housing: t => (BUILDINGS[t.id].house || 0) * levelMult(t),
     jobs: t => (BUILDINGS[t.id].work || 0) * t.level,
-    upgradeCost: t => scaleCost(BUILDINGS[t.id].cost, UPGRADE_BASE * Math.pow(BUILDINGS[t.id].upgradeGrowth || UPGRADE_GROWTH, t.level)),
+    upgradeCost: t => scaleCost(BUILDINGS[t.id].cost, UPGRADE_BASE * Math.pow(BUILDINGS[t.id].upgradeGrowth || UPGRADE_GROWTH, t.level) * upgradeCreep(t)),
   },
 };
+const upgradeCreep = t => BUILDINGS[t.id].linear ? 1 : Math.pow(UPGRADE_CREEP, Math.max(0, t.level - UPGRADE_CREEP_FROM) ** 2);
 const tileKind = t => TILE_KINDS[t.kind];
 const upgradeCost = t => tileKind(t).upgradeCost(t);
 const buildGrowth = id => BUILDINGS[id].growth || BUILD_GROWTH;
@@ -165,9 +168,12 @@ function sustainablePop(lo, hi, budget) {
 const festivalLeft = () => Math.max(0, state.run.buffUntil - state.run.clock);
 const festivalOn = () => festivalLeft() > 0;
 
-// Crowns come from lifetime gold with diminishing returns, plus one per Monument level.
-const crownsFor = gold => Math.floor(Math.pow(Math.max(0, gold) / CROWN_GOLD, CROWN_EXP));
-const pendingCrowns = () => Math.max(0, crownsFor(state.meta.stats.totalGold) - (state.meta.crowns - state.meta.bonusCrowns)) + repLevel('monument');
+// Crowns for abdicating come from the gold earned this reign, on a log scale (see data.js), plus one per Monument level.
+const crownMult = crowns => 1 + CROWN_BONUS * crowns;
+const crownThreshold = crowns => CROWN_GOLD * Math.pow(crownMult(crowns), CROWN_STEEPEN);
+const crownsFor = (runGold, crownsHeld) => Math.max(0, Math.floor(CROWN_RATE * Math.log10(Math.max(1, runGold) / crownThreshold(crownsHeld || 0)) + 1e-9));
+const goldForCrowns = (n, crownsHeld) => crownThreshold(crownsHeld || 0) * Math.pow(10, n / CROWN_RATE); // reign gold needed for n Crowns
+const pendingCrowns = () => crownsFor(state.run.gold, state.meta.crowns) + repLevel('monument');
 const canPrestige = () => hallLevel() >= PRESTIGE_HALL && pendingCrowns() >= 1;
 
 // ───────────────────────── Simulation ─────────────────────────
@@ -187,7 +193,7 @@ function compute() {
   const rawCap = cap;
   cap = Math.floor(cap * repBonus('housing'));
   const staff = need ? Math.min(1, run.pop / need) : 1;
-  const mult = (1 + HALL_BONUS * (hallLevel() - 1)) * (1 + CROWN_BONUS * state.meta.crowns) * (1 + glob * staff) * repBonus('prod');
+  const mult = (1 + HALL_BONUS * (hallLevel() - 1)) * crownMult(state.meta.crowns) * (1 + glob * staff) * repBonus('prod');
   const festival = festivalOn() ? FESTIVAL_MULT : 1, foodMult = repBonus('food');
   const base = { gold: 0, food: HALL_FORAGE * hallLevel(), wood: 0, stone: 0, iron: 0 }; // the hall's own folk forage
   const rates = Object.assign({}, base);
@@ -315,8 +321,8 @@ function prestige() {
   if (!canPrestige()) return fail();
   const n = pendingCrowns(), meta = state.meta;
   meta.bonusCrowns += repLevel('monument'); meta.crowns += n; meta.stats.prestiges++;
-  state.run = newRun(); calc = compute();
-  return { ok: true, crowns: n, msg: `👑 A new dynasty begins with ${fmt(meta.crowns)} Crowns.` };
+  state.run = newRun(undefined, meta.crowns); calc = compute();
+  return { ok: true, crowns: n, msg: `👑 A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
 }
 
 // Hand collection: a flat amount plus a small share of base income (never of festival income).
@@ -369,8 +375,7 @@ function upgradeLegacySave(o) {
   for (const k in o.tiles) { const t = o.tiles[k]; if (isObj(t)) tiles[k] = { kind: t.b === 'hall' ? 'hall' : 'building', id: t.b, level: t.l }; }
   const stats = isObj(o.stats) ? o.stats : {}, crowns = int(o.crowns, 0, 0, 1e9), quest = int(o.quest, 0, 0, 1e6);
   return { v: 2, last: o.last,
-    // Crowns already held stay; any beyond the new formula count as bonus so new ones keep coming.
-    meta: { crowns, bonusCrowns: Math.max(0, crowns - crownsFor(num(stats.totalGold, 0, 0, BIG))),
+    meta: { crowns, bonusCrowns: 0, // Crowns already held stay
       decree: quest < LEGACY_DECREE_ORDER.length ? LEGACY_DECREE_ORDER[quest] : null, stats },
     run: { seed: o.seed, res: o.res, pop: o.pop, exp: o.exp, tiles, research: o.research, starving: o.starving, gold: o.runGold } };
 }

@@ -4,11 +4,13 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const ROOT = path.join(__dirname, '..');
 
-function loadSim() {
+// `patch` replaces top-level numeric constants for what-if runs, e.g. loadSim({ CROWN_BONUS: 0.1 }).
+function loadSim(patch) {
   const ctx = vm.createContext({ console, btoa, atob });
   let names = [];
   for (const f of ['data.js', 'sim.js']) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    let src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    for (const k in patch || {}) src = src.replace(new RegExp('^const ' + k + ' = [^;,]+', 'm'), 'const ' + k + ' = ' + patch[k]);
     vm.runInContext(src, ctx, { filename: f });
     names = names.concat([...src.matchAll(/^(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]));
     names = names.concat([...src.matchAll(/^const\s+[A-Za-z_$][\w$]*\s*=[^;\n]*?,\s*([A-Z_]+)\s*=/gm)].map(m => m[1])); // `const A = 1, B = 2;`

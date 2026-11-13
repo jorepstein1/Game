@@ -103,6 +103,7 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 #inspector { min-height: 120px; }
 #inspector h3, #panel h3 { margin: 0 0 6px; font-size: 18px; }
 #inspector p, #panel p { margin: 4px 0; }
+#inspector .lead b { font-size: 17px; }
 .muted { color: var(--ink2); font-size: 13px; }
 .stat { font-size: 14px; }
 .stat b { color: var(--good); }
@@ -168,6 +169,10 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   main { flex-direction: column; padding: 10px; }
   #left, aside { max-width: none; width: 100%; min-width: 0; }
   #panel { max-height: none; }
+  /* Keep the inspector short on a phone so Collect Taxes and the tabs stay near the map. */
+  #inspector { min-height: 0; padding: 8px 10px; }
+  #inspector .more { display: none; }
+  #inspector .lead { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   header h1 { font-size: 20px; }
   #app { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
   #toasts { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }

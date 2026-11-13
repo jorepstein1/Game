@@ -1,6 +1,7 @@
 'use strict';
 // Balance bot: plays the simulation headlessly and prints a progression report.
-//   node tests/bot.js [hours=4] [policy=none|castle|pct] [seeds=11,22,33,44]
+//   node tests/bot.js [hours=4] [policy] [seeds=11,22,33,44] [taps per second=0]
+//   node tests/bot.js compare [hours=4] [seeds=11,33]     never abdicating vs abdicating, with and without tapping
 // Deterministic: the map comes from the seed and the bot makes no random choices, so the same
 // arguments always print the same numbers. No dependencies.
 //
@@ -11,17 +12,21 @@
 //   4. else builds any building type it has none of, then buys hall upgrades, expansions and research
 //      as soon as they are affordable, then the cheapest other purchase costing at most 20% of the next
 //      hall upgrade (repeatable upgrades are also allowed up to half the gold in hand).
-// Policy: none = never abdicate; castle = abdicate as soon as allowed; pct = abdicate when it adds 25%.
+// Policy: none = never abdicate; castle = as soon as allowed; crowns:N = whenever N Crowns are on offer;
+// once:N = the first time only; cycle:N:M = at N Crowns until minute M, then build up; pct:P = when the Crown
+// multiplier would rise by P percent. Taps: hand collections per second (0 = none).
 const { loadSim } = require('./harness');
-const HOURS = +(process.argv[2] || 4), POLICY = process.argv[3] || 'none';
-const SEEDS = (process.argv[4] || '11,22,33,44').split(',').map(Number);
-const STAMPS = [10, 60, 180, 240, 360, 480].filter(m => m <= HOURS * 60);
 const sum = c => Object.values(c).reduce((a, b) => a + b, 0);
 
-function play(seed) {
-  const sim = loadSim();
-  const s = sim.newState(0); s.run = sim.newRun(seed); sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], starve: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0 } };
+function play(seed, opts) {
+  const { hours: HOURS = 4, policy: POLICY = 'none', taps: TAPS = 0, patch } = opts || {};
+  const STAMPS = [10, 60, 180, 240, 360, 480].filter(m => m <= HOURS * 60), NEED = POLICY.startsWith('crowns:') ? +POLICY.slice(7) : Infinity;
+  const CYCLE = POLICY.startsWith('cycle:') ? POLICY.slice(6).split(':').map(Number) : null; // cycle:N:M = abdicate at N Crowns until minute M, then build up
+  const sim = loadSim(patch);
+  const s = sim.newState(0); s.run = sim.newRun(seed);
+  if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
+  sim.setState(s);
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -67,34 +72,76 @@ function play(seed) {
     return { hall: sim.hallName(sim.hallLevel()), pop: Math.floor(run().pop), housing: C.cap, jobs: C.need, gold: sim.fmt(C.base.gold) + '/s', food: sim.fmt(C.base.food) + '/s', upkeep: sim.fmt(C.eaten) + '/s',
       farms: lv(t => t.id === 'farm' || t.id === 'mill'), cottages: lv(t => t.id === 'cottage'), other: lv(t => t.kind === 'building' && !['farm', 'mill', 'cottage'].includes(t.id)),
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables) }; };
-  let t = 0, si = 0, hall = 1, runStart = 0;
+  let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
   while (t < HOURS * 3600) {
     sim.advance(0.5); t += 0.5;
     if (run().starving) out.starve += 0.5;
-    if (t % 1 === 0) act();
+    if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1) { sim.collectTaxes(); tapDebt--; } act(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
     if (sim.hallLevel() > hall) { hall = sim.hallLevel(); const name = sim.hallName(hall);
       if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold) }; }
     if (sim.canPrestige()) {
       const cur = 1 + sim.CROWN_BONUS * sim.state.meta.crowns, next = 1 + sim.CROWN_BONUS * (sim.state.meta.crowns + sim.pendingCrowns());
-      if (POLICY === 'castle' || (POLICY === 'pct' && next / cur >= 1.25)) {
+      if (POLICY === 'castle' || (POLICY.startsWith('pct:') && next / cur >= 1 + POLICY.slice(4) / 100) || sim.pendingCrowns() >= NEED || (CYCLE && t < CYCLE[1] * 60 && sim.pendingCrowns() >= CYCLE[0]) || (POLICY.startsWith('once:') && !out.prestiges.length && sim.pendingCrowns() >= +POLICY.slice(5))) {
         const n = sim.pendingCrowns(); out.prestiges.push({ min: +(t / 60).toFixed(1), runMin: +((t - runStart) / 60).toFixed(1), crowns: n, total: sim.state.meta.crowns + n, boost: '+' + Math.round((next / cur - 1) * 100) + '%' });
-        sim.prestige(); hall = 1; runStart = t;
+        sim.prestige(); sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.setState(sim.state); hall = 1; runStart = t; // same map every reign: strategies differ only in timing
       }
     }
     if (si < STAMPS.length && t >= STAMPS[si] * 60) out.stamps[STAMPS[si++]] = snap();
   }
-  out.totalGold = sim.state.meta.stats.totalGold;
+  sim.setState(sim.state);
+  out.totalGold = sim.state.meta.stats.totalGold; out.goldRate = sim.calc.base.gold; out.crowns = sim.state.meta.crowns; out.pending = sim.pendingCrowns();
+  out.hall = sim.hallName(sim.hallLevel()); out.fmt = sim.fmt;
   return out;
 }
 
-console.log(`Hearthold balance bot — ${HOURS}h, policy "${POLICY}", seeds ${SEEDS.join(', ')}\n`);
-for (const seed of SEEDS) {
-  const r = play(seed);
-  console.log(`seed ${seed}`);
-  for (const name in r.marks) console.log(`  ${name.padEnd(10)} at ${String(r.marks[name].min).padStart(6)} min   Crowns on offer ${String(r.marks[name].pending).padStart(3)}   lifetime gold ${r.marks[name].lifetimeGold}`);
-  for (const m in r.stamps) { const s = r.stamps[m];
-    console.log(`  ${String(m).padStart(3)} min: ${s.hall}, pop ${s.pop}/${s.housing} (jobs ${s.jobs}), gold ${s.gold}, food ${s.food} after upkeep ${s.upkeep}, farms+mills ${s.farms}, cottages ${s.cottages}, other ${s.other}, Crowns on offer ${s.pending}, repeatables ${s.repeatables}`); }
-  if (r.prestiges.length) console.log('  abdications: ' + r.prestiges.map(p => `${p.min} min (+${p.crowns} → ${p.total}, ${p.boost})`).join('; '));
-  const total = Object.values(r.spent).reduce((a, b) => a + b, 0) || 1;
-  console.log(`  starving ${(r.starve / 60).toFixed(1)} min of ${HOURS * 60}; gold spent: ` + Object.keys(r.spent).map(k => `${k} ${Math.round(100 * r.spent[k] / total)}%`).join(', ') + '\n');
+// Strategy comparison: the same seeds played without abdicating and with it, each with and without tapping.
+// Every reign uses the same map, so the strategies differ only in when they start over. Runs go in parallel.
+const STRATEGIES = [
+  ['never abdicate', 'none'],
+  ['at 10 Crowns until 2.5h, then build', 'cycle:10:150'],
+  ['at 10 Crowns, always', 'crowns:10'],
+];
+function summary(seed, opts) {
+  const r = play(seed, opts);
+  return { seed, taps: opts.taps || 0, policy: opts.policy, lifetimeGold: r.totalGold, goldRate: r.goldRate, peakGold: r.peakGold, crowns: r.crowns, pending: r.pending, hall: r.hall,
+    abdications: r.prestiges.map(p => p.min), castle: r.marks.Castle ? r.marks.Castle.min : null, palace: r.marks.Palace ? r.marks.Palace.min : null, stamps: r.stamps };
+}
+function compare(hours, seeds, tapRates, jobs) {
+  const { execFile } = require('child_process'), os = require('os');
+  const todo = [], rows = [];
+  for (const seed of seeds) for (const taps of tapRates) for (const [label, policy] of STRATEGIES) todo.push({ seed, label, opts: { hours, policy, taps } });
+  let next = 0;
+  const worker = () => new Promise((resolve, reject) => {
+    const i = next++; if (i >= todo.length) return resolve();
+    execFile(process.execPath, [__filename, '--one', String(todo[i].seed), JSON.stringify(todo[i].opts)], { maxBuffer: 1 << 24 }, (err, out) => {
+      if (err) return reject(err);
+      rows[i] = Object.assign(JSON.parse(out), { label: todo[i].label }); worker().then(resolve, reject);
+    });
+  });
+  return Promise.all(Array.from({ length: Math.min(jobs || os.cpus().length, todo.length) }, worker)).then(() => rows);
+}
+module.exports = { play, summary, compare, STRATEGIES };
+
+if (require.main === module) {
+  if (process.argv[2] === '--one') { console.log(JSON.stringify(summary(+process.argv[3], JSON.parse(process.argv[4])))); return; }
+  if (process.argv[2] === 'compare') {
+    const hours = +(process.argv[3] || 4), seeds = (process.argv[4] || '11,33').split(',').map(Number), fmt = loadSim().fmt;
+    console.log(`Hearthold strategy comparison — ${hours}h, seeds ${seeds.join(', ')}\n`);
+    console.log('seed taps/s  abdication strategy                   lifetime gold   gold/s at end  Crowns held+offered  abdications at (min)');
+    compare(hours, seeds, [0, 0.5]).then(rows => { for (const r of rows)
+      console.log(`${String(r.seed).padStart(4)} ${String(r.taps).padStart(6)}  ${r.label.padEnd(36)} ${fmt(r.lifetimeGold).padStart(14)} ${fmt(r.goldRate).padStart(15)}  ${(r.crowns + '+' + r.pending).padStart(19)}  ${r.abdications.join(', ') || '-'}`); });
+    return;
+  }
+  const HOURS = +(process.argv[2] || 4), POLICY = process.argv[3] || 'none', SEEDS = (process.argv[4] || '11,22,33,44').split(',').map(Number), TAPS = +(process.argv[5] || 0);
+  console.log(`Hearthold balance bot — ${HOURS}h, policy "${POLICY}", seeds ${SEEDS.join(', ')}${TAPS ? ', ' + TAPS + ' taps/s' : ''}\n`);
+  for (const seed of SEEDS) {
+    const r = play(seed, { hours: HOURS, policy: POLICY, taps: TAPS });
+    console.log(`seed ${seed}`);
+    for (const name in r.marks) console.log(`  ${name.padEnd(10)} at ${String(r.marks[name].min).padStart(6)} min   Crowns on offer ${String(r.marks[name].pending).padStart(3)}   lifetime gold ${r.marks[name].lifetimeGold}`);
+    for (const m in r.stamps) { const s = r.stamps[m];
+      console.log(`  ${String(m).padStart(3)} min: ${s.hall}, pop ${s.pop}/${s.housing} (jobs ${s.jobs}), gold ${s.gold}, food ${s.food} after upkeep ${s.upkeep}, farms+mills ${s.farms}, cottages ${s.cottages}, other ${s.other}, Crowns on offer ${s.pending}, repeatables ${s.repeatables}`); }
+    if (r.prestiges.length) console.log('  abdications: ' + r.prestiges.map(p => `${p.min} min (+${p.crowns} → ${p.total}, ${p.boost})`).join('; '));
+    const total = Object.values(r.spent).reduce((a, b) => a + b, 0) || 1;
+    console.log(`  starving ${(r.starve / 60).toFixed(1)} min of ${HOURS * 60}; gold spent: ` + Object.keys(r.spent).map(k => `${k} ${Math.round(100 * r.spent[k] / total)}%`).join(', ') + '\n');
+  }
 }

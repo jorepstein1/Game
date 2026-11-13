@@ -9,7 +9,8 @@ A medieval idle city builder that runs entirely in the browser. No build step an
 - **Upgrade and expand.** Every building can be levelled up (×2 output per level; cottages, farms and mills gain a flat amount per level instead, at a gentler price, and the Upgrade button says what the level adds). Raise your Village Hall into a Manor, Keep, Castle and Palace to unlock new buildings and research, and buy more land as you grow. When the map is full, forest, hills and water can be cleared into open plots for gold. Demolishing returns half of everything the building cost, upgrades included.
 - **Follow the Decrees.** A chain of goals with rewards that doubles as the tutorial.
 - **Catch the merchant.** A caravan wanders onto the map every minute or two (a marker appears in the resource bar): tap it for gold, supplies or a ×3 festival.
-- **Found a new kingdom (prestige).** With a Castle you can abdicate for Crowns, each a permanent +5% to all production. Crowns come from lifetime gold earned with diminishing returns: `floor((lifetime gold / 500) ^ 0.25)`, minus those already awarded.
+- **Found a new kingdom (prestige).** With a Castle you can abdicate for Crowns, each a permanent +5% to all production. Crowns on offer are `floor(4 × log10(gold earned this reign / threshold))`, where the threshold is `4000 × (Crown multiplier)^3`. A first Castle, at roughly 45 to 60 minutes, offers about 10 Crowns (+50%); a far longer reign offers only a few more, so starting over is what pays. A new kingdom begins with extra supplies for every Crown held (100 gold, 100 wood, 30 food, 30 stone each), so later reigns get going faster.
+- **Late-reign slowdown.** Above level 6 an upgrade's price is also multiplied by `1.1^(levels above 6)²` (cottages, farms and mills are exempt), and hall levels past Palace cost 50× the last. A single reign therefore slows down after the Palace instead of doubling indefinitely.
 - **Repeatable upgrades.** From the Keep onwards the Research tab offers gold sinks with exponentially scaling costs: food, housing and all-production bonuses, plus Monuments that each add a Crown to your next abdication. They reset when you found a new kingdom.
 - **Idle.** The game saves every 10 seconds and credits up to 8 hours of time away (24 with research), whether the page was closed or the tab was asleep.
 - **Phones.** On narrow screens the resource bar is a single compact row, a bar fixed at the bottom holds the build list (or the selected tile's Upgrade and Demolish) so the map remains in view, and large maps pan inside their frame so plots stay at least 40px.
@@ -33,8 +34,10 @@ Plain script tags, loaded in this order:
 ```
 node tests/sim.test.js        # rules and save format, in Node (no dependencies)
 node tests/bot.js             # balance bot: 4 hours on seeds 11, 22, 33, 44 (no dependencies, about 90 seconds)
-node tests/bot.js 6 pct 11    # arguments: hours, abdication policy (none | castle | pct), comma-separated seeds
+node tests/bot.js 6 crowns:10 11 0.5   # arguments: hours, abdication policy, comma-separated seeds, taps per second
+node tests/bot.js compare     # never abdicating vs abdicating, with and without tapping (about a minute)
+node tests/balance.test.js    # asserts that abdicating beats never abdicating at 4 hours (about a minute)
 node tests/ui.test.js         # layout and input in headless Chromium (needs Playwright: npm i playwright)
 ```
 
-`tests/harness.js` loads `data.js` and `sim.js` into a `vm` context with no DOM. The bot is deterministic: the same arguments print the same numbers.
+`tests/harness.js` loads `data.js` and `sim.js` into a `vm` context with no DOM. The bot is deterministic: the same arguments print the same numbers. Its policies are listed at the top of `tests/bot.js`.

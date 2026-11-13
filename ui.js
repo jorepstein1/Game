@@ -24,7 +24,7 @@ const ui = {
   mapPans: false,
   barMode: '',           // what the bottom bar is showing: 'build', 'tile' or 'terrain'
   barTapAt: -Infinity,   // when, and in which mode, the bar was last tapped
-  barTapMode: '',
+  barTapMode: '', barTapX: 0, barTapY: 0,
   merchant: { next: 70, left: 0 },
   warnedStarve: false,
   paused: false,         // another tab took over the save
@@ -151,7 +151,8 @@ function renderInspector() {
   const sel = ui.sel; let h;
   if (sel.build) {
     const d = BUILDINGS[sel.build];
-    h = `<h3>${d.icon} ${d.name}</h3><p>${d.desc}</p>${buildingStats(sel.build)}<p class="muted">Tap an open plot to build. Badges on the map show the bonus each plot would give. Tap the building again (or press Esc) to cancel.</p>`;
+    // The lead line is all a phone shows while placing (the bottom bar already has the cost); the rest is desktop detail.
+    h = `<p class="lead"><b>${d.icon} ${d.name}</b> — ${d.desc}</p><div class="more">${buildingStats(sel.build)}<p class="muted">Tap an open plot to build. Badges on the map show the bonus each plot would give. Tap the building again (or press Esc) to cancel.</p></div>`;
   } else if (sel.tile && tileAt(sel.tile)) {
     const k = sel.tile, t = tileAt(k), kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
     if (t.kind === 'hall') {
@@ -185,7 +186,7 @@ function renderInspector() {
         <div class="row"><button class="btn${canAfford(c) ? '' : ' cant'}" data-act="clear" data-id="${sel.tile}">Clear land ${costHTML(c)}</button></div>`;
     }
   } else {
-    h = '<h3>Welcome, my liege</h3><p>Pick a building and place it on the map. <b>Where</b> you build matters: neighbours and terrain give bonuses.</p><p class="muted">Tap any building to upgrade it. Follow the Decrees tab if you are unsure what to do next.</p>';
+    h = '<p class="lead"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
   }
   patch($('inspector'), h);
 }
@@ -193,7 +194,7 @@ function renderInspector() {
 const TABS = { build: '🔨 Build', research: '📜 Research', decrees: '🎯 Decrees', realm: '👑 Realm' };
 function renderTabs() {
   const dots = { decrees: decreeDone(), research: RESEARCH.some(r => !hasResearch(r.id) && r.hall <= hallLevel() && canAfford(r.cost)),
-    realm: hallLevel() >= PRESTIGE_HALL && pendingCrowns() >= Math.max(1, state.meta.crowns) };
+    realm: canPrestige() && pendingCrowns() >= CROWN_GOAL };
   patch($('tabs'), Object.keys(TABS).map(t =>
     `<button class="${t === ui.tab ? 'on' : ''}" data-act="tab" data-id="${t}">${TABS[t]}${dots[t] ? '<i class="dot"></i>' : ''}</button>`).join(''));
 }
@@ -236,11 +237,12 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>👑 Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns are based on all the gold you have ever earned, with diminishing returns: each one takes more gold than the last.</p>
-      <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (${pct(meta.crowns * CROWN_BONUS)}) · on abdication: <b>+${fmt(n)}</b></p>
+      <p class="muted">Crowns on offer come from the gold earned this reign. Most arrive early and each further one takes more gold, so around ${CROWN_GOAL} is a good time to start over. A new kingdom also begins with extra supplies for every Crown you hold.</p>
+      <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
+      <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
       <hr><h3>Chronicle</h3>
-      <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b> · this reign: <b>${fmt(run.gold)}</b></p>
+      <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b></p>
       <p class="stat">Buildings raised: <b>${fmt(meta.stats.built)}</b> · Taxes collected by hand: <b>${fmt(meta.stats.clicks)}</b></p>
       <p class="stat">Merchants met: <b>${fmt(meta.stats.merchants)}</b> · Kingdoms founded: <b>${fmt(meta.stats.prestiges + 1)}</b></p>
       <hr><div class="row"><button class="btn alt" data-act="save">Save now</button><button class="btn alt" data-act="export">Export</button>
@@ -428,7 +430,8 @@ const CITY_ACTIONS = {
     if (!canPrestige()) return;
     const n = pendingCrowns();
     confirmBox('Found a new kingdom?', `You abdicate and start over on fresh land. Buildings, resources and research are lost, but you keep
-      <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever.`, () => {
+      <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
+      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, state.meta.crowns + n), true)} extra.`, () => {
       if (!say(prestige()).ok) return;
       ui.sel = {}; ui.mapN = 0; save(); render();
     });
@@ -477,8 +480,9 @@ function bindInput() {
     if (!el || ui.paused || el.classList.contains('locked')) return;
     if (el.closest('#buildbar')) {
       const now = performance.now();
-      if (now - ui.barTapAt < BAR_SETTLE_MS && ui.barTapMode !== ui.barMode) return; // the bar changed under a double tap
-      ui.barTapAt = now; ui.barTapMode = ui.barMode;
+      const near = Math.hypot(e.clientX - ui.barTapX, e.clientY - ui.barTapY) < 40;
+      if (now - ui.barTapAt < BAR_SETTLE_MS && ui.barTapMode !== ui.barMode && near) return; // the bar changed under a double tap
+      ui.barTapAt = now; ui.barTapMode = ui.barMode; ui.barTapX = e.clientX; ui.barTapY = e.clientY;
     }
     const fn = SCREENS[ui.screen].actions[el.dataset.act];
     if (!hasOwn(SCREENS[ui.screen].actions, el.dataset.act)) return;

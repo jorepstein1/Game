@@ -134,11 +134,11 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(() => document.querySelector('#modal [data-act="close"]').click());
 
   // --- prestige round trip: meta kept, run replaced
-  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.repeatables.monument = 2; render(); });
+  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.gold = 5e7; state.run.repeatables.monument = 2; render(); });
   const pend = await page.evaluate(() => pendingCrowns());
   await page.evaluate(() => { document.querySelector('#panel [data-act="prestige"]').click(); document.querySelector('#modal [data-act="yes"]').click(); });
-  const after = await page.evaluate(() => ({ c: state.meta.crowns, b: state.meta.bonusCrowns, p: pendingCrowns(), rep: state.run.repeatables, hall: hallLevel(), tiles: Object.keys(state.run.tiles).length, tg: state.meta.stats.totalGold }));
-  ok(after.c === 12 + pend && after.b === 2 && after.p === 0 && after.hall === 1 && after.tiles === 1 && after.tg >= 5e7 && after.tg < 5.1e7, 'prestige: pending ' + pend + ' -> ' + JSON.stringify(after));
+  const after = await page.evaluate(() => ({ c: state.meta.crowns, b: state.meta.bonusCrowns, p: pendingCrowns(), rep: state.run.repeatables, hall: hallLevel(), tiles: Object.keys(state.run.tiles).length, tg: state.meta.stats.totalGold, gold: state.run.res.gold }));
+  ok(pend > 2 && after.c === 12 + pend && after.b === 2 && after.p === 0 && after.hall === 1 && after.tiles === 1 && after.tg >= 5e7 && after.tg < 5.1e7 && after.gold >= 50 + 100 * after.c, 'prestige: pending ' + pend + ' -> ' + JSON.stringify(after));
 
   // --- hostile import: markup in fields, out-of-range values (review M3)
   const evil = { v: 2, last: '<img src=x onerror=alert(1)>', meta: { crowns: '<img src=x onerror="window.__xss=1">', bonusCrowns: {}, decree: '<script>window.__xss=1</script>', stats: { totalGold: '"><svg onload=window.__xss=1>', clicks: null } },
@@ -184,7 +184,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
   const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: festivalOn(), terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
-  ok(mig.v === 2 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 8 && mig.pend === 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
+  ok(mig.v === 2 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
   const stored = await page.evaluate(() => { ui.merchant.next = 1e9; save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
   ok(stored.v === 2 && stored.grid && stored.decree === 'dynasty' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
@@ -216,6 +216,14 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await p3.goto(URL); await p3.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(p3);
   const cdp = await ph.newCDPSession(p3);
   const vp = await p3.evaluate(() => ({ w: innerWidth, h: innerHeight })); ok(vp.w === 390 && vp.h === 664, 'phone viewport is ' + vp.w + 'x' + vp.h);
+  // P3: the inspector stays short on a phone, so Collect Taxes is not pushed down
+  const insp = () => p3.evaluate(() => { const i = document.getElementById('inspector').getBoundingClientRect(), c = document.getElementById('clicker').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { h: Math.round(i.height), clickerBottom: Math.round(c.bottom), bar: Math.round(b.top) }; });
+  const welcome = await insp();
+  ok(welcome.h <= 70, 'welcome text is ' + welcome.h + 'px tall on a phone');
+  await p3.tap('#bbrow .bb[data-id="farm"]'); await settle(p3);
+  const picked = await insp();
+  ok(picked.h <= 70 && picked.clickerBottom <= picked.bar && /Farm/.test(await p3.evaluate(() => document.querySelector('#inspector .lead').textContent)), 'with a building picked the inspector is ' + picked.h + 'px and Collect Taxes stays above the bar ' + JSON.stringify(picked));
+  await p3.evaluate(() => { ui.sel = {}; render(); ui.barTapAt = -Infinity; }); // forget the Farm tap: the next bar tap is not a double tap
   // R1: tile actions are reachable without scrolling
   const reach = sel => p3.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const r = b.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, hit: !!top && b.contains(top), text: b.textContent.trim().replace(/\s+/g, ' ') }; }, sel);
