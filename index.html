@@ -2,32 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Hearthold — a medieval idle city builder</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>⚜ Hearthold</h1>
-  <span id="subtitle"></span>
-</header>
-<div id="res"></div>
-<main>
-  <section id="left">
-    <div id="mapwrap">
-      <div id="map"></div>
-      <button id="merchant" hidden title="A travelling merchant!">🐪</button>
-    </div>
-    <button id="clicker">💰 Collect Taxes <small id="clickval"></small></button>
+<!-- #app holds one <section class="screen"> per game mode; ui.js shows exactly one at a time. -->
+<div id="app">
+  <section class="screen" id="screen-city" data-screen="city">
+    <header>
+      <h1>⚜ Hearthold</h1>
+      <span id="subtitle"></span>
+    </header>
+    <div id="res" aria-label="Resources"></div>
+    <main>
+      <section id="left">
+        <div id="mapwrap">
+          <div id="mapscroll"><div id="map"></div></div>
+          <div id="maphint" hidden>Drag the map to pan</div>
+          <button id="merchant" data-act="merchant" hidden title="A travelling merchant!" aria-label="Travelling merchant: tap for a gift">🐪</button>
+        </div>
+        <button id="clicker" data-act="collect">💰 Collect Taxes <small id="clickval"></small></button>
+      </section>
+      <aside>
+        <div id="inspector"></div>
+        <nav id="tabs"></nav>
+        <div id="panel"></div>
+      </aside>
+    </main>
+    <div id="buildbar"><div id="bbinfo"></div><div id="bbrow"></div></div>
   </section>
-  <aside>
-    <div id="inspector"></div>
-    <nav id="tabs"></nav>
-    <div id="panel"></div>
-  </aside>
-</main>
-<div id="toasts"></div>
-<div id="modal" hidden><div id="modalbox"></div></div>
-<script src="game.js"></script>
+</div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<div id="modal" hidden><div id="modalbox" role="dialog" aria-modal="true" aria-labelledby="modaltitle"></div></div>
+<script src="data.js"></script>
+<script src="sim.js"></script>
+<script src="ui.js"></script>
 </body>
 </html>
