@@ -28,8 +28,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await shot(page, 'shot-390-fresh.png');
 
   // --- early game: pick from bottom bar, place on map, page does not scroll
-  const bar = await page.evaluate(() => { const b = document.getElementById('buildbar').getBoundingClientRect(); return { top: b.top, bottom: b.bottom, disp: getComputedStyle(document.getElementById('buildbar')).display }; });
-  ok(bar.disp !== 'none' && Math.abs(bar.bottom - 844) < 1, 'build bar fixed at bottom (top=' + Math.round(bar.top) + ')');
+  const bar = await page.evaluate(() => { const b = document.getElementById('buildbar').getBoundingClientRect(), t = document.getElementById('tabs').getBoundingClientRect();
+    return { top: b.top, bottom: b.bottom, tabsTop: t.top, tabsBottom: t.bottom, disp: getComputedStyle(document.getElementById('buildbar')).display, docH: document.documentElement.scrollHeight }; });
+  ok(bar.disp !== 'none' && Math.abs(bar.tabsBottom - 844) < 1 && Math.abs(bar.bottom - bar.tabsTop) < 1 && bar.docH <= 845, 'build bar sits on the tab row at the bottom and the page does not scroll (bar top=' + Math.round(bar.top) + ', doc height ' + bar.docH + ')');
   await page.tap('#bbrow .bb[data-id="cottage"]'); await settle(page);
   let st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect();
     return { y: scrollY, mt: m.top, mb: m.bottom, bt: b.top, sel: ui.sel.build, can: document.querySelectorAll('.tile.can').length }; });
@@ -42,14 +43,15 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     return document.activeElement === b && document.querySelector('#bbrow .bb[data-id="farm"]') === b; });
   ok(kept, 're-render keeps the same button element and its focus');
 
-  // --- picking a card far down the Build tab scrolls the map back into view
-  await page.evaluate(() => { ui.sel = {}; render(); document.querySelector('#panel .card[data-id="lumber"]').scrollIntoView({ block: 'center' }); });
-  await settle(page);
-  const before = await page.evaluate(() => scrollY);
+  // --- picking a card in the Build sheet closes the sheet and leaves the map in view
+  await page.evaluate(() => { ui.sel = {}; render(); });
+  await page.tap('#tabs [data-id="build"]'); await settle(page);
+  const sheetUp = await page.evaluate(() => { const c = document.querySelector('#panel .card[data-id="lumber"]').getBoundingClientRect(), t = document.getElementById('tabs').getBoundingClientRect(); return { open: ui.sheet, cardTop: Math.round(c.top), cardBottom: Math.round(c.bottom), tabsTop: Math.round(t.top), y: scrollY }; });
+  ok(sheetUp.open && sheetUp.cardTop > 0 && sheetUp.cardBottom <= sheetUp.tabsTop && sheetUp.y === 0, 'the Build tab opens a sheet with its cards on screen ' + JSON.stringify(sheetUp));
   await page.tap('#panel .card[data-id="lumber"]'); await settle(page);
   st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(), r = document.getElementById('res').getBoundingClientRect();
-    return { y: scrollY, mt: Math.round(m.top), mb: Math.round(m.bottom), bt: Math.round(b.top), rb: Math.round(r.bottom) }; });
-  ok(st.mt >= st.rb - 1 && st.mb <= st.bt + 1, 'picking a card (scrollY was ' + before + '): map visible between res bar and build bar ' + JSON.stringify(st));
+    return { y: scrollY, sel: ui.sel.build, sheet: ui.sheet, panel: getComputedStyle(document.getElementById('panel')).display, mt: Math.round(m.top), mb: Math.round(m.bottom), bt: Math.round(b.top), rb: Math.round(r.bottom) }; });
+  ok(st.sel === 'lumber' && !st.sheet && st.panel === 'none' && st.y === 0 && st.mt >= st.rb - 1 && st.mb <= st.bt + 1, 'picking a card closes the sheet: map visible between res bar and build bar ' + JSON.stringify(st));
 
   // --- late game state: 11x11 map, all resources, crowns, festival, merchant
   await page.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12; run.buffUntil = run.clock + 60; ui.merchant.left = 18; ui.merchant.x = 40; ui.merchant.y = 40;
@@ -118,7 +120,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(await page.evaluate(k => { const [x, y] = xy(k); return state.run.terrain[x][y] === 'plain' && state.run.cleared === 1 && clearCost().gold === 1000; }, ck), 'terrain can be cleared for gold; next clearing costs double');
 
   // --- research tab with repeatable upgrades
-  await page.evaluate(() => { ui.tab = 'research'; render(); });
+  await page.evaluate(() => { ui.tab = 'research'; ui.sheet = true; render(); });
   const lv0 = await page.evaluate(() => repLevel('prod'));
   await page.evaluate(() => document.querySelector('#panel .card[data-act="rep"][data-id="prod"]').click());
   ok(await page.evaluate(() => repLevel('prod')) === lv0 + 1, 'repeatable upgrade can be bought');
@@ -230,17 +232,52 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await p3.goto(URL); await p3.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(p3);
   const cdp = await ph.newCDPSession(p3);
   const vp = await p3.evaluate(() => ({ w: innerWidth, h: innerHeight })); ok(vp.w === 390 && vp.h === 664, 'phone viewport is ' + vp.w + 'x' + vp.h);
-  // P3: the inspector stays short on a phone, so Collect Taxes is not pushed down
-  const insp = () => p3.evaluate(() => { const i = document.getElementById('inspector').getBoundingClientRect(), c = document.getElementById('clicker').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { h: Math.round(i.height), bottom: Math.round(i.bottom), clickerBottom: Math.round(c.bottom), bar: Math.round(b.top) }; });
-  const welcome = await insp();
-  ok(welcome.h <= 40 && welcome.bottom <= welcome.bar, 'welcome text is one line (' + welcome.h + 'px) and wholly above the bar ' + JSON.stringify(welcome));
-  await p3.tap('#bbrow .bb[data-id="farm"]'); await settle(p3);
-  const picked = await insp();
-  ok(picked.h <= 40 && picked.bottom <= picked.bar && picked.clickerBottom <= picked.bar && /Farm/.test(await p3.evaluate(() => document.querySelector('#inspector .lead').textContent)), 'with a building picked the inspector is one line (' + picked.h + 'px), wholly above the bar, as is Collect Taxes ' + JSON.stringify(picked));
-  await p3.evaluate(() => { ui.sel = {}; render(); ui.barTapAt = -Infinity; }); // forget the Farm tap: the next bar tap is not a double tap
-  // R1: tile actions are reachable without scrolling
+  // The phone shell: nothing scrolls the page, and the map, Collect Taxes, the bar and the tab row are all on screen.
   const reach = sel => p3.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const r = b.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, hit: !!top && b.contains(top), text: b.textContent.trim().replace(/\s+/g, ' ') }; }, sel);
+  const still = () => p3.evaluate(() => { scrollTo(0, 500); const y = scrollY; scrollTo(0, 0); return { docH: document.documentElement.scrollHeight, bodyH: document.body.scrollHeight, vh: innerHeight, y, w: document.documentElement.scrollWidth }; });
+  const noScroll = d => d.docH <= d.vh + 1 && d.bodyH <= d.vh + 1 && d.y === 0 && d.w <= 390;
+  let doc = await still();
+  ok(noScroll(doc), 'on load the document cannot scroll ' + JSON.stringify(doc));
+  const onLoad = { map: await reach('#mapscroll'), tax: await reach('#clicker'), bar: await reach('#bbrow .bb[data-id="cottage"]'), tabs: {} };
+  for (const t of ['build', 'research', 'decrees', 'realm']) onLoad.tabs[t] = await reach('#tabs [data-id="' + t + '"]');
+  ok(onLoad.map.inView && onLoad.map.w === onLoad.map.h && onLoad.tax.inView && onLoad.tax.hit && onLoad.tax.h >= 44 && onLoad.bar.inView && onLoad.bar.hit, 'on load the whole square map, Collect Taxes and the build list are on screen ' + JSON.stringify({ map: onLoad.map, tax: onLoad.tax, bar: onLoad.bar }));
+  ok(Object.values(onLoad.tabs).every(t => t && t.inView && t.hit && t.h >= 44) && onLoad.tabs.realm.bottom === 664, 'the four tabs form a row along the bottom, each at least 44px tall ' + JSON.stringify(onLoad.tabs.realm));
+  ok(await p3.evaluate(() => getComputedStyle(document.getElementById('panel')).display === 'none' && document.getElementById('inspector').parentNode.id === 'strip'), 'the panel starts closed and the inspector sits under the map');
+  const goal = await p3.evaluate(() => { const g = document.querySelector('#inspector .goal'), w = document.querySelector('#inspector .welcome'); return { text: g && g.textContent, shown: g && getComputedStyle(g).display !== 'none', welcome: getComputedStyle(w).display }; });
+  ok(goal.shown && /A Roof Overhead/.test(goal.text) && goal.welcome === 'none', 'with nothing selected the inspector shows the current decree: "' + goal.text + '"');
+  await shot(p3, 'shot-390x664-fresh-closed.png');
+  const c1 = await p3.evaluate(() => state.meta.stats.clicks); await p3.tap('#clicker'); await settle(p3);
+  ok(await p3.evaluate(() => state.meta.stats.clicks) === c1 + 1, 'Collect Taxes works with one tap from the map');
+  // every tab: one tap opens its sheet over the map, content on screen, the page still does not scroll
+  const wanted = { build: '.card[data-id="cottage"]', research: '.card[data-act="research"]', decrees: '[data-act="claim"]', realm: '[data-act="prestige"]' };
+  for (const t of ['build', 'research', 'decrees', 'realm']) {
+    await p3.tap('#tabs [data-id="' + t + '"]'); await settle(p3);
+    const sh = await p3.evaluate(sel => { const p = document.getElementById('panel'), r = p.getBoundingClientRect(), tabs = document.getElementById('tabs').getBoundingClientRect(), res = document.getElementById('res').getBoundingClientRect(), el = p.querySelector(sel);
+      el.scrollIntoView({ block: 'nearest' }); const e = el.getBoundingClientRect(), hit = document.elementFromPoint(e.left + e.width / 2, e.top + e.height / 2);
+      return { open: ui.sheet, on: document.querySelector('#tabs .on').dataset.id, top: Math.round(r.top), bottom: Math.round(r.bottom), tabsTop: Math.round(tabs.top), resBottom: Math.round(res.bottom), head: p.querySelector('.sheethead').textContent.trim(), scrolls: p.scrollHeight > p.clientHeight, panelY: p.scrollTop,
+        elTop: Math.round(e.top), elBottom: Math.round(e.bottom), hit: !!hit && el.contains(hit), mapShowing: Math.round(r.top - document.getElementById('mapscroll').getBoundingClientRect().top) }; }, '#panel ' + wanted[t]);
+    doc = await still();
+    ok(sh.open && sh.on === t && sh.bottom === sh.tabsTop && sh.top >= sh.resBottom + 80 && sh.mapShowing >= 80 && sh.elTop >= sh.top && sh.elBottom <= sh.bottom && sh.hit && noScroll(doc), t + ' tab: the sheet opens above the tab row, its main control is reachable inside it, part of the map stays in view, the page does not scroll ' + JSON.stringify(sh));
+    if (t === 'realm') { ok(sh.scrolls, 'the Realm panel is longer than the sheet and scrolls inside it'); await shot(p3, 'shot-390x664-fresh-sheet.png'); }
+  }
+  await p3.tap('#tabs [data-id="realm"]'); await settle(p3);
+  ok(await p3.evaluate(() => !ui.sheet && getComputedStyle(document.getElementById('panel')).display === 'none'), 'tapping the open tab again closes the sheet');
+  await p3.tap('#tabs [data-id="research"]'); await settle(p3); await p3.tap('#panel [data-act="closeSheet"]'); await settle(p3);
+  ok(await p3.evaluate(() => !ui.sheet), 'the sheet has its own close button');
+  await p3.tap('#tabs [data-id="decrees"]'); await settle(p3); await p3.keyboard.press('Escape'); await settle(p3);
+  ok(await p3.evaluate(() => !ui.sheet), 'Esc closes the sheet');
+  await p3.tap('#tabs [data-id="decrees"]'); await settle(p3);
+  const seen = await p3.evaluate(() => { const top = document.getElementById('panel').getBoundingClientRect().top; return [...document.querySelectorAll('.tile')].map(t => t.getBoundingClientRect()).filter(r => r.bottom <= top - 4).map(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))[0]; });
+  await p3.touchscreen.tap(seen.x, seen.y); await settle(p3);
+  ok(await p3.evaluate(() => !ui.sheet && !!ui.sel.tile), 'tapping a tile above the sheet selects it and closes the sheet');
+  await p3.evaluate(() => { ui.sel = {}; render(); ui.barTapAt = -Infinity; });
+  await p3.tap('#bbrow .bb[data-id="farm"]'); await settle(p3);
+  const picked = await p3.evaluate(() => { const i = document.getElementById('inspector').getBoundingClientRect(), c = document.getElementById('clicker').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect();
+    return { lead: document.querySelector('#inspector .lead').textContent, bottom: Math.round(i.bottom), clickerBottom: Math.round(c.bottom), bar: Math.round(b.top), info: document.getElementById('bbinfo').textContent }; });
+  ok(/Farm/.test(picked.lead) && /Farm/.test(picked.info) && picked.bottom <= picked.bar && picked.clickerBottom <= picked.bar, 'with a building picked the inspector describes it, wholly above the bar, as is Collect Taxes ' + JSON.stringify(picked));
+  await p3.evaluate(() => { ui.sel = {}; render(); ui.barTapAt = -Infinity; }); // forget the Farm tap: the next bar tap is not a double tap
+  // R1: tile actions are reachable without scrolling
   await p3.evaluate(() => { state.run.res = { gold: 5000, food: 500, wood: 5000, stone: 5000, iron: 0 }; render(); });
   await p3.tap('.tile.hall'); await settle(p3);
   let up = await reach('#buildbar [data-act="up"]');
@@ -268,26 +305,45 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await p3.waitForTimeout(400); await p3.touchscreen.tap(dbl.x, dbl.y); await settle(p3);
   ok(await p3.evaluate(() => ui.sel.build) === dbl.id, 'the same button works once the bar has settled');
   await p3.evaluate(() => { ui.sel = {}; render(); });
-  // R2: a drag that starts on the map scrolls the page unless the map itself can pan that way
+  // R2, adapted to the shell: a drag never scrolls the page; the map pans only when it is bigger than its frame
   for (const [exp, n] of [[0, 5], [1, 7]]) {
     await fresh(p3); await p3.evaluate(exp => { state.run.exp = exp; ui.mapN = 0; render(); }, exp); await settle(p3);
-    const m = await p3.evaluate(() => { const r = document.getElementById('mapscroll').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.7, pans: document.getElementById('mapscroll').classList.contains('pans'), tiles: document.querySelectorAll('.tile').length }; });
-    await drag(cdp, m.x, m.y, 0, -250); await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 150)); });
-    const y = await p3.evaluate(() => scrollY);
-    ok(!m.pans && m.tiles === n * n && y >= 150, n + 'x' + n + ' map: a 250px upward drag starting on the map scrolls the page ' + y + 'px');
+    const m = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), r = sc.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.7, pans: sc.classList.contains('pans'), tiles: document.querySelectorAll('.tile').length, fits: sc.scrollWidth <= sc.clientWidth + 1 && sc.scrollHeight <= sc.clientHeight + 1 }; });
+    await drag(cdp, m.x, m.y, 0, -250); await p3.waitForTimeout(200);
+    const after = await p3.evaluate(() => ({ y: scrollY, top: document.getElementById('mapscroll').scrollTop, sel: Object.keys(ui.sel).length }));
+    ok(!m.pans && m.fits && m.tiles === n * n && after.y === 0 && after.top === 0 && after.sel === 0, n + 'x' + n + ' map fits its frame: a 250px upward drag on it moves nothing and selects nothing ' + JSON.stringify(after));
   }
-  await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 300)); }); // let the last fling die
-  await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; ui.mapN = 0; render(); scrollTo(0, 0); }); await settle(p3);
+  await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; state.run.tiles[HALL_KEY].level = 5; state.meta.crowns = 20; state.run.res = { gold: 1e8, food: 1e6, wood: 1e7, stone: 1e6, iron: 1e5 }; ui.mapN = 0; render(); }); await settle(p3);
+  doc = await still();
+  const lateLoad = { tax: await reach('#clicker'), realm: await reach('#tabs [data-id="realm"]'), bar: await reach('#bbrow .bb[data-id="cottage"]') };
+  ok(noScroll(doc) && lateLoad.tax.inView && lateLoad.tax.hit && lateLoad.realm.inView && lateLoad.realm.hit && lateLoad.bar.inView, 'late game (11x11, Palace): the page still cannot scroll and Collect Taxes, the bar and the tabs are on screen ' + JSON.stringify(doc));
+  await shot(p3, 'shot-390x664-late-closed.png');
+  await p3.tap('#tabs [data-id="research"]'); await settle(p3);
+  const lateSheet = await p3.evaluate(() => { const p = document.getElementById('panel'); p.scrollTop = p.scrollHeight; const last = p.querySelector('.card[data-act="rep"][data-id="monument"]').getBoundingClientRect(), r = p.getBoundingClientRect();
+    return { scrollable: p.scrollHeight > p.clientHeight + 100, scrolled: p.scrollTop > 100, lastIn: last.top >= r.top && last.bottom <= r.bottom, y: scrollY }; });
+  ok(lateSheet.scrollable && lateSheet.scrolled && lateSheet.lastIn && lateSheet.y === 0, 'late Research: the long list scrolls inside the sheet down to the last repeatable upgrade ' + JSON.stringify(lateSheet));
+  await p3.evaluate(() => { document.getElementById('panel').scrollTop = 0; }); await shot(p3, 'shot-390x664-late-sheet.png');
+  await p3.evaluate(() => { ui.merchant.left = 15; ui.merchant.x = 40; ui.merchant.y = 70; render(); }); await settle(p3);
+  const hidden = await reach('#merchant'); await p3.tap('#res .chip.merchant'); await settle(p3); const shown = await reach('#merchant');
+  ok(hidden && !hidden.hit && shown.inView && shown.hit && await p3.evaluate(() => !ui.sheet), 'a merchant behind the sheet: tapping its chip in the resource bar closes the sheet and the merchant is tappable ' + JSON.stringify(shown));
+  await p3.evaluate(() => { ui.merchant.left = 0; ui.sel = {}; render(); });
   const big = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), r = sc.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, pans: sc.classList.contains('pans'), left: sc.scrollLeft }; });
   await drag(cdp, big.x, big.y, -60, 0); await p3.waitForFunction(() => { const sc = document.getElementById('mapscroll'), v = sc.scrollLeft; return new Promise(r => setTimeout(() => r(sc.scrollLeft === v), 150)); });
   const panned = await p3.evaluate(() => ({ left: document.getElementById('mapscroll').scrollLeft, y: scrollY }));
   ok(big.pans && panned.left > big.left + 30 && panned.y === 0, '11x11 map: a sideways drag pans the map (' + big.left + ' -> ' + panned.left + ') and not the page');
   await p3.evaluate(() => { const sc = document.getElementById('mapscroll'); sc.scrollTop = sc.scrollHeight; }); await settle(p3);
-  await drag(cdp, big.x, big.y, 0, -250); await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 150)); });
+  await drag(cdp, big.x, big.y, 0, -250); await p3.waitForTimeout(250);
   const chained = await p3.evaluate(() => scrollY);
-  ok(chained >= 150, '11x11 map at its bottom edge: an upward drag chains to the page (' + chained + 'px)');
+  ok(chained === 0, '11x11 map at its bottom edge: an upward drag does not move the page (' + chained + 'px)');
+  // a very short screen (keyboard up, split view): the map frame gets shorter and pans; everything else stays put
+  await fresh(p3); await p3.setViewportSize({ width: 390, height: 480 }); await settle(p3);
+  const short = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), c = document.getElementById('clicker').getBoundingClientRect(), t = document.getElementById('tabs').getBoundingClientRect();
+    return { docH: document.documentElement.scrollHeight, vh: innerHeight, frameW: sc.clientWidth, frameH: sc.clientHeight, pans: sc.classList.contains('pans'), canPan: sc.scrollHeight > sc.clientHeight, tile: Math.round(document.querySelector('.tile').getBoundingClientRect().height), taxIn: c.top >= 0 && c.bottom <= innerHeight, tabsBottom: Math.round(t.bottom) }; });
+  ok(short.docH <= short.vh + 1 && short.frameH < short.frameW && short.frameH >= 120 && short.pans && short.canPan && short.tile >= 40 && short.taxIn && short.tabsBottom === 480, 'at 390x480 the map frame shrinks and pans, tiles keep their size, Collect Taxes and the tabs stay on screen ' + JSON.stringify(short));
+  await p3.setViewportSize({ width: 390, height: 664 }); await settle(p3);
+  await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; ui.mapN = 0; render(); }); await settle(p3);
   // S1: a resize (address bar showing or hiding) must not recentre a panned map
-  const keptPan = await p3.evaluate(() => { scrollTo(0, 0); const sc = document.getElementById('mapscroll'); sc.scrollLeft = 0; sc.scrollTop = 0;
+  const keptPan = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'); sc.scrollLeft = 0; sc.scrollTop = 0;
     window.dispatchEvent(new Event('resize')); render(); return { left: sc.scrollLeft, top: sc.scrollTop, pans: sc.classList.contains('pans') }; });
   ok(keptPan.pans && keptPan.left === 0 && keptPan.top === 0, "resize keeps the map where it was panned to " + JSON.stringify(keptPan));
   await p3.setViewportSize({ width: 390, height: 720 }); await settle(p3);
@@ -296,7 +352,6 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await p3.setViewportSize({ width: 390, height: 664 });
   const grown = await p3.evaluate(() => { state.run.exp = 2; render(); const sc = document.getElementById('mapscroll'); return { left: sc.scrollLeft, max: sc.scrollWidth - sc.clientWidth }; });
   ok(grown.max > 0 && Math.abs(grown.left - grown.max / 2) <= 1, 'a change of map size still recentres on the hall ' + JSON.stringify(grown));
-  await p3.evaluate(() => { state.run.exp = 3; render(); const sc = document.getElementById('mapscroll'); sc.scrollTop = sc.scrollHeight; scrollTo(0, 0); }); await settle(p3);
   ok(e4.length === 0, 'phone: no console errors ' + JSON.stringify(e4));
   await ph.close();
 
@@ -309,6 +364,11 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(dd.bar === 'none' && dd.tw > 45 && !dd.scroll && !dd.hint && dd.label === 'Palace, level 5', 'desktop: no build bar, full map fits without scrolling, tiles labelled ' + JSON.stringify(dd));
   await p2.hover('.tile'); await settle(p2);
   ok(!(await p2.evaluate(() => { const sc = document.getElementById('mapscroll'); return sc.scrollWidth > sc.clientWidth || sc.scrollHeight > sc.clientHeight; })), 'desktop: hovering a corner tile adds no scrollbars');
+  const place = () => p2.evaluate(() => ({ host: document.getElementById('inspector').parentNode.id, panel: getComputedStyle(document.getElementById('panel')).display, head: getComputedStyle(document.querySelector('.sheethead')).display, header: getComputedStyle(document.querySelector('header')).display, on: !!document.querySelector('#tabs .on'), canScroll: document.documentElement.scrollHeight > innerHeight }));
+  const wideL = await place(); await p2.setViewportSize({ width: 700, height: 900 }); await settle(p2); const narrowL = await place();
+  await p2.setViewportSize({ width: 1280, height: 900 }); await settle(p2); const backL = await place();
+  ok(wideL.host === 'side' && wideL.panel === 'block' && wideL.head === 'none' && wideL.header !== 'none' && wideL.on && narrowL.host === 'strip' && narrowL.panel === 'none' && !narrowL.canScroll && backL.host === 'side' && backL.panel === 'block',
+    'desktop keeps the side panel open with the inspector above it; narrowing the window switches to the phone shell and back ' + JSON.stringify({ wideL, narrowL, backL }));
   ok(e2.length === 0, 'desktop: no console errors ' + JSON.stringify(e2));
   await shot(p2, 'shot-1280.png');
   await br.close();

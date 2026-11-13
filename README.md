@@ -13,7 +13,7 @@ A medieval idle city builder that runs entirely in the browser. No build step an
 - **Late-reign slowdown.** Above level 6 an upgrade's price is also multiplied by `1.1^(levels above 6)²` (cottages, farms and mills are exempt), and hall levels past Palace cost 50× the last. A single reign therefore slows down after the Palace instead of doubling indefinitely.
 - **Repeatable upgrades.** From the Keep onwards the Research tab offers gold sinks with exponentially scaling costs: food, housing and all-production bonuses, plus Monuments that each add a Crown to your next abdication. They reset when you found a new kingdom.
 - **Idle.** The game saves every 10 seconds and credits up to 8 hours of time away (24 with research), whether the page was closed or the tab was asleep.
-- **Phones.** On narrow screens the resource bar is a single compact row, a bar fixed at the bottom holds the build list (or the selected tile's Upgrade and Demolish) so the map remains in view, and large maps pan inside their frame so plots stay at least 40px.
+- **Phones.** On narrow screens the game is an app-style screen that never scrolls as a page: the resource bar (a single compact row) on top, the map, a strip with what is selected (or the current decree) beside Collect Taxes, a bar holding the build list (or the selected tile's Upgrade and Demolish), and the tab row along the bottom. A tab opens its panel as a sheet over the lower part of the screen, with its own scrolling; tapping the tab again, the sheet's close button or a tile closes it. Large maps pan inside their frame so plots stay at least 40px.
 
 ## Saves
 

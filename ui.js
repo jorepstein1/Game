@@ -19,6 +19,7 @@ const ui = {
   screen: 'city',
   sel: {},               // { build: id } or { tile: 'x,y' }
   tab: 'build',
+  sheet: false,          // phones: whether the tab's panel is open as a sheet over the map
   popKey: null,          // tile to play the placement animation on
   mapN: 0,               // map size last drawn; 0 forces a recentre on the hall
   mapPans: false,
@@ -114,8 +115,10 @@ function renderMap() {
   }
   patch(m, h); ui.popKey = null;
   const sc = $('mapscroll');
-  // Only a map too big for its frame becomes a scroll container; smaller ones let a drag scroll the page.
-  const pans = n * 40 + (n - 1) * 3 + 4 > sc.clientWidth + 1;
+  // Only a map too big for its frame becomes a scroll container. The grid is square and at least as wide as
+  // the frame, so on a short phone screen (frame wider than tall) it can also overflow downwards.
+  const side = Math.max(n * 40 + (n - 1) * 3 + 4, sc.clientWidth);
+  const pans = side > sc.clientWidth + 1 || side > sc.clientHeight + 1;
   sc.classList.toggle('pans', pans);
   // Recentre on the hall only when the map changes size or first becomes pannable, never on a plain re-render
   // or resize (mobile browsers fire resize whenever the address bar shows or hides).
@@ -186,7 +189,10 @@ function renderInspector() {
         <div class="row"><button class="btn${canAfford(c) ? '' : ' cant'}" data-act="clear" data-id="${sel.tile}">Clear land ${costHTML(c)}</button></div>`;
     }
   } else {
-    h = '<p class="lead"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
+    // Phones show the current decree here instead of the welcome line (CSS), since the Decrees tab is a tap away.
+    const d = currentDecree(), prog = d && d.progress ? d.progress() : null;
+    h = (d ? `<p class="goal">🎯 <b>${d.title}</b>${decreeDone() ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone() ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
+      + '<p class="lead welcome"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
   }
   patch($('inspector'), h);
 }
@@ -205,10 +211,11 @@ function renderTabs() {
     realm: canPrestige() && pendingCrowns() >= CROWN_GOAL };
   patch($('tabs'), Object.keys(TABS).map(t =>
     `<button class="${t === ui.tab ? 'on' : ''}" data-act="tab" data-id="${t}">${TABS[t]}${dots[t] ? '<i class="dot"></i>' : ''}</button>`).join(''));
+  $('side').classList.toggle('open', ui.sheet); // only styled on phones, where the panel is a sheet
 }
 function renderPanel() {
   const run = state.run, meta = state.meta, hall = hallLevel();
-  let h = '';
+  let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
@@ -259,8 +266,9 @@ function renderPanel() {
       <p class="muted">The game saves itself in this browser every 10 seconds and keeps working while you are away. Browsers can clear that storage, so export a copy now and then.</p>`;
   }
   patch($('panel'), h);
+  if (ui.panelTab !== ui.tab) { ui.panelTab = ui.tab; $('panel').scrollTop = 0; } // a newly opened tab starts at its top
 }
-// Fixed bottom bar on narrow screens (hidden by CSS on desktop): pick a building without scrolling away from the map.
+// Bottom bar on narrow screens (hidden by CSS on desktop): pick a building without scrolling away from the map.
 function renderBuildBar() {
   let h = '';
   const k = ui.sel.tile, t = k && tileAt(k), tr = k && !t ? state.run.terrain[xy(k)[0]][xy(k)[1]] : null;
@@ -409,11 +417,18 @@ function claimTab() {
 
 // ───────────────────────── Input ─────────────────────────
 const calmMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
-function showMap() { $('mapwrap').scrollIntoView({ block: 'nearest', behavior: calmMotion && calmMotion.matches ? 'auto' : 'smooth' }); }
+// Phones: put the map back in view by closing the sheet. Desktop: scroll to it if a long panel pushed it away.
+function showMap() { ui.sheet = false; $('mapwrap').scrollIntoView({ block: 'nearest', behavior: calmMotion && calmMotion.matches ? 'auto' : 'smooth' }); }
+// The inspector lives beside the tabs on desktop and under the map on phones (see the max-width block in style.css).
+const phoneLayout = window.matchMedia ? window.matchMedia('(max-width: 800px)') : { matches: false };
+function placeInspector() {
+  const host = phoneLayout.matches ? $('strip') : $('side'), el = $('inspector');
+  if (el.parentNode !== host) host.insertBefore(el, host.firstChild);
+}
 // Actions for the city screen, keyed by data-act. Each gets (data-id, event, element).
 const CITY_ACTIONS = {
   tile(k) {
-    const [x, y] = xy(k), sel = ui.sel;
+    const [x, y] = xy(k), sel = ui.sel; ui.sheet = false;
     if (!tileAt(k) && state.run.terrain[x][y] === 'plain' && sel.build) { if (say(build(k, sel.build)).ok) ui.popKey = k; }
     else ui.sel = sel.tile === k ? {} : { tile: k };
   },
@@ -421,7 +436,9 @@ const CITY_ACTIONS = {
     ui.sel = ui.sel.build === id ? {} : { build: id };
     if (ui.sel.build) showMap(); // bring the map back if a card was picked further down the page
   },
-  tab(id) { if (TABS[id]) ui.tab = id; },
+  // On phones a tab opens its panel as a sheet; tapping the open tab again closes it.
+  tab(id) { if (!TABS[id]) return; ui.sheet = !(ui.sheet && ui.tab === id); ui.tab = id; },
+  closeSheet() { ui.sheet = false; },
   deselect() { ui.sel = {}; },
   up(k) { if (say(upgrade(k)).ok) ui.popKey = k; },
   demolish(k) {
@@ -508,6 +525,7 @@ function bindInput() {
     if (e.repeat && (e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('button')) { e.preventDefault(); return; }
     if (e.key === 'Escape') {
       if (!$('modal').hidden) { if (!dialog.locked) closeModal(); }
+      else if (ui.sheet && phoneLayout.matches) { ui.sheet = false; render(); }
       else if (ui.sel.build || ui.sel.tile) { ui.sel = {}; render(); }
     } else if (e.key === 'Tab' && !$('modal').hidden) { // keep focus inside the dialog
       const f = [...$('modalbox').querySelectorAll('button, textarea')]; if (!f.length) return;
@@ -520,6 +538,8 @@ function bindInput() {
   $('res').addEventListener('scroll', renderResources, { passive: true });
   window.addEventListener('beforeunload', () => save());
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else { simTick(); if (!ui.paused) render(); } });
+  const moved = () => { placeInspector(); if (!ui.paused) render(); };
+  if (phoneLayout.addEventListener) phoneLayout.addEventListener('change', moved); else if (phoneLayout.addListener) phoneLayout.addListener(moved);
   window.addEventListener('resize', () => { if (!ui.paused) render(); }); // re-checks whether the map needs to pan; keeps its position
 }
 
@@ -551,6 +571,7 @@ function drawTick() {
   if (++drawCount % 4 === 0) render(); else { renderResources(); renderMerchant(); }
 }
 
+placeInspector();
 bindInput();
 claimTab();
 loadGame();

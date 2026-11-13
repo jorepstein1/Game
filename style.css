@@ -58,7 +58,7 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 /* Tiles never shrink below a tappable 40px; a bigger map pans inside its frame instead. */
 #mapwrap { scroll-margin: 60px 0 110px; }
 #mapscroll { aspect-ratio: 1; border-radius: 5px; }
-/* Set by ui.js only when the grid is wider than the frame. Scrolling chains to the page at the map's edges. */
+/* Set by ui.js only when the grid is bigger than the frame. */
 #mapscroll.pans { overflow: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
 #map { display: grid; grid-template-columns: repeat(var(--n), minmax(40px, 1fr)); gap: 3px; padding: 2px; }
 #maphint { text-align: center; color: var(--parch2); font-size: 12px; font-style: italic; padding-top: 4px; opacity: .8; }
@@ -91,8 +91,10 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
   position: absolute; font-size: 40px; background: #ffe58a; border: 3px solid var(--gold); border-radius: 50%;
   width: 68px; height: 68px; z-index: 10; animation: bob 1s infinite alternate ease-in-out; box-shadow: 0 0 18px #ffd84a;
 }
+#strip { display: flex; }
+.sheethead, #inspector .goal { display: none; }
 #clicker {
-  padding: 14px; font-size: 20px; font-weight: bold; color: #3a2a05;
+  flex: 1; padding: 14px; font-size: 20px; font-weight: bold; color: #3a2a05;
   background: linear-gradient(#f3d660, #c9a227); border: 2px solid #6e5510; border-radius: 10px;
   box-shadow: 0 4px 0 #6e5510; user-select: none; touch-action: manipulation;
 }
@@ -163,20 +165,56 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
 @keyframes bob { to { transform: translateY(-8px) rotate(6deg); } }
 @keyframes pop { 0% { transform: scale(.4); } 70% { transform: scale(1.2); } }
 @keyframes rise { to { transform: translateY(-60px); opacity: 0; } }
+@keyframes sheet { from { transform: translateY(30%); opacity: .4; } }
 @keyframes slide { from { transform: translateX(40px); opacity: 0; } }
 
 @media (max-width: 800px) {
-  main { flex-direction: column; gap: 10px; padding: 10px; }
-  #left, aside { max-width: none; width: 100%; min-width: 0; }
-  #panel { max-height: none; }
-  /* Keep the inspector to one line on a phone so it sits wholly above the bottom bar on a short screen (390x664). */
-  #inspector { min-height: 0; padding: 4px 10px; }
-  #inspector .lead { margin: 0; }
-  #inspector .more { display: none; }
-  #inspector .lead { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-  header h1 { font-size: 20px; }
-  #app { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
-  #toasts { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
+  /* Phones get an app-style shell: the page itself never scrolls. Top to bottom: resource bar, map,
+     a strip with the inspector and Collect Taxes, the build/action bar, the tab row. A tab opens its
+     panel as a sheet over the lower part of the screen, with its own scrolling. */
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  #app { position: fixed; inset: 0; min-height: 0; }
+  .screen:not([hidden]) { height: 100%; display: flex; flex-direction: column; }
+  header { display: none; }
+  #res { position: static; flex: none; padding-top: calc(4px + env(safe-area-inset-top, 0px)); }
+  main { flex: 1 1 auto; min-height: 0; flex-direction: column; align-items: stretch; gap: 0; padding: 0; max-width: none; margin: 0; }
+  #left { flex: 1 1 auto; min-height: 0; max-width: none; width: 100%; gap: 6px; padding: 6px; }
+
+  /* The map is square while there is room; on a short screen its frame gets shorter and the map pans inside. */
+  #mapwrap { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 5px; }
+  #mapscroll { flex: 0 1 auto; min-height: 0; }
+  #mapscroll.pans { overscroll-behavior: contain; scrollbar-width: none; }
+  #mapscroll.pans::-webkit-scrollbar { display: none; }
+  #maphint { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: #1c140ccc; color: var(--parch); opacity: 1; pointer-events: none; white-space: nowrap; }
+
+  /* Under the map: what is selected (or the current decree) on the left, Collect Taxes on the right. */
+  #strip { flex: 1 0 56px; min-height: 56px; gap: 6px; align-items: flex-start; }
+  #inspector { flex: 1 1 0; min-width: 0; min-height: 0; align-self: stretch; overflow-y: auto; overscroll-behavior: contain; padding: 5px 10px; font-size: 14px; }
+  #inspector h3 { font-size: 15px; margin-bottom: 2px; }
+  #inspector p { margin: 2px 0; }
+  #inspector .lead b { font-size: 15px; }
+  #inspector .row, #inspector .more { display: none; }       /* the bar below holds the actions */
+  #inspector .goal { display: block; }
+  #inspector .goal ~ .welcome { display: none; }
+  #clicker { flex: 0 0 auto; height: 56px; padding: 4px 12px; font-size: 15px; line-height: 1.15; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 3px 0 #6e5510; }
+  #clicker .ic { display: none; }
+  #clicker .lbl::before { content: "💰 "; }
+  #clicker small { font-size: 13px; }
+
+  /* Tab row along the bottom; the panel is a sheet that rises from it. */
+  aside { flex: none; position: relative; z-index: 40; min-width: 0; max-width: none; width: 100%; display: block; }
+  #tabs { gap: 0; background: #1c140c; border-top: 1px solid #000; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  #tabs button { height: 46px; padding: 0 2px; border: 0; border-radius: 0; font-size: 14px; white-space: nowrap; background: none; }
+  #tabs button.on { background: none; color: var(--parch); font-weight: normal; }
+  aside.open #tabs button.on { background: var(--parch); color: var(--ink); font-weight: bold; }
+  #tabs .dot { top: 5px; right: 5px; width: 8px; height: 8px; }
+  #panel { display: none; position: absolute; left: 0; right: 0; bottom: 100%; margin: 0; max-height: min(64vh, 520px); max-height: min(64dvh, 520px); overflow-y: auto; overscroll-behavior: contain;
+    border-width: 2px 0 0; border-color: var(--gold); border-radius: 14px 14px 0 0; padding: 0 10px 12px; box-shadow: 0 -8px 24px #000a, inset 0 0 30px #b99b5a55; }
+  aside.open #panel { display: block; animation: sheet .18s ease-out; }
+  .sheethead { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 2; margin: 0 -10px 8px; padding: 6px 6px 6px 12px; background: var(--parch2); border-bottom: 1px solid #a88f5a; border-radius: 12px 12px 0 0; font-weight: bold; font-size: 16px; }
+  .sheethead button { width: 44px; height: 36px; border: 1px solid #a88f5a; border-radius: 8px; background: #fbf2d8; font-size: 16px; }
+  /* Toasts drop in under the resource bar, clear of the controls at the bottom; taps pass through them. */
+  #toasts { left: 10px; right: 10px; max-width: none; align-items: flex-end; bottom: auto; top: calc(50px + env(safe-area-inset-top, 0px)); }
 
   /* Resource bar: one compact row, rate stacked under the amount; scrolls sideways if it ever overflows. */
   #res { flex-wrap: nowrap; overflow-x: auto; gap: 2px; padding: 4px; scrollbar-width: none; }
@@ -190,12 +228,8 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   /* If the row still overflows, fade the right edge to show there is more to scroll to. */
   #res.more { -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); mask-image: linear-gradient(to right, #000 88%, transparent); }
 
-  /* Build bar: fixed to the bottom so the map stays in view while picking and placing. */
-  #buildbar {
-    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    background: rgba(30, 22, 15, .97); border-top: 2px solid var(--gold);
-    padding: 4px calc(6px + env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-left, 0px));
-  }
+  /* Build bar: always under the map, so picking and placing never leaves it. */
+  #buildbar { display: block; flex: none; background: rgba(30, 22, 15, .97); border-top: 2px solid var(--gold); padding: 4px 6px 6px; }
   #bbinfo { color: var(--parch); font-size: 12px; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px 3px; }
   #bbinfo .hint { font-style: italic; opacity: .75; }
   #bbinfo .cost { margin-left: 6px; font-size: 12px; }
@@ -217,3 +251,4 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
   .bb.act .ic { font-size: 20px; }
 }
+@media (max-width: 800px) and (prefers-reduced-motion: reduce) { aside.open #panel { animation: none; } }

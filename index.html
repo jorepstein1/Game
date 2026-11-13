@@ -22,15 +22,18 @@
           <div id="maphint" hidden>Drag the map to pan</div>
           <button id="merchant" data-act="merchant" hidden title="A travelling merchant!" aria-label="Travelling merchant: tap for a gift">🐪</button>
         </div>
-        <button id="clicker" data-act="collect">💰 Collect Taxes <small id="clickval"></small></button>
+        <!-- On phones ui.js moves #inspector in here, beside the button, so both sit under the map. -->
+        <div id="strip"><button id="clicker" data-act="collect"><span class="ic">💰</span> <span class="lbl">Collect Taxes</span> <small id="clickval"></small></button></div>
       </section>
-      <aside>
+      <!-- Phones only: the build list, or the selected tile's actions. -->
+      <div id="buildbar"><div id="bbinfo"></div><div id="bbrow"></div></div>
+      <!-- On phones this is the tab row along the bottom, and #panel is a sheet that slides up from it. -->
+      <aside id="side">
         <div id="inspector"></div>
         <nav id="tabs"></nav>
         <div id="panel"></div>
       </aside>
     </main>
-    <div id="buildbar"><div id="bbinfo"></div><div id="bbrow"></div></div>
   </section>
 </div>
 <div id="toasts" role="status" aria-live="polite"></div>
