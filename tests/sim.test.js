@@ -52,6 +52,9 @@ test('pendingCrowns and abdication: Crowns banked, Monuments counted, head start
   assert.strictEqual(sim.state.meta.stats.totalGold, 1.3e6, 'meta survives abdication');
   assert.deepStrictEqual(plain(sim.state.run.res), { gold: 50 + 12 * sim.HEAD_START.gold, food: 30 + 12 * sim.HEAD_START.food, wood: 30 + 12 * sim.HEAD_START.wood, stone: 12 * sim.HEAD_START.stone, iron: 0 });
   assert.deepStrictEqual(plain(sim.newRun(1).res), plain(sim.START_RES), 'a first kingdom gets no head start');
+  assert.deepStrictEqual(plain(sim.newRun(1, 500).res), plain(sim.newRun(1, sim.HEAD_START_CAP).res), 'the head start stops growing at the cap');
+  near(sim.crownThreshold(30) / sim.crownThreshold(0), Math.pow(2.5, sim.CROWN_STEEPEN), 1e-6, 'up to 30 Crowns the threshold follows the multiplier cubed;');
+  near(sim.crownThreshold(60) / sim.crownThreshold(30), Math.pow(4 / 2.5, sim.CROWN_STEEPEN + sim.CROWN_DEAR), 1e-6, 'past 30 Crowns it climbs much faster;');
 });
 
 test('high levels cost extra, linear buildings are exempt', sim => {
@@ -61,7 +64,23 @@ test('high levels cost extra, linear buildings are exempt', sim => {
   near(step('smith', sim.UPGRADE_CREEP_FROM), sim.UPGRADE_GROWTH * sim.UPGRADE_CREEP, 0.01, 'first creeping level');
   assert.ok(step('smith', 14) > step('smith', 10) && step('smith', 10) > step('smith', 8), 'each level steeper than the last');
   near(step('cottage', 14), sim.LINEAR_UPGRADE_GROWTH, 0.01, 'cottage');
-  assert.ok(Number.isFinite(up('guild', sim.MAX_LEVEL - 1).gold) || up('guild', sim.MAX_LEVEL - 1).gold === Infinity);
+  assert.ok(Number.isFinite(up('guild', sim.MAX_LEVEL - 1).gold) && up('guild', sim.MAX_LEVEL - 1).gold < 1e300, 'the dearest upgrade is a finite number');
+});
+
+test('a save at the level cap keeps every cost, refund and stock finite', sim => {
+  const s = sim.newState(0); s.run = sim.newRun(12345);
+  s.run.tiles['4,5'] = { kind: 'building', id: 'lumber', level: 1e9 }; s.run.tiles['6,5'] = { kind: 'building', id: 'guild', level: 1e9 };
+  s.run.repeatables = { monument: 1e9 };
+  const { state: clean } = sim.sanitizeSave(plain(s), 1000); sim.setState(clean);
+  for (const k of ['4,5', '6,5']) {
+    const t = sim.state.run.tiles[k]; assert.strictEqual(t.level, sim.MAX_LEVEL);
+    for (const c of [sim.upgradeCost(t), sim.spentOn(t), sim.demolishRefund(t)]) for (const r in c) assert.ok(Number.isFinite(c[r]), `${t.id} ${r} is ${c[r]}`);
+  }
+  for (const r of sim.REPEATABLES) { const c = sim.repCost(r); for (const k in c) assert.ok(Number.isFinite(c[k]), r.id + ' cost is ' + c[k]); }
+  assert.ok(sim.demolish('4,5').ok); assert.ok(sim.demolish('6,5').ok);
+  for (const r in sim.state.run.res) assert.ok(Number.isFinite(sim.state.run.res[r]), r + ' is ' + sim.state.run.res[r]);
+  const again = sim.sanitizeSave(JSON.parse(JSON.stringify(sim.state)), 1000).state;
+  assert.strictEqual(again.run.res.gold, sim.state.run.res.gold, 'the refund survives a save and load');
 });
 
 test('creditAway: caps at 8h, 24h with Stewardship; reports the cap', sim => {

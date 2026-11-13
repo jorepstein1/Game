@@ -82,7 +82,7 @@ function play(seed, opts) {
     if (sim.canPrestige()) {
       const cur = 1 + sim.CROWN_BONUS * sim.state.meta.crowns, next = 1 + sim.CROWN_BONUS * (sim.state.meta.crowns + sim.pendingCrowns());
       if (POLICY === 'castle' || (POLICY.startsWith('pct:') && next / cur >= 1 + POLICY.slice(4) / 100) || sim.pendingCrowns() >= NEED || (CYCLE && t < CYCLE[1] * 60 && sim.pendingCrowns() >= CYCLE[0]) || (POLICY.startsWith('once:') && !out.prestiges.length && sim.pendingCrowns() >= +POLICY.slice(5))) {
-        const n = sim.pendingCrowns(); out.prestiges.push({ min: +(t / 60).toFixed(1), runMin: +((t - runStart) / 60).toFixed(1), crowns: n, total: sim.state.meta.crowns + n, boost: '+' + Math.round((next / cur - 1) * 100) + '%' });
+        const n = sim.pendingCrowns(); out.prestiges.push({ min: +(t / 60).toFixed(1), runMin: +((t - runStart) / 60).toFixed(1), hall, crowns: n, total: sim.state.meta.crowns + n, boost: '+' + Math.round((next / cur - 1) * 100) + '%' });
         sim.prestige(); sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.setState(sim.state); hall = 1; runStart = t; // same map every reign: strategies differ only in timing
       }
     }
@@ -104,12 +104,17 @@ const STRATEGIES = [
 function summary(seed, opts) {
   const r = play(seed, opts);
   return { seed, taps: opts.taps || 0, policy: opts.policy, lifetimeGold: r.totalGold, goldRate: r.goldRate, peakGold: r.peakGold, crowns: r.crowns, pending: r.pending, hall: r.hall,
-    abdications: r.prestiges.map(p => p.min), castle: r.marks.Castle ? r.marks.Castle.min : null, palace: r.marks.Palace ? r.marks.Palace.min : null, stamps: r.stamps };
+    abdications: r.prestiges.map(p => p.min), reigns: r.prestiges.map(p => ({ minutes: p.runMin, hall: p.hall })), castle: r.marks.Castle ? r.marks.Castle.min : null, palace: r.marks.Palace ? r.marks.Palace.min : null, stamps: r.stamps };
 }
 function compare(hours, seeds, tapRates, jobs) {
-  const { execFile } = require('child_process'), os = require('os');
-  const todo = [], rows = [];
+  const todo = [];
   for (const seed of seeds) for (const taps of tapRates) for (const [label, policy] of STRATEGIES) todo.push({ seed, label, opts: { hours, policy, taps } });
+  return runAll(todo, jobs);
+}
+// Runs a list of { seed, label, opts } in parallel child processes; resolves to their summaries in the same order.
+function runAll(todo, jobs) {
+  const { execFile } = require('child_process'), os = require('os');
+  const rows = [];
   let next = 0;
   const worker = () => new Promise((resolve, reject) => {
     const i = next++; if (i >= todo.length) return resolve();
@@ -120,7 +125,7 @@ function compare(hours, seeds, tapRates, jobs) {
   });
   return Promise.all(Array.from({ length: Math.min(jobs || os.cpus().length, todo.length) }, worker)).then(() => rows);
 }
-module.exports = { play, summary, compare, STRATEGIES };
+module.exports = { play, summary, compare, runAll, STRATEGIES };
 
 if (require.main === module) {
   if (process.argv[2] === '--one') { console.log(JSON.stringify(summary(+process.argv[3], JSON.parse(process.argv[4])))); return; }
@@ -140,7 +145,8 @@ if (require.main === module) {
     for (const name in r.marks) console.log(`  ${name.padEnd(10)} at ${String(r.marks[name].min).padStart(6)} min   Crowns on offer ${String(r.marks[name].pending).padStart(3)}   lifetime gold ${r.marks[name].lifetimeGold}`);
     for (const m in r.stamps) { const s = r.stamps[m];
       console.log(`  ${String(m).padStart(3)} min: ${s.hall}, pop ${s.pop}/${s.housing} (jobs ${s.jobs}), gold ${s.gold}, food ${s.food} after upkeep ${s.upkeep}, farms+mills ${s.farms}, cottages ${s.cottages}, other ${s.other}, Crowns on offer ${s.pending}, repeatables ${s.repeatables}`); }
-    if (r.prestiges.length) console.log('  abdications: ' + r.prestiges.map(p => `${p.min} min (+${p.crowns} → ${p.total}, ${p.boost})`).join('; '));
+    if (r.prestiges.length) console.log('  abdications: ' + r.prestiges.map(p => `${p.min} min (+${p.crowns} → ${p.total}, ${p.boost})`).join('; ')
+      + '\n  reign lengths (min, hall level reached): ' + r.prestiges.map(p => `${p.runMin} L${p.hall}`).join(', '));
     const total = Object.values(r.spent).reduce((a, b) => a + b, 0) || 1;
     console.log(`  starving ${(r.starve / 60).toFixed(1)} min of ${HOURS * 60}; gold spent: ` + Object.keys(r.spent).map(k => `${k} ${Math.round(100 * r.spent[k] / total)}%`).join(', ') + '\n');
   }

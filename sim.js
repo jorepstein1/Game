@@ -26,7 +26,7 @@ function newRun(seed, crowns) {
     buffUntil: 0,   // festival end, on the run clock
     gold: 0 };      // gold earned this run
   run.tiles[HALL_KEY] = { kind: 'hall', id: 'hall', level: 1 };
-  for (const r in HEAD_START) run.res[r] += HEAD_START[r] * (crowns || 0);
+  for (const r in HEAD_START) run.res[r] += HEAD_START[r] * Math.min(HEAD_START_CAP, crowns || 0);
   return run;
 }
 function newState(now) { return { v: SAVE_VERSION, last: now || 0, meta: newMeta(now), run: newRun() }; }
@@ -81,7 +81,7 @@ const unlocked = (x, y) => Math.abs(x - MAP_MID) <= mapRadius() && Math.abs(y - 
 function neighbors(x, y) { return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].filter(([a, b]) => unlocked(a, b)); }
 
 const levelMult = t => BUILDINGS[t.id].linear ? t.level : Math.pow(2, t.level - 1);
-function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.ceil(cost[r] * k); return o; }
+function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.min(BIG, Math.ceil(cost[r] * k)); return o; } // never Infinity
 function addCost(total, cost) { for (const r in cost) total[r] = (total[r] || 0) + cost[r]; return total; }
 const canAfford = cost => Object.keys(cost).every(r => state.run.res[r] >= cost[r]);
 function pay(cost) { if (!canAfford(cost)) return false; for (const r in cost) state.run.res[r] -= cost[r]; return true; }
@@ -170,7 +170,7 @@ const festivalOn = () => festivalLeft() > 0;
 
 // Crowns for abdicating come from the gold earned this reign, on a log scale (see data.js), plus one per Monument level.
 const crownMult = crowns => 1 + CROWN_BONUS * crowns;
-const crownThreshold = crowns => CROWN_GOLD * Math.pow(crownMult(crowns), CROWN_STEEPEN);
+const crownThreshold = crowns => CROWN_GOLD * Math.pow(crownMult(crowns), CROWN_STEEPEN) * Math.pow(Math.max(1, crownMult(crowns) / crownMult(CROWN_DEAR_FROM)), CROWN_DEAR);
 const crownsFor = (runGold, crownsHeld) => Math.max(0, Math.floor(CROWN_RATE * Math.log10(Math.max(1, runGold) / crownThreshold(crownsHeld || 0)) + 1e-9));
 const goldForCrowns = (n, crownsHeld) => crownThreshold(crownsHeld || 0) * Math.pow(10, n / CROWN_RATE); // reign gold needed for n Crowns
 const pendingCrowns = () => crownsFor(state.run.gold, state.meta.crowns) + repLevel('monument');
@@ -268,7 +268,7 @@ function spentOn(t) {
   for (let l = 1; l < t.level; l++) addCost(total, upgradeCost({ kind: t.kind, id: t.id, level: l }));
   return total;
 }
-function demolishRefund(t) { const o = spentOn(t); for (const r in o) o[r] = Math.floor(o[r] * REFUND_SHARE); return o; }
+function demolishRefund(t) { const o = spentOn(t); for (const r in o) o[r] = Math.min(BIG, Math.floor(o[r] * REFUND_SHARE)); return o; }
 function demolish(key) {
   const t = state.run.tiles[key];
   if (!t || !tileKind(t).removable) return fail();

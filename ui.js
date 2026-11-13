@@ -237,7 +237,7 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>👑 Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns on offer come from the gold earned this reign. Most arrive early and each further one takes more gold, so around ${CROWN_GOAL} is a good time to start over. A new kingdom also begins with extra supplies for every Crown you hold.</p>
+      <p class="muted">Crowns on offer come from the gold earned this reign. Most arrive early and each further one takes more gold, so around ${CROWN_GOAL} is a good time to start over. Past ${CROWN_DEAR_FROM} Crowns each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with extra supplies for every Crown you hold (up to ${HEAD_START_CAP}).</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
@@ -431,7 +431,7 @@ const CITY_ACTIONS = {
     const n = pendingCrowns();
     confirmBox('Found a new kingdom?', `You abdicate and start over on fresh land. Buildings, resources and research are lost, but you keep
       <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
-      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, state.meta.crowns + n), true)} extra.`, () => {
+      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, Math.min(HEAD_START_CAP, state.meta.crowns + n)), true)} extra.`, () => {
       if (!say(prestige()).ok) return;
       ui.sel = {}; ui.mapN = 0; save(); render();
     });

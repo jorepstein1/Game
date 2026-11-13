@@ -166,13 +166,14 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
 @keyframes slide { from { transform: translateX(40px); opacity: 0; } }
 
 @media (max-width: 800px) {
-  main { flex-direction: column; padding: 10px; }
+  main { flex-direction: column; gap: 10px; padding: 10px; }
   #left, aside { max-width: none; width: 100%; min-width: 0; }
   #panel { max-height: none; }
-  /* Keep the inspector short on a phone so Collect Taxes and the tabs stay near the map. */
-  #inspector { min-height: 0; padding: 8px 10px; }
+  /* Keep the inspector to one line on a phone so it sits wholly above the bottom bar on a short screen (390x664). */
+  #inspector { min-height: 0; padding: 4px 10px; }
+  #inspector .lead { margin: 0; }
   #inspector .more { display: none; }
-  #inspector .lead { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #inspector .lead { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   header h1 { font-size: 20px; }
   #app { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
   #toasts { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }

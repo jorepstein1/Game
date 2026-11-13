@@ -148,7 +148,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
     return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: festivalLeft(), ok: isFinite(calc.rates.gold) }; });
-  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 50 && ev.hall === 300 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff <= 60 && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 50 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff <= 60 && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
   ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
@@ -217,12 +217,12 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const cdp = await ph.newCDPSession(p3);
   const vp = await p3.evaluate(() => ({ w: innerWidth, h: innerHeight })); ok(vp.w === 390 && vp.h === 664, 'phone viewport is ' + vp.w + 'x' + vp.h);
   // P3: the inspector stays short on a phone, so Collect Taxes is not pushed down
-  const insp = () => p3.evaluate(() => { const i = document.getElementById('inspector').getBoundingClientRect(), c = document.getElementById('clicker').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { h: Math.round(i.height), clickerBottom: Math.round(c.bottom), bar: Math.round(b.top) }; });
+  const insp = () => p3.evaluate(() => { const i = document.getElementById('inspector').getBoundingClientRect(), c = document.getElementById('clicker').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { h: Math.round(i.height), bottom: Math.round(i.bottom), clickerBottom: Math.round(c.bottom), bar: Math.round(b.top) }; });
   const welcome = await insp();
-  ok(welcome.h <= 70, 'welcome text is ' + welcome.h + 'px tall on a phone');
+  ok(welcome.h <= 40 && welcome.bottom <= welcome.bar, 'welcome text is one line (' + welcome.h + 'px) and wholly above the bar ' + JSON.stringify(welcome));
   await p3.tap('#bbrow .bb[data-id="farm"]'); await settle(p3);
   const picked = await insp();
-  ok(picked.h <= 70 && picked.clickerBottom <= picked.bar && /Farm/.test(await p3.evaluate(() => document.querySelector('#inspector .lead').textContent)), 'with a building picked the inspector is ' + picked.h + 'px and Collect Taxes stays above the bar ' + JSON.stringify(picked));
+  ok(picked.h <= 40 && picked.bottom <= picked.bar && picked.clickerBottom <= picked.bar && /Farm/.test(await p3.evaluate(() => document.querySelector('#inspector .lead').textContent)), 'with a building picked the inspector is one line (' + picked.h + 'px), wholly above the bar, as is Collect Taxes ' + JSON.stringify(picked));
   await p3.evaluate(() => { ui.sel = {}; render(); ui.barTapAt = -Infinity; }); // forget the Farm tap: the next bar tap is not a double tap
   // R1: tile actions are reachable without scrolling
   const reach = sel => p3.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const r = b.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);

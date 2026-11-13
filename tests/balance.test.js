@@ -1,12 +1,25 @@
 'use strict';
-// Slow balance check (about a minute): runs the bot for 4 game hours per strategy and asserts that starting over
-// pays. No dependencies: node tests/balance.test.js
+// Slow balance check (a few minutes): runs the bot for 4 game hours per strategy and asserts that starting over
+// pays, then for 12 hours of abdicating at every chance and asserts that reigns do not keep getting shorter.
+// No dependencies: node tests/balance.test.js
 const assert = require('assert');
-const { compare } = require('./bot');
+const { compare, runAll } = require('./bot');
+const LONG = [{ seed: 11, opts: { hours: 12, policy: 'crowns:10', taps: 0 } }, { seed: 33, opts: { hours: 12, policy: 'crowns:10', taps: 0.5 } }];
 
-compare(4, [11, 33], [0, 0.5]).then(rows => {
+Promise.all([compare(4, [11, 33], [0, 0.5], 2), runAll(LONG, 2)]).then(([rows, long]) => {
   let failed = 0;
   const check = (name, fn) => { try { fn(); console.log('PASS ' + name); } catch (e) { failed++; console.log('FAIL ' + name + '\n     ' + e.message); } };
+  for (const r of long) {
+    const who = `seed ${r.seed}, ${r.taps} taps/s, 12h of abdicating at 10 Crowns`, lens = r.reigns.map(x => x.minutes), halls = r.reigns.map(x => x.hall);
+    check(`${who}: no reign after the third is shorter than 30 minutes`, () => {
+      assert.ok(Math.min(...lens.slice(3)) >= 30, 'reign lengths ' + lens.join(', ')); });
+    check(`${who}: Crowns stay bounded (at most 200)`, () => {
+      assert.ok(r.crowns + r.pending <= 200 && r.crowns >= 100, r.crowns + '+' + r.pending + ' Crowns'); });
+    check(`${who}: later reigns go deeper than the Castle`, () => {
+      assert.ok(halls.slice(0, 3).every(h => h === 4) && halls.slice(-3).every(h => h >= 6) && halls.filter(h => h >= 5).length >= halls.length / 2, 'hall levels ' + halls.join(', ')); });
+    check(`${who}: the last three reigns are no shorter than the three before them`, () => {
+      const avg = a => a.reduce((x, y) => x + y, 0) / a.length; assert.ok(avg(lens.slice(-3)) >= avg(lens.slice(-6, -3)), lens.join(', ')); });
+  }
   for (const seed of [11, 33]) for (const taps of [0, 0.5]) {
     const get = policy => rows.find(r => r.seed === seed && r.taps === taps && r.policy === policy);
     const never = get('none'), cycle = get('cycle:10:150'), always = get('crowns:10'), who = `seed ${seed}, ${taps} taps/s`;
