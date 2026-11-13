@@ -95,7 +95,7 @@ function tileLabel(key, t, tr) {
 }
 function renderMap() {
   const run = state.run, half = mapRadius(), n = half * 2 + 1, m = $('map');
-  m.style.setProperty('--n', n);
+  m.style.setProperty('--n', n); $('mapwrap').style.setProperty('--n', n); // the frame's size depends on it too
   let h = '';
   for (let y = MAP_MID - half; y <= MAP_MID + half; y++) for (let x = MAP_MID - half; x <= MAP_MID + half; x++) {
     const k = x + ',' + y, t = run.tiles[k], tr = run.terrain[x][y];
@@ -115,10 +115,10 @@ function renderMap() {
   }
   patch(m, h); ui.popKey = null;
   const sc = $('mapscroll');
-  // Only a map too big for its frame becomes a scroll container. The grid is square and at least as wide as
-  // the frame, so on a short phone screen (frame wider than tall) it can also overflow downwards.
-  const side = Math.max(n * 40 + (n - 1) * 3 + 4, sc.clientWidth);
-  const pans = side > sc.clientWidth + 1 || side > sc.clientHeight + 1;
+  // Only a map too big for its frame becomes a scroll container. The room is the frame's shorter inner side:
+  // on desktop the frame is square; on phones CSS sizes the grid to the shorter side, down to 40px tiles.
+  const cs = getComputedStyle(sc), room = Math.min(sc.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), sc.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+  const pans = n * 40 + (n - 1) * 3 + 4 > room + 1;
   sc.classList.toggle('pans', pans);
   // Recentre on the hall only when the map changes size or first becomes pannable, never on a plain re-render
   // or resize (mobile browsers fire resize whenever the address bar shows or hides).
@@ -420,7 +420,7 @@ const calmMotion = window.matchMedia && window.matchMedia('(prefers-reduced-moti
 // Phones: put the map back in view by closing the sheet. Desktop: scroll to it if a long panel pushed it away.
 function showMap() { ui.sheet = false; $('mapwrap').scrollIntoView({ block: 'nearest', behavior: calmMotion && calmMotion.matches ? 'auto' : 'smooth' }); }
 // The inspector lives beside the tabs on desktop and under the map on phones (see the max-width block in style.css).
-const phoneLayout = window.matchMedia ? window.matchMedia('(max-width: 800px)') : { matches: false };
+const phoneLayout = window.matchMedia ? window.matchMedia('(max-width: 800px), (max-height: 500px)') : { matches: false };
 function placeInspector() {
   const host = phoneLayout.matches ? $('strip') : $('side'), el = $('inspector');
   if (el.parentNode !== host) host.insertBefore(el, host.firstChild);

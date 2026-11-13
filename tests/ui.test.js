@@ -63,9 +63,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const order = await page.evaluate(() => [...document.getElementById('res').children].slice(0, 2).map(c => c.className));
   ok(/merchant/.test(order[0]) && /buff/.test(order[1]), 'timed chips lead the resource bar');
   const mp = await page.evaluate(() => { const t = document.querySelector('.tile').getBoundingClientRect(), sc = document.getElementById('mapscroll');
-    return { n: document.querySelectorAll('.tile').length, w: t.width, h: t.height, sw: sc.scrollWidth, cw: sc.clientWidth, sl: sc.scrollLeft, st: sc.scrollTop, hint: !document.getElementById('maphint').hidden, docW: document.documentElement.scrollWidth }; });
+    return { n: document.querySelectorAll('.tile').length, w: t.width, h: t.height, sw: sc.scrollWidth, cw: sc.clientWidth, sh: sc.scrollHeight, ch: sc.clientHeight, sl: sc.scrollLeft, st: sc.scrollTop, hint: !document.getElementById('maphint').hidden, docW: document.documentElement.scrollWidth }; });
   ok(mp.n === 121 && mp.w >= 40 && mp.h >= 40, '11x11 tiles are ' + mp.w.toFixed(1) + 'x' + mp.h.toFixed(1) + 'px');
-  ok(mp.sw > mp.cw && mp.sl > 0 && mp.st > 0 && mp.hint, 'map pans inside its frame, centred on hall ' + JSON.stringify(mp));
+  ok(mp.sw > mp.cw && Math.abs(mp.sl - (mp.sw - mp.cw) / 2) <= 1 && Math.abs(mp.st - (mp.sh - mp.ch) / 2) <= 1 && mp.hint, 'map pans inside its frame, centred on hall ' + JSON.stringify(mp));
   ok(mp.docW <= 390, 'no horizontal page overflow (doc width ' + mp.docW + ')');
   const badge = await page.evaluate(() => { let worst = 0, n = 0; for (const b of document.querySelectorAll('.tile .bn')) { n++; const r = b.getBoundingClientRect(), t = b.parentElement.getBoundingClientRect(); worst = Math.max(worst, r.right - t.right, t.left - r.left); } return { n, worst }; });
   await page.evaluate(() => { const k = Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'farm'); calc.tiles[k].adj = 2.7; });
@@ -340,6 +340,43 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const short = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), c = document.getElementById('clicker').getBoundingClientRect(), t = document.getElementById('tabs').getBoundingClientRect();
     return { docH: document.documentElement.scrollHeight, vh: innerHeight, frameW: sc.clientWidth, frameH: sc.clientHeight, pans: sc.classList.contains('pans'), canPan: sc.scrollHeight > sc.clientHeight, tile: Math.round(document.querySelector('.tile').getBoundingClientRect().height), taxIn: c.top >= 0 && c.bottom <= innerHeight, tabsBottom: Math.round(t.bottom) }; });
   ok(short.docH <= short.vh + 1 && short.frameH < short.frameW && short.frameH >= 120 && short.pans && short.canPan && short.tile >= 40 && short.taxIn && short.tabsBottom === 480, 'at 390x480 the map frame shrinks and pans, tiles keep their size, Collect Taxes and the tabs stay on screen ' + JSON.stringify(short));
+  // U1: the grid is sized to the frame's shorter side, so a small map is whole on short and sideways phones too
+  const mapFit = () => p3.evaluate(() => { const sc = document.getElementById('mapscroll'), f = sc.getBoundingClientRect(), g = document.getElementById('map').getBoundingClientRect(), ts = [...document.querySelectorAll('.tile')].map(t => t.getBoundingClientRect());
+    const R = id => { const r = document.getElementById(id).getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height) }; };
+    const goal = document.querySelector('#inspector .goal'), gr = goal && goal.getBoundingClientRect(), lh = goal && parseFloat(getComputedStyle(goal).lineHeight), ins = document.getElementById('inspector');
+    return { docH: document.documentElement.scrollHeight, docW: document.documentElement.scrollWidth, vw: innerWidth, vh: innerHeight, pans: sc.classList.contains('pans'), frame: [Math.round(f.width), Math.round(f.height)], grid: [Math.round(g.width), Math.round(g.height)],
+      tile: [Math.round(ts[0].width), Math.round(ts[0].height)], font: parseFloat(getComputedStyle(document.querySelector('.tile')).fontSize), inside: ts.every(r => r.left >= f.left - .5 && r.right <= f.right + .5 && r.top >= f.top - .5 && r.bottom <= f.bottom + .5),
+      strip: R('strip'), tax: R('clicker'), bar: R('buildbar'), tabs: R('tabs'), map: R('mapscroll'),
+      goalLines: goal ? +(gr.height / lh).toFixed(2) : null, goalCut: goal ? goal.scrollHeight > goal.clientHeight + 1 : null, goalInside: goal ? gr.bottom <= ins.getBoundingClientRect().bottom - 2 && ins.scrollHeight <= ins.clientHeight + 1 : null }; });
+  const wholeLines = f => f.goalInside && Math.abs(f.goalLines - Math.round(f.goalLines)) < 0.05;
+  const onScreen = f => f.docH <= f.vh + 1 && f.docW <= f.vw && f.tax.top >= 0 && f.tax.bottom <= f.vh && f.tax.right <= f.vw && f.tabs.bottom === f.vh && f.bar.bottom <= f.tabs.top + 1;
+  for (const [w, h] of [[375, 553], [360, 560]]) {
+    await p3.setViewportSize({ width: w, height: h }); await fresh(p3); await settle(p3);
+    const f = await mapFit();
+    ok(!f.pans && f.inside && f.grid[0] === f.grid[1] && f.tile[0] >= 40 && f.tile[0] === f.tile[1] && f.map.bottom <= f.strip.top && onScreen(f), w + 'x' + h + ', new game: the whole 5x5 map is in its frame without panning, square tiles, controls on screen ' + JSON.stringify({ frame: f.frame, grid: f.grid, tile: f.tile, strip: f.strip.h }));
+    ok(wholeLines(f) && f.goalLines <= 2 && f.goalCut, w + 'x' + h + ': the decree line under the map is clamped to ' + f.goalLines + ' whole lines with an ellipsis, not cut mid-line');
+  }
+  await p3.setViewportSize({ width: 664, height: 340 }); await fresh(p3); await settle(p3);
+  let land = await mapFit();
+  ok(!land.pans && land.inside && land.grid[0] === land.grid[1] && land.tile[0] >= 40 && land.tile[0] === land.tile[1] && land.font < land.tile[0] * 0.7, '664x340 (phone on its side), new game: the whole map is in its frame, square tiles with icons that fit ' + JSON.stringify({ frame: land.frame, grid: land.grid, tile: land.tile, font: land.font }));
+  ok(onScreen(land) && land.strip.left >= land.map.right && land.bar.left >= land.map.right && land.tabs.left >= land.map.right && wholeLines(land), '664x340: the strip, bar and tabs stack to the right of the map, nothing scrolls ' + JSON.stringify({ map: land.map, strip: land.strip, bar: land.bar, tabs: land.tabs }));
+  await p3.tap('#tabs [data-id="realm"]'); await settle(p3);
+  const landSheet = await p3.evaluate(() => { const p = document.getElementById('panel'), b = p.querySelector('[data-act="prestige"]'); b.scrollIntoView({ block: 'nearest' }); const r = p.getBoundingClientRect(), e = b.getBoundingClientRect(), hit = document.elementFromPoint(e.left + e.width / 2, e.top + e.height / 2);
+    return { top: Math.round(r.top), left: Math.round(r.left), resBottom: Math.round(document.getElementById('res').getBoundingClientRect().bottom), mapRight: Math.round(document.getElementById('mapscroll').getBoundingClientRect().right), hit: !!hit && b.contains(hit), docH: document.documentElement.scrollHeight }; });
+  ok(landSheet.top >= landSheet.resBottom && landSheet.left >= landSheet.mapRight && landSheet.hit && landSheet.docH <= 341, '664x340: a sheet opens beside the map, under the resource bar, with its button reachable ' + JSON.stringify(landSheet));
+  await p3.evaluate(() => { ui.sheet = false; state.run.exp = 3; ui.mapN = 0; render(); }); await settle(p3);
+  land = await mapFit();
+  ok(land.pans && land.tile[0] === 40 && land.tile[1] === 40 && onScreen(land), '664x340, 11x11 map: tiles stay 40px square and the map pans ' + JSON.stringify({ frame: land.frame, grid: land.grid }));
+  // the strip under the map has one height whatever is selected, so the map never jumps; a tall phone gives the rest to the map
+  await p3.setViewportSize({ width: 390, height: 844 }); await fresh(p3); await settle(p3);
+  const idle = await mapFit(); await p3.evaluate(() => { ui.barTapAt = -Infinity; }); await p3.tap('#bbrow .bb[data-id="farm"]'); await settle(p3);
+  const pick = await mapFit(); await p3.tap('.tile.hall'); await settle(p3);
+  const tsel = await mapFit();
+  ok(idle.strip.h <= 100 && pick.strip.h === idle.strip.h && tsel.strip.h === idle.strip.h && pick.map.top === idle.map.top && tsel.map.top === idle.map.top && tsel.frame[0] === idle.frame[0] && !idle.pans && onScreen(tsel),
+    '390x844: the strip is ' + idle.strip.h + 'px idle, with a building picked and with a tile selected, and the map does not move ' + JSON.stringify({ map: idle.map, strip: idle.strip }));
+  await p3.evaluate(() => { ui.sel = {}; state.run.exp = 3; ui.mapN = 0; render(); }); await settle(p3);
+  const tall = await mapFit();
+  ok(tall.frame[1] >= 480 && tall.frame[1] > tall.frame[0] && tall.grid[1] <= tall.frame[1] && onScreen(tall), '390x844, 11x11 map: the frame is taller than wide (' + tall.frame.join('x') + ') and shows every row; only sideways panning is left');
   await p3.setViewportSize({ width: 390, height: 664 }); await settle(p3);
   await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; ui.mapN = 0; render(); }); await settle(p3);
   // S1: a resize (address bar showing or hiding) must not recentre a panned map
