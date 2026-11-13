@@ -40,7 +40,8 @@ header h1 { margin: 0; font-size: 26px; letter-spacing: 2px; color: var(--gold);
   background: var(--parch); border: 1px solid #a88f5a; border-radius: 6px;
   padding: 3px 9px; display: flex; align-items: baseline; gap: 6px; white-space: nowrap;
 }
-.chip b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.chip b { font-size: 16px; font-variant-numeric: tabular-nums; margin-left: 5px; }
+.chip.timed b, .chip small b { margin-left: 0; font-size: inherit; }
 .chip small { color: var(--good); font-variant-numeric: tabular-nums; }
 .chip small.neg, .chip.bad b { color: var(--bad); }
 .chip.bad { background: #f3c9b9; animation: pulse 1s infinite; }
@@ -56,7 +57,9 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 #mapwrap { position: relative; padding: 8px; background: #5a4326; border: 3px solid #1c140c; border-radius: 10px; box-shadow: 0 6px 20px #000a, inset 0 0 0 2px #7b5f38; }
 /* Tiles never shrink below a tappable 40px; a bigger map pans inside its frame instead. */
 #mapwrap { scroll-margin: 60px 0 110px; }
-#mapscroll { aspect-ratio: 1; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; border-radius: 5px; }
+#mapscroll { aspect-ratio: 1; border-radius: 5px; }
+/* Set by ui.js only when the grid is wider than the frame. Scrolling chains to the page at the map's edges. */
+#mapscroll.pans { overflow: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
 #map { display: grid; grid-template-columns: repeat(var(--n), minmax(40px, 1fr)); gap: 3px; padding: 2px; }
 #maphint { text-align: center; color: var(--parch2); font-size: 12px; font-style: italic; padding-top: 4px; opacity: .8; }
 #maphint[hidden] { display: none; }
@@ -104,6 +107,8 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 .stat { font-size: 14px; }
 .stat b { color: var(--good); }
 .warn { color: var(--bad); }
+.warn.small { font-size: 12px; margin: 3px 0 0; font-family: system-ui, sans-serif; }
+.chip small i { font-style: normal; }
 .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
 #tabs { display: flex; gap: 4px; }
@@ -170,9 +175,14 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   /* Resource bar: one compact row, rate stacked under the amount; scrolls sideways if it ever overflows. */
   #res { flex-wrap: nowrap; overflow-x: auto; gap: 2px; padding: 4px; scrollbar-width: none; }
   #res::-webkit-scrollbar { display: none; }
-  .chip { flex: 1 0 auto; flex-direction: column; align-items: center; gap: 0; padding: 2px 3px; font-size: 11px; line-height: 1.2; }
-  .chip b { font-size: 11.5px; }
+  .chip { flex: 1 0 auto; flex-direction: column; align-items: center; gap: 0; padding: 2px; font-size: 11px; line-height: 1.2; }
+  .chip b { font-size: 11px; margin-left: 1px; }
   .chip small { font-size: 10px; }
+  .chip small i { display: none; }            /* rates drop the "/s" to save width */
+  .chip.timed { flex: 0 0 auto; }
+  .chip.timed small { color: var(--ink); }
+  /* If the row still overflows, fade the right edge to show there is more to scroll to. */
+  #res.more { -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); mask-image: linear-gradient(to right, #000 88%, transparent); }
 
   /* Build bar: fixed to the bottom so the map stays in view while picking and placing. */
   #buildbar {
@@ -194,4 +204,10 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb small { font-size: 10px; line-height: 1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bb.on { background: #ffe58a; border-color: var(--red); box-shadow: 0 0 8px #ffd84a; }
   .bb.cant { opacity: .6; }
+  .bb.act { flex: 0 0 74px; }
+  .bb.act.wide { flex: 1 1 auto; min-width: 0; background: var(--red); border-color: #4d0e0e; color: #fff; font-size: 14px; }
+  .bb.act.wide.cant { background: #9c8a7a; border-color: #6b5e52; opacity: 1; }
+  .bb.act.wide .cost { font-size: 12px; white-space: nowrap; }
+  .bb.act.wide .cost .lack { color: #ffd0c0; }
+  .bb.act .ic { font-size: 20px; }
 }

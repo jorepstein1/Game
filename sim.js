@@ -62,7 +62,7 @@ function fmt(n) {
   if (n < 1000) s = String(Math.floor(n));
   else { const e = Math.floor(Math.log10(n) / 3);
     if (e >= NUMBER_SUFFIX.length) s = n.toExponential(2);
-    else { const v = n / 10 ** (e * 3); s = (v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : v.toFixed(0)) + NUMBER_SUFFIX[e]; } }
+    else { const v = n / 10 ** (e * 3); s = (v < 9.995 ? v.toFixed(2) : v < 99.95 ? v.toFixed(1) : Math.min(999, Math.round(v))) + NUMBER_SUFFIX[e]; } } // never "1000M"
   return (neg ? '-' : '') + s;
 }
 const fmtRate = n => (n >= 0 ? '+' : '-') + (Math.abs(n) < 100 ? Math.abs(n).toFixed(1) : fmt(Math.abs(n))) + '/s';
@@ -104,7 +104,7 @@ const TILE_KINDS = {
     icon: t => BUILDINGS[t.id].icon,
     housing: t => (BUILDINGS[t.id].house || 0) * levelMult(t),
     jobs: t => (BUILDINGS[t.id].work || 0) * t.level,
-    upgradeCost: t => scaleCost(BUILDINGS[t.id].cost, UPGRADE_BASE * Math.pow(UPGRADE_GROWTH, t.level)),
+    upgradeCost: t => scaleCost(BUILDINGS[t.id].cost, UPGRADE_BASE * Math.pow(BUILDINGS[t.id].upgradeGrowth || UPGRADE_GROWTH, t.level)),
   },
 };
 const tileKind = t => TILE_KINDS[t.kind];
@@ -152,6 +152,16 @@ const repBonus = id => 1 + repeatable(id).per * repLevel(id);
 const repCost = r => scaleCost(r.cost, Math.pow(r.growth, repLevel(r.id)));
 
 const foodPerPop = pop => FOOD_PER_POP * (1 + (pop / FOOD_CROWD) ** 2);
+const upkeep = pop => pop * foodPerPop(pop);
+// Base food income if the town held `pop` villagers (used to preview what more housing would do).
+function foodRateAt(pop) { const keep = state.run.pop; state.run.pop = pop; const r = compute().base.food; state.run.pop = keep; return r; }
+// Largest population between lo and hi whose upkeep still fits in `budget` food per second.
+function sustainablePop(lo, hi, budget) {
+  if (upkeep(hi) <= budget) return hi;
+  if (upkeep(lo) > budget) return lo;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (upkeep(mid) <= budget) lo = mid; else hi = mid; }
+  return lo;
+}
 const festivalLeft = () => Math.max(0, state.run.buffUntil - state.run.clock);
 const festivalOn = () => festivalLeft() > 0;
 
@@ -174,6 +184,7 @@ function compute() {
     if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * t.level;
     tiles[k] = { adj: adjBonus(t.id, x, y), levelMult: levelMult(t), mult: 0 };
   }
+  const rawCap = cap;
   cap = Math.floor(cap * repBonus('housing'));
   const staff = need ? Math.min(1, run.pop / need) : 1;
   const mult = (1 + HALL_BONUS * (hallLevel() - 1)) * (1 + CROWN_BONUS * state.meta.crowns) * (1 + glob * staff) * repBonus('prod');
@@ -186,9 +197,9 @@ function compute() {
     const live = tiles[k].mult = m * festival * (def.work && run.starving && !def.out.food ? STARVE_PENALTY : 1);
     for (const r in def.out) { base[r] += def.out[r] * m; rates[r] += def.out[r] * live; }
   }
-  const eaten = run.pop * foodPerPop(run.pop);
+  const eaten = upkeep(run.pop);
   base.food -= eaten; rates.food -= eaten;
-  return { cap, need, staff, mult, festival, base, rates, eaten, tiles };
+  return { cap, rawCap, need, staff, mult, festival, base, rates, eaten, tiles };
 }
 
 // Advance the city by dt seconds. Pure rules: no rendering, no wall clock.
@@ -198,7 +209,18 @@ function stepCity(dt) {
   for (const r in calc.rates) run.res[r] = Math.max(0, run.res[r] + calc.rates[r] * dt);
   earnGold(Math.max(0, calc.rates.gold * dt));
   run.starving = run.res.food <= 0 && calc.rates.food < 0;
-  if (run.pop < calc.cap && !run.starving) run.pop = Math.min(calc.cap, run.pop + Math.max(0.2, calc.cap * 0.02) * dt);
+  // Population follows food as well as housing, so a hungry town recovers on its own:
+  // villagers leave while it starves (down to what the farms can feed), and new ones only move in
+  // while the food income, or a healthy stockpile, can carry them.
+  const produced = calc.rates.food + calc.eaten; // food made per second before upkeep
+  if (run.starving) {
+    const floor = sustainablePop(Math.min(run.pop, START_POP), run.pop, produced);
+    run.pop = Math.max(floor, run.pop - Math.max(0.2, run.pop * STARVE_LOSS) * dt);
+  } else if (run.pop < calc.cap) {
+    let target = Math.min(calc.cap, run.pop + Math.max(0.2, calc.cap * 0.02) * dt);
+    if (run.res.food <= calc.eaten * FOOD_RESERVE_SECONDS) target = sustainablePop(run.pop, target, produced);
+    run.pop = target;
+  }
   if (run.pop > calc.cap) run.pop = calc.cap;
   run.clock += dt;
 }
@@ -356,13 +378,14 @@ function upgradeLegacySave(o) {
 // Returns { state, notes }. Throws if the data is not a save at all (or is from a newer version).
 function sanitizeSave(raw, now) {
   if (!isObj(raw)) throw new Error('not a save');
-  let o = raw; const notes = [];
-  if (o.v === undefined && isObj(o.tiles) && isObj(o.res)) o = upgradeLegacySave(o);
+  let o = raw; const notes = [], legacy = o.v === undefined && isObj(o.tiles) && isObj(o.res);
+  if (legacy) o = upgradeLegacySave(o);
   const v = int(o.v, 0, 0, 1e9);
   if (!v || !isObj(o.meta) || !isObj(o.run)) throw new Error('not a save');
   if (v > SAVE_VERSION) throw new Error('save is from a newer version');
   // Migrations between later versions go here: if (v < 3) { ... }
 
+  if (legacy) notes.push('This kingdom predates the rebalance: cottages, farms and mills now gain a flat amount per level and big towns eat more, so it needs more housing and food than before.');
   const s = newState(now), meta = s.meta, run = s.run, m = o.meta, r = o.run;
   s.last = num(o.last, now, 0, now);
 

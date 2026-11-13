@@ -1,0 +1,210 @@
+'use strict';
+// Rules and save-format tests. No dependencies: node tests/sim.test.js
+const assert = require('assert');
+const { loadSim } = require('./harness');
+
+let passed = 0, failed = 0;
+function test(name, fn) {
+  const sim = loadSim(); sim.startNewGame(0);
+  try { fn(sim); passed++; console.log('PASS ' + name); }
+  catch (e) { failed++; console.log('FAIL ' + name + '\n     ' + String(e.message).split('\n').join('\n     ')); }
+}
+const plain = v => JSON.parse(JSON.stringify(v)); // objects from the vm context have foreign prototypes
+const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg || ''} expected ${b} ± ${tol}, got ${a}`);
+// A small working town on a known map.
+function town(sim, levels) {
+  const s = sim.newState(0); s.run = sim.newRun(12345); sim.setState(s);
+  const run = sim.state.run; run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 };
+  const free = [];
+  for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (run.terrain[x][y] === 'plain' && !(x === 5 && y === 5)) free.push(x + ',' + y);
+  for (const id of ['cottage', 'cottage', 'farm', 'lumber', 'quarry']) assert.ok(sim.build(free.shift(), id).ok, 'build ' + id);
+  if (levels) for (const k in run.tiles) for (let i = 1; i < levels; i++) sim.upgrade(k);
+  sim.setState(sim.state);
+  return free;
+}
+
+test('crownsFor: fourth root of lifetime gold / 500, floored', sim => {
+  assert.strictEqual(sim.crownsFor(0), 0);
+  assert.strictEqual(sim.crownsFor(-5), 0);
+  assert.strictEqual(sim.crownsFor(499), 0);
+  assert.strictEqual(sim.crownsFor(500), 1);
+  assert.strictEqual(sim.crownsFor(500 * 16), 2);
+  assert.strictEqual(sim.crownsFor(1.36e6), 7);
+  assert.strictEqual(sim.crownsFor(500 * 10 ** 4), 10);
+  assert.ok(sim.crownsFor(1e12) - sim.crownsFor(1e11) < sim.crownsFor(1e11), 'diminishing: 10× the gold less than doubles the Crowns');
+});
+
+test('pendingCrowns: lifetime-based, minus Crowns already awarded, plus Monuments', sim => {
+  sim.state.meta.stats.totalGold = 1.36e6;
+  assert.strictEqual(sim.pendingCrowns(), 7);
+  assert.strictEqual(sim.canPrestige(), false, 'needs a Castle');
+  sim.state.run.tiles[sim.HALL_KEY].level = 4; sim.state.run.repeatables.monument = 2;
+  assert.strictEqual(sim.pendingCrowns(), 9);
+  const r = sim.prestige();
+  assert.ok(r.ok); assert.strictEqual(r.crowns, 9);
+  assert.strictEqual(sim.state.meta.crowns, 9); assert.strictEqual(sim.state.meta.bonusCrowns, 2);
+  assert.strictEqual(sim.pendingCrowns(), 0, 'the same lifetime gold is not paid twice');
+  assert.strictEqual(sim.hallLevel(), 1); assert.strictEqual(Object.keys(sim.state.run.tiles).length, 1);
+  assert.strictEqual(sim.state.meta.stats.totalGold, 1.36e6, 'meta survives abdication');
+});
+
+test('creditAway: caps at 8h, 24h with Stewardship; reports the cap', sim => {
+  town(sim);
+  let r = sim.creditAway(20 * 3600);
+  assert.strictEqual(r.credited, 8 * 3600); assert.strictEqual(r.capped, true); assert.strictEqual(r.capHours, 8); assert.strictEqual(r.away, 20 * 3600);
+  near(sim.state.run.clock, 8 * 3600, 1e-6, 'clock');
+  r = sim.creditAway(30);
+  assert.strictEqual(r.credited, 30); assert.strictEqual(r.capped, false);
+  sim.state.run.research.steward = 1;
+  r = sim.creditAway(30 * 3600);
+  assert.strictEqual(r.credited, 24 * 3600); assert.strictEqual(r.capHours, 24);
+  for (const bad of [-5, NaN, Infinity, undefined]) assert.strictEqual(sim.creditAway(bad).credited, 0, 'bad gap ' + bad);
+});
+
+test('demolish refunds half of the build price and every upgrade', sim => {
+  town(sim);
+  const run = sim.state.run, key = Object.keys(run.tiles).find(k => run.tiles[k].id === 'quarry');
+  const paid = plain(sim.buildCost('quarry')); // price of a second quarry...
+  const first = { gold: 60, wood: 40 };        // ...the first cost the base price
+  let spent = Object.assign({}, first);
+  for (let i = 0; i < 7; i++) { const c = plain(sim.upgradeCost(run.tiles[key])); for (const r in c) spent[r] += c[r]; assert.ok(sim.upgrade(key).ok); }
+  assert.strictEqual(run.tiles[key].level, 8);
+  assert.deepStrictEqual(plain(sim.spentOn(run.tiles[key])), spent);
+  assert.ok(paid.gold > first.gold);
+  const before = plain(run.res), refund = plain(sim.demolishRefund(run.tiles[key]));
+  assert.deepStrictEqual(refund, { gold: Math.floor(spent.gold / 2), wood: Math.floor(spent.wood / 2) });
+  assert.ok(refund.gold > 100 * first.gold, 'upgrades dominate the refund');
+  assert.ok(sim.demolish(key).ok); assert.strictEqual(run.tiles[key], undefined);
+  assert.strictEqual(run.res.gold, before.gold + refund.gold);
+  assert.strictEqual(sim.demolish(sim.HALL_KEY).ok, false, 'the hall cannot be demolished');
+});
+
+test('sanitizeSave rejects things that are not saves', sim => {
+  for (const bad of [null, 5, 'x', [], {}, { v: 2 }, { v: 2, meta: 5, run: [] }, { v: 99, meta: {}, run: {} }, { v: '<b>', meta: {}, run: {} }])
+    assert.throws(() => sim.sanitizeSave(bad, 1000), undefined, JSON.stringify(bad));
+  const before = sim.state;
+  assert.throws(() => sim.adoptSave({ v: 99, meta: {}, run: {} }, 1000));
+  assert.strictEqual(sim.state, before, 'a rejected save leaves the current game in place');
+});
+
+test('sanitizeSave coerces and clamps every field', sim => {
+  const evil = { v: 2, last: '<img src=x onerror=alert(1)>', extra: '<script>',
+    meta: { crowns: '<img src=x onerror=alert(1)>', bonusCrowns: 1e9, decree: '<script>', stats: { totalGold: '"><svg>', clicks: -4, built: 3.7, bogus: 1 } },
+    run: { seed: 'x', exp: 9, pop: '<b>', cleared: 1e9, res: { gold: '<img>', food: -5, wood: Infinity, stone: NaN, iron: '12.5', plutonium: 9 }, terrain: [['<img>']],
+      tiles: { '5,5': { kind: 'hall', id: 'hall', level: 1e9 }, '4,5': { kind: 'building', id: '<img src=x>', level: 2 }, '6,5': { kind: 'building', id: 'constructor', level: 2 },
+        '"><img>': { kind: 'building', id: 'farm', level: 1 }, '5,4': { kind: 'building', id: 'farm', level: '<i>' }, '0,0': { kind: 'building', id: 'farm', level: -3 }, '99,99': { kind: 'building', id: 'farm', level: 1 }, '5,6': 7 },
+      research: { axes: 1, '<img>': 1, tithes: 0 }, repeatables: { prod: '<img>', food: 1e9, bogus: 3 }, buffUntil: 1e99, clock: 5, starving: 'yes' } };
+  const { state: s, notes } = sim.sanitizeSave(evil, 1000);
+  assert.deepStrictEqual(Object.keys(s).sort(), ['last', 'meta', 'run', 'v']);
+  assert.strictEqual(s.last, 1000);
+  assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, null);
+  assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, merchants: 0, prestiges: 0, built: 3, started: 1000 });
+  assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
+  assert.deepStrictEqual(plain(s.run.res), { gold: 50, food: 0, wood: 30, stone: 0, iron: 12.5 });
+  assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['0,0', '5,4', '5,5']);
+  assert.strictEqual(s.run.tiles['5,5'].level, sim.MAX_LEVEL); assert.strictEqual(s.run.tiles['5,5'].kind, 'hall');
+  assert.strictEqual(s.run.tiles['5,4'].level, 1); assert.strictEqual(s.run.tiles['0,0'].level, 1);
+  assert.deepStrictEqual(plain(s.run.research), { axes: 1 });
+  assert.deepStrictEqual(plain(s.run.repeatables), { food: sim.MAX_REPEATABLE });
+  assert.strictEqual(s.run.buffUntil, 5 + sim.FESTIVAL_SECONDS);
+  assert.strictEqual(s.run.terrain.length, 11); assert.ok(s.run.terrain.every(col => col.length === 11 && col.every(c => c in sim.TERRAIN)));
+  assert.strictEqual(s.run.terrain[5][4], 'plain', 'buildings always stand on open plots');
+  assert.ok(notes.some(n => /5 buildings in this save were not recognised/.test(n)), notes.join('|'));
+  assert.ok(!/[<>]/.test(JSON.stringify(s)), 'no markup survives');
+  sim.setState(s); sim.advance(10);
+  for (const r in sim.calc.rates) assert.ok(Number.isFinite(sim.calc.rates[r]) && Number.isFinite(sim.state.run.res[r]), r + ' stays finite');
+});
+
+test('a save round-trips unchanged, including through export text', sim => {
+  town(sim, 3); sim.advance(120); sim.state.last = 500;
+  const json = sim.serialize(), back = sim.sanitizeSave(JSON.parse(json), 1000);
+  assert.strictEqual(JSON.stringify(back.state), json); assert.strictEqual(back.notes.length, 0);
+  assert.strictEqual(sim.decodeSave(sim.encodeSave(json)), json);
+  const odd = JSON.stringify({ note: 'żółć ✓ 👑' });
+  assert.strictEqual(sim.decodeSave(sim.encodeSave(odd)), odd, 'non-Latin-1 text');
+  assert.strictEqual(sim.decodeSave(btoa('{"seed":1}')), '{"seed":1}', 'version-1 exports still decode');
+});
+
+test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the seed', sim => {
+  const v1 = { seed: 12345, res: { gold: 5e6, food: 1e5, wood: 1000, stone: 1000, iron: 1000 }, pop: 400, exp: 2,
+    tiles: { '5,5': { b: 'hall', l: 4 }, '5,4': { b: 'cottage', l: 8 }, '4,5': { b: 'farm', l: 6 }, '6,5': { b: 'smith', l: 3 }, '5,6': { b: 'nonsense', l: 2 } },
+    research: { axes: 1, tithes: 1 }, starving: false, buffUntil: 1.7e12, quest: 19, crowns: 19, runGold: 3e6, last: 900,
+    stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: 100 } };
+  const { state: s, notes } = sim.sanitizeSave(v1, 1000);
+  assert.strictEqual(s.v, 2); assert.strictEqual(s.last, 900);
+  assert.strictEqual(s.meta.decree, 'dynasty', 'index 19 of the old order');
+  assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 19 - sim.crownsFor(1.02e7));
+  assert.deepStrictEqual(plain(s.run.tiles), { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'cottage', level: 8 },
+    '4,5': { kind: 'building', id: 'farm', level: 6 }, '6,5': { kind: 'building', id: 'smith', level: 3 } });
+  const fresh = plain(sim.genTerrain(12345)), got = plain(s.run.terrain);
+  for (const k in s.run.tiles) { const [x, y] = k.split(',').map(Number); fresh[x][y] = 'plain'; }
+  assert.deepStrictEqual(got, fresh);
+  assert.strictEqual(s.run.buffUntil, 0, 'wall-clock festival times are dropped');
+  assert.strictEqual(s.run.gold, 3e6); assert.deepStrictEqual(plain(s.run.research), { axes: 1, tithes: 1 });
+  assert.ok(notes.some(n => /predates the rebalance/.test(n)) && notes.some(n => /1 building in this save was not recognised/.test(n)), notes.join('|'));
+  sim.setState(s); assert.strictEqual(sim.pendingCrowns(), 0);
+  assert.strictEqual(sim.sanitizeSave({ seed: 1, res: {}, tiles: {}, quest: 24 }, 1000).state.meta.decree, null, 'a finished v1 chain stays finished');
+});
+
+test('starvation is recoverable: villagers leave until the farms can feed the rest', sim => {
+  town(sim, 4);
+  const run = sim.state.run; run.res.food = 0;
+  const farm = Object.keys(run.tiles).find(k => run.tiles[k].id === 'farm');
+  for (const k in run.tiles) if (run.tiles[k].id === 'cottage') run.tiles[k].level = 60; // far more housing than food
+  run.pop = 500; sim.setState(sim.state);
+  assert.ok(sim.calc.rates.food < 0);
+  sim.advance(5); assert.strictEqual(run.starving, true);
+  sim.advance(1800);
+  assert.strictEqual(run.starving, false, 'no longer starving');
+  assert.ok(run.pop < 500 && run.pop > sim.START_POP, 'population settled at ' + run.pop.toFixed(1));
+  near(sim.calc.rates.food, 0, 1, 'food income settles at break-even:');
+  const settled = run.pop; sim.advance(600);
+  near(run.pop, settled, 1, 'and stays there:');
+  for (let i = 0; i < 3; i++) sim.upgrade(farm);
+  sim.advance(600);
+  assert.ok(run.pop > settled + 5, 'more food lets the town grow again: ' + run.pop.toFixed(1));
+  assert.strictEqual(run.starving, false);
+});
+
+test('villagers do not move in beyond what the food income can carry', sim => {
+  town(sim);
+  const run = sim.state.run; run.res.food = 0;
+  for (const k in run.tiles) if (run.tiles[k].id === 'cottage') run.tiles[k].level = 40;
+  sim.advance(900);
+  assert.strictEqual(run.starving, false);
+  assert.ok(run.pop < sim.calc.cap - 10 && sim.calc.rates.food >= -1e-6, `pop ${run.pop.toFixed(1)} of ${sim.calc.cap}, food ${sim.calc.rates.food.toFixed(3)}/s`);
+  assert.ok(sim.foodRateAt(sim.calc.cap) < 0, 'the full-housing preview shows the deficit');
+});
+
+test('linear buildings: flat gain per level and gentler upgrade prices', sim => {
+  town(sim);
+  const run = sim.state.run, cottage = Object.keys(run.tiles).find(k => run.tiles[k].id === 'cottage'), quarry = Object.keys(run.tiles).find(k => run.tiles[k].id === 'quarry');
+  const cap0 = sim.calc.cap; sim.upgrade(cottage); sim.setState(sim.state); assert.strictEqual(sim.calc.cap - cap0, 5);
+  const c2 = sim.upgradeCost(run.tiles[cottage]).wood; sim.upgrade(cottage); const c3 = sim.upgradeCost(run.tiles[cottage]).wood;
+  near(c3 / c2, sim.LINEAR_UPGRADE_GROWTH, 0.05, 'cottage step');
+  const q1 = sim.upgradeCost(run.tiles[quarry]).gold; sim.upgrade(quarry); const q2 = sim.upgradeCost(run.tiles[quarry]).gold;
+  near(q2 / q1, sim.UPGRADE_GROWTH, 0.05, 'quarry step');
+});
+
+test('base rates exclude the festival; taps and merchant gifts use base rates', sim => {
+  town(sim, 3); sim.advance(60);
+  const base = sim.calc.base.gold, tap = sim.clickValue();
+  sim.state.run.buffUntil = sim.state.run.clock + 60; sim.setState(sim.state);
+  near(sim.calc.rates.gold, base * sim.FESTIVAL_MULT, 1e-6, 'live rate');
+  near(sim.calc.base.gold, base, 1e-9, 'base rate'); assert.strictEqual(sim.clickValue(), tap);
+  const gold = sim.state.run.res.gold; sim.merchantVisit(0.1);
+  near(sim.state.run.res.gold - gold, Math.max(30, base * sim.MERCHANT_SECONDS), 1e-6, 'merchant gold');
+  sim.advance(61); assert.strictEqual(sim.festivalOn(), false, 'festival ends on the run clock');
+});
+
+test('decrees advance by id', sim => {
+  assert.strictEqual(sim.state.meta.decree, 'roof'); assert.strictEqual(sim.claimDecree().ok, false);
+  town(sim);
+  assert.ok(sim.claimDecree().ok); assert.strictEqual(sim.state.meta.decree, 'timber');
+  assert.ok(sim.claimDecree().ok); assert.strictEqual(sim.state.meta.decree, 'bread');
+  assert.strictEqual(sim.decreesFulfilled(), 2);
+  assert.strictEqual(sim.LEGACY_DECREE_ORDER.filter(id => !sim.DECREES.some(d => d.id === id)).length, 0, 'every v1 decree still exists');
+});
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

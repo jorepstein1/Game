@@ -10,6 +10,8 @@ const TAB_ID = Date.now().toString(36) + Math.random().toString(36).slice(2);
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+let lastTick = Date.now(); // wall-clock time the simulation has been advanced to
+
 // UI-only state: nothing here is saved.
 const ui = {
   screen: 'city',
@@ -62,17 +64,20 @@ const tileAt = key => state.run.tiles[key];
 function renderResources() {
   const run = state.run, res = run.res;
   let h = '';
-  if (ui.merchant.left > 0) h += `<button class="chip merchant" data-act="showMerchant" title="A merchant is visiting: tap to find them on the map"><span>🐪 <b>${Math.ceil(ui.merchant.left)}s</b></span><small>merchant</small></button>`;
+  // Timed chips lead the row so they are never the ones pushed off a narrow screen.
+  if (ui.merchant.left > 0) h += `<button class="chip merchant timed" data-act="showMerchant" title="A merchant is visiting: tap to find them on the map"><span>🐪</span><small><b>${Math.ceil(ui.merchant.left)}s</b></small></button>`;
+  if (festivalOn()) h += `<div class="chip buff timed" title="Festival: all production ×${FESTIVAL_MULT}"><span>🎪×${FESTIVAL_MULT}</span><small><b>${Math.ceil(festivalLeft())}s</b></small></div>`;
   for (const r in RESOURCES) {
     if (r === 'iron' && hallLevel() < 3 && !res.iron) continue;
     if (r === 'stone' && !res.stone && !count('quarry')) continue;
     const bad = r === 'food' && run.starving;
-    h += `<div class="chip${bad ? ' bad' : ''}" title="${RESOURCES[r].name}"><span>${RESOURCES[r].icon} <b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r])}</small></div>`;
+    h += `<div class="chip${bad ? ' bad' : ''}" title="${RESOURCES[r].name}"><span>${RESOURCES[r].icon}<b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r]).replace('/s', '<i>/s</i>')}</small></div>`;
   }
-  h += `<div class="chip${calc.staff < 1 ? ' bad' : ''}" title="Population / housing — jobs to fill. Food upkeep: ${foodPerPop(run.pop).toFixed(2)} per villager per second"><span>👥 <b>${fmt(run.pop)}/${fmt(calc.cap)}</b></span><small class="${calc.staff < 1 ? 'neg' : ''}">${fmt(calc.need)} jobs</small></div>`;
-  if (state.meta.crowns) h += `<div class="chip crown" title="Crowns: ${pct(CROWN_BONUS)} production each"><span>👑 <b>${fmt(state.meta.crowns)}</b></span></div>`;
-  if (festivalOn()) h += `<div class="chip buff"><span>🎪 ×${FESTIVAL_MULT} ${Math.ceil(festivalLeft())}s</span></div>`;
+  const full = foodRateAt(calc.cap), hungry = run.pop < calc.cap - 0.5 && full < 0 && !run.starving;
+  h += `<div class="chip${calc.staff < 1 ? ' bad' : ''}" title="Population of housing${hungry ? ' (short of food, so no one is moving in)' : ''}. Jobs to fill: ${fmt(calc.need)}${calc.staff < 1 ? ' (understaffed)' : ''}. Food upkeep: ${foodPerPop(run.pop).toFixed(2)} per villager per second. At full housing: food ${fmtRate(full)}"><span>👥<b>${fmt(run.pop)}</b></span><small class="${calc.staff < 1 || hungry ? 'neg' : ''}">of ${fmt(calc.cap)}</small></div>`;
+  if (state.meta.crowns) h += `<div class="chip crown timed" title="Crowns: ${pct(CROWN_BONUS)} production each"><span>👑</span><small><b>${fmt(state.meta.crowns)}</b></small></div>`;
   patch($('res'), h);
+  const bar = $('res'); bar.classList.toggle('more', bar.scrollWidth > bar.clientWidth + 1 && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
   patch($('clickval'), '+' + fmt(clickValue()));
   patch($('subtitle'), esc(hallName(hallLevel()) + ' of ' + Math.floor(run.pop) + ' souls'));
 }
@@ -103,8 +108,11 @@ function renderMap() {
   }
   patch(m, h); ui.popKey = null;
   const sc = $('mapscroll');
+  // Only a map too big for its frame becomes a scroll container; smaller ones let a drag scroll the page.
+  const pans = n * 40 + (n - 1) * 3 + 4 > sc.clientWidth + 1;
+  sc.classList.toggle('pans', pans);
   if (n !== ui.mapN) { ui.mapN = n; sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2; sc.scrollTop = (sc.scrollHeight - sc.clientHeight) / 2; }
-  $('maphint').hidden = sc.scrollWidth <= sc.clientWidth + 1;
+  $('maphint').hidden = !pans;
 }
 
 function buildingStats(id) {
@@ -117,6 +125,18 @@ function buildingStats(id) {
   for (const a in adj.building || {}) h += `<p class="stat"><b>${pct(adj.building[a])}</b> per adjacent ${BUILDINGS[a].name} ${BUILDINGS[a].icon} (per level)</p>`;
   for (const o of BUILD_ORDER) if (boosts(o, id)) h += `<p class="stat">Boosts adjacent ${BUILDINGS[o].name}s ${BUILDINGS[o].icon} by <b>${pct(BUILDINGS[o].adj.building[id])}</b> per level</p>`;
   return h;
+}
+// What one more level gives, for the Upgrade button: "×2", or the flat amount for linear buildings.
+function upgradeGain(k, t) {
+  const d = BUILDINGS[t.id], info = calc.tiles[k];
+  if (!d.linear) return '×2';
+  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' 🏠';
+  return Object.keys(d.out).map(r => '+' + (d.out[r] * info.mult / info.levelMult).toFixed(1) + ' ' + RESOURCES[r].icon + '/s').join(' ');
+}
+// Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
+function housingWarning(extra) {
+  const rate = foodRateAt(calc.cap + extra);
+  return rate < 0 ? `<p class="warn small">⚠ Not enough food to fill it: at full housing food would be ${fmtRate(rate)}. Villagers only move in while they can be fed.</p>` : '';
 }
 function renderInspector() {
   const sel = ui.sel; let h;
@@ -141,8 +161,9 @@ function renderInspector() {
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * t.level * calc.staff)}</b></p>`;
       if (d.adj) h += `<p class="stat">Adjacency bonus: <b>${pct(info.adj)}</b></p>`;
       if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} 👥${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed — build cottages)</span>` : ''}</p>`;
-      h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${d.linear ? 'to level ' + (t.level + 1) : '×2'} ${costHTML(c)}</button>
+      h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${upgradeGain(k, t)} ${costHTML(c)}</button>
         <button class="btn alt" data-act="demolish" data-id="${k}">Demolish <span class="cost">refunds</span> ${costHTML(demolishRefund(t), true)}</button></div>`;
+      if (d.house) h += housingWarning(d.house * repBonus('housing'));
     }
   } else if (sel.tile) {
     const [x, y] = xy(sel.tile), tr = state.run.terrain[x][y];
@@ -176,7 +197,7 @@ function renderPanel() {
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
       const c = buildCost(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
       h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">🗺️</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
@@ -191,7 +212,7 @@ function renderPanel() {
     if (reps.length) h += '<hr><h3>Repeatable upgrades</h3><p class="muted">Each level costs more than the last. Levels reset when you found a new kingdom.</p>';
     for (const r of reps) { const c = repCost(r);
       h += `<button class="card${canAfford(c) ? '' : ' cant'}" data-act="rep" data-id="${r.id}">
-      <div class="ic">🔁</div><div class="bd"><div class="nm">${r.name} <span>level ${repLevel(r.id)}</span></div><div class="muted">${r.desc}</div>${costHTML(c)}</div></button>`; }
+      <div class="ic">🔁</div><div class="bd"><div class="nm">${r.name} <span>level ${repLevel(r.id)}</span></div><div class="muted">${r.desc}</div>${costHTML(c)}${r.id === 'housing' ? housingWarning(Math.floor(calc.rawCap * (repBonus('housing') + r.per)) - calc.cap) : ''}</div></button>`; }
     if (owned.length) h += '<hr><p class="muted">Known: ' + owned.map(r => r.name).join(', ') + '</p>';
   } else if (ui.tab === 'decrees') {
     const d = currentDecree();
@@ -222,6 +243,22 @@ function renderPanel() {
 // Fixed bottom bar on narrow screens (hidden by CSS on desktop): pick a building without scrolling away from the map.
 function renderBuildBar() {
   let h = '';
+  const k = ui.sel.tile, t = k && tileAt(k), tr = k && !t ? state.run.terrain[xy(k)[0]][xy(k)[1]] : null;
+  const close = '<button class="bb act close" data-act="deselect" aria-label="Close"><span class="ic">✕</span><small>Close</small></button>';
+  if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
+    const kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
+    h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}</button>`;
+    if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">🧨</span><small>Demolish</small></button>`;
+    patch($('bbrow'), h + close);
+    patch($('bbinfo'), `<b>${kind.icon(t)} ${kind.name(t)}</b> level ${t.level}`);
+    return;
+  }
+  if (tr && tr !== 'plain') {
+    const c = clearCost();
+    patch($('bbrow'), `<button class="bb act wide${canAfford(c) ? '' : ' cant'}" data-act="clear" data-id="${k}"><b>Clear land</b>${costHTML(c)}</button>` + close);
+    patch($('bbinfo'), `<b>${TERRAIN[tr].icon} ${TERRAIN[tr].name}</b> <span class="hint">nothing can be built here</span>`);
+    return;
+  }
   for (const id of BUILD_ORDER) {
     const d = BUILDINGS[id]; if (d.hall > hallLevel()) continue;
     h += `<button class="bb${ui.sel.build === id ? ' on' : ''}${canAfford(buildCost(id)) ? '' : ' cant'}" data-act="pick" data-id="${id}" title="${d.name}"><span class="ic">${d.icon}</span><small>${d.name}</small></button>`;
@@ -285,7 +322,7 @@ const MODAL_ACTIONS = {
   doimport() {
     try {
       const notes = adoptSave(JSON.parse(decodeSave($('imp').value)), Date.now());
-      state.last = Date.now(); ui.sel = {}; ui.mapN = 0;
+      lastTick = Date.now(); ui.sel = {}; ui.mapN = 0;
       closeModal(); save(); toast('Kingdom restored.'); notes.forEach(toast);
     } catch (e) { toast('That save could not be read.'); }
   },
@@ -296,7 +333,7 @@ const MODAL_ACTIONS = {
 // Returns true if the game was written. Failures are reported (once per streak, or always when asked by hand).
 function save(manual) {
   if (ui.paused) return false;
-  state.last = Date.now();
+  state.last = lastTick; // the moment the simulation has reached, so time not yet simulated is credited on the next load
   try {
     localStorage.setItem(SAVE_KEY, serialize());
     ui.saveFailed = false; return true;
@@ -332,6 +369,7 @@ function loadGame() {
     }
   } else startNewGame(now);
   render();
+  lastTick = now;
   catchUp((now - state.last) / 1000);
   notes.forEach(toast);
 }
@@ -347,7 +385,8 @@ function claimTab() {
 }
 
 // ───────────────────────── Input ─────────────────────────
-function showMap() { $('mapwrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+const calmMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+function showMap() { $('mapwrap').scrollIntoView({ block: 'nearest', behavior: calmMotion && calmMotion.matches ? 'auto' : 'smooth' }); }
 // Actions for the city screen, keyed by data-act. Each gets (data-id, event, element).
 const CITY_ACTIONS = {
   tile(k) {
@@ -360,6 +399,7 @@ const CITY_ACTIONS = {
     if (ui.sel.build) showMap(); // bring the map back if a card was picked further down the page
   },
   tab(id) { if (TABS[id]) ui.tab = id; },
+  deselect() { ui.sel = {}; },
   up(k) { if (say(upgrade(k)).ok) ui.popKey = k; },
   demolish(k) {
     const t = tileAt(k); if (!t || !tileKind(t).removable) return;
@@ -446,8 +486,10 @@ function bindInput() {
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
   });
+  $('res').addEventListener('scroll', renderResources, { passive: true });
   window.addEventListener('beforeunload', () => save());
-  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else { simTick(); if (!ui.paused) render(); } });
+  window.addEventListener('resize', () => { ui.mapN = 0; if (!ui.paused) render(); });
 }
 
 // ───────────────────────── Timers ─────────────────────────
@@ -460,8 +502,10 @@ function stepMerchant(dt) {
   m.x = 8 + Math.random() * 70; m.y = 8 + Math.random() * 70;
   toast('🐪 A merchant has arrived! Tap the 🐪 at the top to find them.');
 }
-let lastTick = Date.now();
+// A hidden tab does not step at all: browsers wake its timers about once a minute, which would turn one long
+// absence into many small uncapped gaps. The whole hidden span arrives as a single gap when the tab is shown.
 function simTick() {
+  if (document.hidden) return;
   const now = Date.now(), dt = Math.max(0, (now - lastTick) / 1000); lastTick = now;
   if (ui.paused) return;
   if (dt > OFFLINE_REPORT_SECONDS) { catchUp(dt); render(); } // the tab was asleep: same capped path as a page load

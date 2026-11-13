@@ -1,0 +1,274 @@
+'use strict';
+// Browser checks (layout at phone and desktop sizes, input, saves). Needs Playwright with Chromium:
+//   node tests/ui.test.js            (set SHOTS=<dir> to also write screenshots there)
+// Every page starts from a fixed map seed with merchant visits and smooth scrolling off, so runs are repeatable.
+const path = require('path'), { pathToFileURL } = require('url');
+const { chromium, devices } = require('playwright');
+const URL = pathToFileURL(path.join(__dirname, '..', 'index.html')).href, OUT = process.env.SHOTS;
+const shot = (page, name) => OUT ? page.screenshot({ path: path.join(OUT, name) }) : null;
+// A known starting position: same terrain every run, no merchant wandering in mid-test.
+const fresh = page => page.evaluate(() => { startNewGame(Date.now()); state.run = newRun(12345); calc = compute(); ui.sel = {}; ui.tab = 'build'; ui.mapN = 0; ui.merchant.next = 1e9; ui.merchant.left = 0; closeModal(); render(); scrollTo(0, 0); });
+const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+async function drag(cdp, x, y, dx, dy) { // a real touch drag, as a finger would do it
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= 10; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx * i / 10, y: y + dy * i / 10 }] });
+  for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 40)); await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y: y + dy }] }); } // rest before lifting: no fling
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); page.on('pageerror', e => errs.push(String(e))); page.on('dialog', d => { errs.push('dialog: ' + d.message()); d.dismiss(); }); };
+(async () => {
+  const br = await chromium.launch();
+  const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
+  const page = await ctx.newPage(); const errs = []; watch(page, errs);
+  await page.goto(URL); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(page);
+  const resInfo = () => page.evaluate(() => { const r = document.getElementById('res'), cs = [...r.children].map(c => Math.round(c.getBoundingClientRect().top));
+    return { h: r.getBoundingClientRect().height, rows: new Set(cs).size, n: cs.length, sw: r.scrollWidth, cw: r.clientWidth }; });
+  let ri = await resInfo(); ok(ri.rows === 1 && ri.h <= 48, 'fresh: resource bar single row, h=' + ri.h.toFixed(1) + ' chips=' + ri.n);
+  await shot(page, 'shot-390-fresh.png');
+
+  // --- early game: pick from bottom bar, place on map, page does not scroll
+  const bar = await page.evaluate(() => { const b = document.getElementById('buildbar').getBoundingClientRect(); return { top: b.top, bottom: b.bottom, disp: getComputedStyle(document.getElementById('buildbar')).display }; });
+  ok(bar.disp !== 'none' && Math.abs(bar.bottom - 844) < 1, 'build bar fixed at bottom (top=' + Math.round(bar.top) + ')');
+  await page.tap('#bbrow .bb[data-id="cottage"]'); await settle(page);
+  let st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect();
+    return { y: scrollY, mt: m.top, mb: m.bottom, bt: b.top, sel: ui.sel.build, can: document.querySelectorAll('.tile.can').length }; });
+  ok(st.sel === 'cottage' && st.y === 0 && st.mt >= 0 && st.mb <= st.bt, 'after picking in bar: map fully visible above bar ' + JSON.stringify(st));
+  await page.tap('.tile.can'); await settle(page);
+  ok(await page.evaluate(() => count('cottage')) === 1, 'tapping a plot places the cottage');
+
+  // --- DOM patching keeps elements (focus / press survive re-render)
+  const kept = await page.evaluate(() => { const b = document.querySelector('#bbrow .bb[data-id="farm"]'); b.focus(); state.run.res.gold += 1000; render(); render();
+    return document.activeElement === b && document.querySelector('#bbrow .bb[data-id="farm"]') === b; });
+  ok(kept, 're-render keeps the same button element and its focus');
+
+  // --- picking a card far down the Build tab scrolls the map back into view
+  await page.evaluate(() => { ui.sel = {}; render(); document.querySelector('#panel .card[data-id="lumber"]').scrollIntoView({ block: 'center' }); });
+  await settle(page);
+  const before = await page.evaluate(() => scrollY);
+  await page.tap('#panel .card[data-id="lumber"]'); await settle(page);
+  st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(), r = document.getElementById('res').getBoundingClientRect();
+    return { y: scrollY, mt: Math.round(m.top), mb: Math.round(m.bottom), bt: Math.round(b.top), rb: Math.round(r.bottom) }; });
+  ok(st.mt >= st.rb - 1 && st.mb <= st.bt + 1, 'picking a card (scrollY was ' + before + '): map visible between res bar and build bar ' + JSON.stringify(st));
+
+  // --- late game state: 11x11 map, all resources, crowns, festival, merchant
+  await page.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12; run.buffUntil = run.clock + 60; ui.merchant.left = 18; ui.merchant.x = 40; ui.merchant.y = 40;
+    run.res = { gold: 123456789, food: 2345678, wood: 98765432, stone: 7654321, iron: 345678 }; run.pop = 1234;
+    for (let i = 0; i < 9; i++) for (let j = 0; j < 3; j++) if (run.terrain[i][j] === 'plain') run.tiles[i + ',' + j] = { kind: 'building', id: ['cottage', 'smith', 'lumber', 'quarry', 'mine', 'farm'][(i + j) % 6], level: 12 };
+    ui.sel = {}; render(); scrollTo(0, 0); });
+  await settle(page);
+  ri = await resInfo(); ok(ri.rows === 1 && ri.h <= 48 && ri.n === 9 && ri.sw <= ri.cw, 'late: all 9 chips (merchant, festival, 5 resources, population, Crowns) fit one row without scrolling, h=' + ri.h.toFixed(1) + ' scrollW/clientW=' + ri.sw + '/' + ri.cw);
+  const order = await page.evaluate(() => [...document.getElementById('res').children].slice(0, 2).map(c => c.className));
+  ok(/merchant/.test(order[0]) && /buff/.test(order[1]), 'timed chips lead the resource bar');
+  const mp = await page.evaluate(() => { const t = document.querySelector('.tile').getBoundingClientRect(), sc = document.getElementById('mapscroll');
+    return { n: document.querySelectorAll('.tile').length, w: t.width, h: t.height, sw: sc.scrollWidth, cw: sc.clientWidth, sl: sc.scrollLeft, st: sc.scrollTop, hint: !document.getElementById('maphint').hidden, docW: document.documentElement.scrollWidth }; });
+  ok(mp.n === 121 && mp.w >= 40 && mp.h >= 40, '11x11 tiles are ' + mp.w.toFixed(1) + 'x' + mp.h.toFixed(1) + 'px');
+  ok(mp.sw > mp.cw && mp.sl > 0 && mp.st > 0 && mp.hint, 'map pans inside its frame, centred on hall ' + JSON.stringify(mp));
+  ok(mp.docW <= 390, 'no horizontal page overflow (doc width ' + mp.docW + ')');
+  const badge = await page.evaluate(() => { let worst = 0, n = 0; for (const b of document.querySelectorAll('.tile .bn')) { n++; const r = b.getBoundingClientRect(), t = b.parentElement.getBoundingClientRect(); worst = Math.max(worst, r.right - t.right, t.left - r.left); } return { n, worst }; });
+  await page.evaluate(() => { const k = Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'farm'); calc.tiles[k].adj = 2.7; });
+  ok(badge.worst <= 0, 'bonus badges stay inside their tile (' + badge.n + ' badges, overflow ' + badge.worst.toFixed(1) + 'px)');
+  const wide = await page.evaluate(() => { const b = document.querySelector('.tile .bn') || document.querySelector('.tile').appendChild(Object.assign(document.createElement('span'), { className: 'bn' })); b.textContent = '+270%'; const r = b.getBoundingClientRect(), t = b.parentElement.getBoundingClientRect(); const o = r.right - t.right; lastHTML.delete(document.getElementById('map')); render(); return o; });
+  ok(wide <= 0, 'a "+270%" badge fits a 40px tile (overflow ' + wide.toFixed(1) + 'px)');
+  await page.tap('#bbrow .bb[data-id="farm"]'); await settle(page);
+  st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { y: scrollY, mt: m.top, mb: m.bottom, bt: b.top }; });
+  ok(st.y === 0 && st.mt >= 0 && st.mb <= st.bt, 'late: map fully visible with build selected ' + JSON.stringify(st));
+  const pt = await page.evaluate(() => { const s = document.getElementById('mapscroll').getBoundingClientRect(), m = document.getElementById('merchant').getBoundingClientRect();
+    for (const t of document.querySelectorAll('.tile.can')) { const r = t.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      if (r.left >= s.left && r.right <= s.right && r.top >= s.top && r.bottom <= s.bottom && !(x > m.left && x < m.right && y > m.top && y < m.bottom)) return { x, y }; } });
+  const f0 = await page.evaluate(() => count('farm'));
+  await page.touchscreen.tap(pt.x, pt.y); await settle(page);
+  ok(await page.evaluate(() => count('farm')) === f0 + 1, 'late: tapping a 40px+ tile places the farm');
+  await page.evaluate(() => { document.getElementById('mapscroll').scrollLeft = 0; render(); });
+  ok(await page.evaluate(() => document.getElementById('mapscroll').scrollLeft) === 0, 'map pan position survives re-render');
+  await page.evaluate(() => { const sc = document.getElementById('mapscroll'); sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2; });
+  await shot(page, 'shot-390-late.png');
+
+  // --- merchant cue in the sticky bar, and the merchant itself
+  ok(await page.evaluate(() => !!document.querySelector('#res .chip.merchant') && !document.getElementById('merchant').hidden), 'merchant shows a chip in the resource bar');
+  const m0 = await page.evaluate(() => state.meta.stats.merchants);
+  await page.evaluate(() => document.getElementById('merchant').click());
+  ok(await page.evaluate(() => state.meta.stats.merchants) === m0 + 1 && await page.evaluate(() => document.getElementById('merchant').hidden && !document.querySelector('#res .chip.merchant')), 'tapping the merchant pays out and removes the cue');
+
+  // --- tapping: small share of base income; key repeat ignored
+  const tap = await page.evaluate(() => { state.run.buffUntil = 0; calc = compute(); const a = clickValue(); state.run.buffUntil = state.run.clock + 60; calc = compute(); return { v: a, fest: clickValue(), base: calc.base.gold, live: calc.rates.gold }; });
+  ok(tap.v === tap.fest && tap.v / tap.base < 0.021 && tap.live > tap.base * 2.9, 'tap is ' + (100 * tap.v / tap.base).toFixed(2) + '% of base gold/s and ignores the festival');
+  const c0 = await page.evaluate(() => state.meta.stats.clicks);
+  await page.focus('#clicker'); await page.keyboard.down('Enter'); for (let i = 0; i < 10; i++) await page.keyboard.down('Enter'); await page.keyboard.up('Enter');
+  ok(await page.evaluate(() => state.meta.stats.clicks) === c0 + 1, 'holding Enter collects once, not per key repeat');
+
+  // --- demolish: confirmation above level 1, refund counts upgrades
+  const dk = await page.evaluate(() => Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'smith'));
+  const dinfo = await page.evaluate(k => { ui.sel = { tile: k }; render(); const t = state.run.tiles[k]; return { refund: demolishRefund(t), spent: spentOn(t), gold: state.run.res.gold }; }, dk);
+  await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
+  ok(await page.evaluate(k => !document.getElementById('modal').hidden && !!state.run.tiles[k] && document.activeElement.dataset.act === 'close', dk), 'demolishing a level 12 building asks first (focus on Cancel)');
+  await page.keyboard.press('Escape');
+  ok(await page.evaluate(k => document.getElementById('modal').hidden && !!state.run.tiles[k], dk), 'Esc cancels the dialog');
+  await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
+  await page.evaluate(() => document.getElementById('modal').click());
+  ok(await page.evaluate(k => document.getElementById('modal').hidden && !!state.run.tiles[k], dk), 'tapping the backdrop cancels the dialog');
+  await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
+  await page.evaluate(() => document.querySelector('#modal [data-act="yes"]').click());
+  const dafter = await page.evaluate(k => ({ gone: !state.run.tiles[k], gold: state.run.res.gold }), dk);
+  ok(dafter.gone && dinfo.refund.gold === Math.floor(dinfo.spent.gold / 2) && dinfo.refund.gold > 1e8 && dafter.gold - dinfo.gold >= dinfo.refund.gold * 0.999, 'confirmed demolish refunds half of build+upgrade costs (' + dinfo.refund.gold + ' gold of ' + dinfo.spent.gold + ' spent)');
+
+  // --- clearing terrain
+  const ck = await page.evaluate(() => { for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] !== 'plain') return x + ',' + y; });
+  await page.evaluate(k => { ui.sel = { tile: k }; render(); document.querySelector('#inspector [data-act="clear"]').click(); }, ck);
+  ok(await page.evaluate(k => { const [x, y] = xy(k); return state.run.terrain[x][y] === 'plain' && state.run.cleared === 1 && clearCost().gold === 1000; }, ck), 'terrain can be cleared for gold; next clearing costs double');
+
+  // --- research tab with repeatable upgrades
+  await page.evaluate(() => { ui.tab = 'research'; render(); });
+  const lv0 = await page.evaluate(() => repLevel('prod'));
+  await page.evaluate(() => document.querySelector('#panel .card[data-act="rep"][data-id="prod"]').click());
+  ok(await page.evaluate(() => repLevel('prod')) === lv0 + 1, 'repeatable upgrade can be bought');
+  await page.evaluate(() => [...document.querySelectorAll('#panel h3')].find(h => /Repeatable/.test(h.textContent)).scrollIntoView({ block: 'start' }));
+  await settle(page); await shot(page, 'shot-390-research.png');
+
+  // --- export / import round trip (UTF-8 safe), copy button present
+  await page.evaluate(() => { ui.tab = 'realm'; render(); window.__json = serialize(); document.querySelector('#panel [data-act="export"]').click(); });
+  const exp = await page.evaluate(() => ({ text: document.getElementById('exp').value, copy: !!document.querySelector('#modal [data-act="copy"]'), fs: getComputedStyle(document.getElementById('exp')).fontSize }));
+  ok(exp.copy && exp.fs === '16px' && exp.text.length > 100, 'export dialog has a Copy button and a 16px field');
+  const rt = await page.evaluate(text => { const before = window.__json; const utf = encodeSave(JSON.stringify({ note: 'żółć ✓ 👑' })); return { same: decodeSave(text) === before, utf: JSON.parse(decodeSave(utf)).note }; }, exp.text);
+  ok(rt.same && rt.utf === 'żółć ✓ 👑', 'export encodes UTF-8 and decodes back exactly');
+  await page.evaluate(() => document.querySelector('#modal [data-act="close"]').click());
+
+  // --- prestige round trip: meta kept, run replaced
+  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.repeatables.monument = 2; render(); });
+  const pend = await page.evaluate(() => pendingCrowns());
+  await page.evaluate(() => { document.querySelector('#panel [data-act="prestige"]').click(); document.querySelector('#modal [data-act="yes"]').click(); });
+  const after = await page.evaluate(() => ({ c: state.meta.crowns, b: state.meta.bonusCrowns, p: pendingCrowns(), rep: state.run.repeatables, hall: hallLevel(), tiles: Object.keys(state.run.tiles).length, tg: state.meta.stats.totalGold }));
+  ok(after.c === 12 + pend && after.b === 2 && after.p === 0 && after.hall === 1 && after.tiles === 1 && after.tg >= 5e7 && after.tg < 5.1e7, 'prestige: pending ' + pend + ' -> ' + JSON.stringify(after));
+
+  // --- hostile import: markup in fields, out-of-range values (review M3)
+  const evil = { v: 2, last: '<img src=x onerror=alert(1)>', meta: { crowns: '<img src=x onerror="window.__xss=1">', bonusCrowns: {}, decree: '<script>window.__xss=1</script>', stats: { totalGold: '"><svg onload=window.__xss=1>', clicks: null } },
+    run: { seed: 'x', exp: 9, pop: '<b>', res: { gold: '<img src=x onerror=window.__xss=1>', food: -5, wood: 1e999, stone: NaN }, terrain: [['<img>']],
+      tiles: { '5,5': { kind: 'hall', id: 'hall', level: 1e9 }, '4,5': { kind: 'building', id: '<img src=x onerror=window.__xss=1>', level: 2 }, '6,5': { kind: 'building', id: 'constructor', level: 2 }, '"><img src=x onerror=window.__xss=1>': { kind: 'building', id: 'farm', level: 1 }, '5,4': { kind: 'building', id: 'farm', level: '<i>' }, '0,0': { kind: 'building', id: 'farm', level: -3 } },
+      research: { axes: 1, '<img onerror=window.__xss=1 src=x>': 1 }, repeatables: { prod: '<img>', food: 1e9 }, buffUntil: 1e99, clock: 5 } };
+  await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
+  const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
+    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: festivalLeft(), ok: isFinite(calc.rates.gold) }; });
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 50 && ev.hall === 300 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff <= 60 && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+    'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
+  await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
+  ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
+  await page.evaluate(() => closeModal());
+
+  // --- H1: a long loop gap goes through the capped offline path
+  await fresh(page);
+  const gap = await page.evaluate(() => { const c0 = state.run.clock; lastTick = Date.now() - 20 * 3600 * 1000; simTick(); return { clock: state.run.clock - c0, modal: document.getElementById('modalbox').textContent }; });
+  ok(Math.abs(gap.clock - 8 * 3600) < 1 && /capped at 8 hours/.test(gap.modal) && /20h 0m/.test(gap.modal), 'resuming after 20h credits exactly 8h and says so (' + (gap.clock / 3600).toFixed(3) + 'h)');
+
+  // --- R3: a hidden tab does not step; its timers waking every ~61s must not dodge the cap or stack dialogs
+  await fresh(page);
+  const hid = await page.evaluate(() => {
+    let hidden = true, dialogs = 0; const realOpen = openModal; window.openModal = (...a) => { dialogs++; return realOpen(...a); };
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    const c0 = state.run.clock;
+    for (let i = 0; i < 600; i++) { lastTick -= 61000; simTick(); }           // 10.17h of throttled wake-ups
+    const whileHidden = { stepped: state.run.clock - c0, dialogs }; save();
+    const savedLag = Date.now() - JSON.parse(localStorage.getItem(SAVE_KEY)).last;
+    hidden = false; document.dispatchEvent(new Event('visibilitychange'));
+    const out = { whileHidden, savedLagH: savedLag / 3600000, credited: (state.run.clock - c0) / 3600, dialogs, modal: document.getElementById('modalbox').textContent };
+    delete document.hidden; window.openModal = realOpen; return out; });
+  ok(hid.whileHidden.stepped === 0 && hid.whileHidden.dialogs === 0, 'hidden tab: 600 timer wake-ups step nothing and open no dialog');
+  ok(Math.abs(hid.savedLagH - 10.1667) < 0.01, 'a save made while hidden records the time the simulation reached (' + hid.savedLagH.toFixed(2) + 'h ago), not now');
+  ok(Math.abs(hid.credited - 8) < 0.001 && hid.dialogs === 1 && /capped at 8 hours/.test(hid.modal) && /10h 10m/.test(hid.modal), 'on return the whole 10.17h arrives as one capped gap: ' + hid.credited.toFixed(3) + 'h credited, ' + hid.dialogs + ' dialog');
+  await page.evaluate(() => closeModal());
+
+  // --- old (v1) save tolerated and migrated; short gap credited (L1)
+  await page.evaluate(() => { const old = { seed: 12345, res: { gold: 5e6, food: 100000, wood: 1000, stone: 1000, iron: 1000 }, pop: 400, exp: 2,
+      tiles: { '5,5': { b: 'hall', l: 4 }, '5,4': { b: 'cottage', l: 8 }, '4,5': { b: 'farm', l: 6 }, '6,5': { b: 'smith', l: 3 }, '5,6': { b: 'nonsense', l: 2 } },
+      research: { axes: 1, tithes: 1 }, starving: false, buffUntil: Date.now() + 1e6, quest: 19, crowns: 19, runGold: 3e6, last: Date.now() - 30000,
+      stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: Date.now() - 1e7 } };
+    ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
+  await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
+  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: festivalOn(), terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
+  ok(mig.v === 2 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 8 && mig.pend === 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
+  ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
+  const stored = await page.evaluate(() => { ui.merchant.next = 1e9; save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
+  ok(stored.v === 2 && stored.grid && stored.decree === 'dynasty' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
+
+  // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy
+  for (const [name, raw] of [['truncated JSON', '{"tiles":5,"res":'], ['wrong shape', '{"v":2,"meta":5,"run":[]}'], ['newer version', '{"v":99,"meta":{},"run":{}}'], ['legacy exp:9', JSON.stringify({ seed: 1, exp: 9, res: {}, tiles: {} })]]) {
+    await page.evaluate(raw => { ui.paused = true; localStorage.setItem(SAVE_KEY, raw); }, raw);
+    await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
+    const r = await page.evaluate(() => ({ hall: hallLevel(), tiles: document.querySelectorAll('.tile').length, backup: localStorage.getItem(BACKUP_KEY), exp: state.run.exp }));
+    ok(r.hall === 1 && r.tiles >= 25 && errs.length === 0 && (name === 'legacy exp:9' ? r.exp === 3 && r.tiles === 121 : r.backup === raw), name + ': game still playable ' + JSON.stringify({ tiles: r.tiles, exp: r.exp, backedUp: r.backup === raw }));
+  }
+  // --- failed writes are reported, "Saved." only on success
+  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('quota'); }; ui.tab = 'realm'; render(); document.getElementById('toasts').innerHTML = ''; document.querySelector('#panel [data-act="save"]').click(); });
+  const tt = await page.evaluate(() => document.getElementById('toasts').textContent);
+  ok(/Saving failed/.test(tt) && !/💾 Saved/.test(tt), 'failed save is reported and not announced as saved');
+
+  // --- two tabs: the older one pauses
+  const ctx2 = await br.newContext({ viewport: { width: 390, height: 844 } });
+  const a = await ctx2.newPage(), b = await ctx2.newPage(); const e3 = []; watch(a, e3); watch(b, e3);
+  await a.goto(URL); await a.waitForFunction(() => typeof state === 'object'); await b.goto(URL); await a.waitForFunction(() => ui.paused);
+  const two = { a: await a.evaluate(() => ({ paused: ui.paused, modal: document.getElementById('modalbox').textContent })), b: await b.evaluate(() => ui.paused) };
+  ok(two.a.paused && !two.b && /another tab/.test(two.a.modal) && e3.length === 0, 'opening a second tab pauses the first: ' + JSON.stringify(two.a.paused));
+  await a.keyboard.press('Escape'); ok(await a.evaluate(() => !document.getElementById('modal').hidden), 'the paused-tab dialog cannot be dismissed');
+  await ctx2.close(); await ctx.close();
+
+  // --- a real phone viewport: iPhone 13 shows 390x664 once Safari's bars are counted (review R1, R2)
+  const ph = await br.newContext({ ...devices['iPhone 13'], reducedMotion: 'reduce' }); const p3 = await ph.newPage(); const e4 = []; watch(p3, e4);
+  await p3.goto(URL); await p3.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(p3);
+  const cdp = await ph.newCDPSession(p3);
+  const vp = await p3.evaluate(() => ({ w: innerWidth, h: innerHeight })); ok(vp.w === 390 && vp.h === 664, 'phone viewport is ' + vp.w + 'x' + vp.h);
+  // R1: tile actions are reachable without scrolling
+  const reach = sel => p3.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const r = b.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, hit: !!top && b.contains(top), text: b.textContent.trim().replace(/\s+/g, ' ') }; }, sel);
+  await p3.evaluate(() => { state.run.res = { gold: 5000, food: 500, wood: 5000, stone: 5000, iron: 0 }; render(); });
+  await p3.tap('.tile.hall'); await settle(p3);
+  let up = await reach('#buildbar [data-act="up"]');
+  ok(up && up.inView && up.hit && up.h >= 44 && /Raise a Manor/.test(up.text) && await p3.evaluate(() => scrollY) === 0, 'tap the hall: "Raise a Manor" is on screen in the bottom bar, unobscured, no scrolling ' + JSON.stringify(up));
+  await p3.tap('#buildbar [data-act="up"]'); await settle(p3);
+  ok(await p3.evaluate(() => hallLevel()) === 2, 'tapping it upgrades the hall');
+  await p3.tap('#buildbar [data-act="deselect"]'); await settle(p3);
+  ok(await p3.evaluate(() => !ui.sel.tile && !!document.querySelector('#bbrow .bb[data-act="pick"]')), 'Close returns the bar to the build list');
+  await p3.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 }; run.tiles['6,5'] = { kind: 'building', id: 'smith', level: 4 }; run.terrain[6][5] = 'plain'; ui.mapN = 0; render(); });
+  await settle(p3); await p3.tap('.tile[data-id="6,5"]'); await settle(p3);
+  up = await reach('#buildbar [data-act="up"]'); const dem = await reach('#buildbar [data-act="demolish"]');
+  ok(up && up.inView && up.hit && /Upgrade ×2/.test(up.text) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade and Demolish are on screen in the bar ' + JSON.stringify({ up, dem }));
+  await p3.tap('#buildbar [data-act="up"]'); await settle(p3);
+  ok(await p3.evaluate(() => state.run.tiles['6,5'].level) === 5, 'tapping Upgrade in the bar upgrades the Blacksmith');
+  await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage', level: 2 }; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
+  up = await reach('#buildbar [data-act="up"]');
+  ok(up && up.inView && /Upgrade \+5 🏠/.test(up.text), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
+  await shot(p3, 'shot-390x664-tile.png');
+  // R2: a drag that starts on the map scrolls the page unless the map itself can pan that way
+  for (const [exp, n] of [[0, 5], [1, 7]]) {
+    await fresh(p3); await p3.evaluate(exp => { state.run.exp = exp; ui.mapN = 0; render(); }, exp); await settle(p3);
+    const m = await p3.evaluate(() => { const r = document.getElementById('mapscroll').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.7, pans: document.getElementById('mapscroll').classList.contains('pans'), tiles: document.querySelectorAll('.tile').length }; });
+    await drag(cdp, m.x, m.y, 0, -250); await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 150)); });
+    const y = await p3.evaluate(() => scrollY);
+    ok(!m.pans && m.tiles === n * n && y >= 150, n + 'x' + n + ' map: a 250px upward drag starting on the map scrolls the page ' + y + 'px');
+  }
+  await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 300)); }); // let the last fling die
+  await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; ui.mapN = 0; render(); scrollTo(0, 0); }); await settle(p3);
+  const big = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), r = sc.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, pans: sc.classList.contains('pans'), left: sc.scrollLeft }; });
+  await drag(cdp, big.x, big.y, -60, 0); await p3.waitForFunction(() => { const sc = document.getElementById('mapscroll'), v = sc.scrollLeft; return new Promise(r => setTimeout(() => r(sc.scrollLeft === v), 150)); });
+  const panned = await p3.evaluate(() => ({ left: document.getElementById('mapscroll').scrollLeft, y: scrollY }));
+  ok(big.pans && panned.left > big.left + 30 && panned.y === 0, '11x11 map: a sideways drag pans the map (' + big.left + ' -> ' + panned.left + ') and not the page');
+  await p3.evaluate(() => { const sc = document.getElementById('mapscroll'); sc.scrollTop = sc.scrollHeight; }); await settle(p3);
+  await drag(cdp, big.x, big.y, 0, -250); await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 150)); });
+  const chained = await p3.evaluate(() => scrollY);
+  ok(chained >= 150, '11x11 map at its bottom edge: an upward drag chains to the page (' + chained + 'px)');
+  ok(e4.length === 0, 'phone: no console errors ' + JSON.stringify(e4));
+  await ph.close();
+
+  // --- desktop
+  const d = await br.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' }); const p2 = await d.newPage(); const e2 = []; watch(p2, e2);
+  await p2.goto(URL); await p2.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(p2);
+  await p2.evaluate(() => { state.run.exp = 3; state.run.tiles[HALL_KEY].level = 5; state.run.res = { gold: 1e8, food: 1e6, wood: 1e7, stone: 1e6, iron: 1e5 }; render(); });
+  const dd = await p2.evaluate(() => { const t = document.querySelector('.tile').getBoundingClientRect(), sc = document.getElementById('mapscroll');
+    return { bar: getComputedStyle(document.getElementById('buildbar')).display, tw: t.width, scroll: sc.scrollWidth > sc.clientWidth || sc.scrollHeight > sc.clientHeight, hint: !document.getElementById('maphint').hidden, label: document.querySelector('.tile.hall').getAttribute('aria-label') }; });
+  ok(dd.bar === 'none' && dd.tw > 45 && !dd.scroll && !dd.hint && dd.label === 'Palace, level 5', 'desktop: no build bar, full map fits without scrolling, tiles labelled ' + JSON.stringify(dd));
+  await p2.hover('.tile'); await settle(p2);
+  ok(!(await p2.evaluate(() => { const sc = document.getElementById('mapscroll'); return sc.scrollWidth > sc.clientWidth || sc.scrollHeight > sc.clientHeight; })), 'desktop: hovering a corner tile adds no scrollbars');
+  ok(e2.length === 0, 'desktop: no console errors ' + JSON.stringify(e2));
+  await shot(p2, 'shot-1280.png');
+  await br.close();
+  console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
+})();

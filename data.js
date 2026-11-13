@@ -37,9 +37,12 @@ const START_POP = 3;
 const FOOD_PER_POP = 0.08;       // base food upkeep per villager per second
 const FOOD_CROWD = 200;          // upkeep per villager is multiplied by 1 + (population / FOOD_CROWD)^2
 const STARVE_PENALTY = 0.5;      // output of non-food workplaces while starving
+const STARVE_LOSS = 0.01;        // share of villagers who leave per second while starving
+const FOOD_RESERVE_SECONDS = 120; // villagers also move in while the stores cover this many seconds of upkeep
 const BUILD_GROWTH = 1.18;       // default cost growth per copy of a building already standing
 const UPGRADE_BASE = 1.5;        // upgrade cost = base cost × UPGRADE_BASE × UPGRADE_GROWTH^level
-const UPGRADE_GROWTH = 3.2;
+const UPGRADE_GROWTH = 3.2;        // default; a building's own upgradeGrowth overrides it
+const LINEAR_UPGRADE_GROWTH = 2.5; // buildings that gain a flat amount per level get cheaper steps
 const MAX_LEVEL = 300;           // keeps every cost and rate a finite number
 const REFUND_SHARE = 0.5;        // share of build + upgrade costs returned on demolition
 const CROWN_BONUS = 0.05;        // production bonus per Crown
@@ -54,18 +57,19 @@ const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a su
 // Buildings. out: per second at level 1. work: villagers needed per level.
 // adj: bonus per adjacent terrain type / per level of adjacent building.
 // linear: housing/output grows by a flat amount per level instead of doubling. growth: build cost growth.
+// upgradeGrowth: upgrade cost growth per level (default UPGRADE_GROWTH).
 const BUILDINGS = {
-  cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { wood: 10 }, house: 5, linear: true, growth: 1.3, out: { gold: 0.4 },
+  cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { wood: 10 }, house: 5, linear: true, growth: 1.3, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { gold: 0.4 },
     adj: { building: { tavern: 0.5 } }, desc: 'Houses villagers, who pay a modest tax.' },
   lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20 }, work: 2, out: { wood: 0.8 },
     adj: { terrain: { forest: 0.5 } }, desc: 'Fells timber. Wants forest nearby.' },
-  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 1.25, out: { food: 1.5 },
+  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 1.25, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 1.5 },
     adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the village. Thrives beside water and mills.' },
   quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 60, wood: 40 }, work: 3, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
   market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 150, wood: 100, stone: 30 }, work: 3, out: { gold: 4 },
     adj: { building: { cottage: 0.2, guild: 0.5 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
-  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { wood: 120, stone: 60 }, work: 2, linear: true, out: { food: 2 },
+  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { wood: 120, stone: 60 }, work: 2, linear: true, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 2 },
     desc: 'Grinds grain and boosts every farm beside it.' },
   tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 300, wood: 150 }, work: 2, out: { gold: 2 },
     desc: 'Merry villagers pay more tax. Boosts cottages beside it.' },
