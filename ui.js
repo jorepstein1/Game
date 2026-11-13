@@ -67,6 +67,12 @@ const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(
   `<span class="${!plain && state.run.res[r] < cost[r] ? 'lack' : ''}">${RESOURCES[r].icon} ${fmt(cost[r])}</span>`).join('') + '</span>';
 const tileAt = key => state.run.tiles[key];
 
+// The routine-upgrades preview walks every building, so it is worked out at most once per action or every two seconds.
+function routinePreview() {
+  const now = performance.now();
+  if (!ui.routine || now - ui.routine.at > 2000) { ui.routine = routineUpgrades(true); ui.routine.at = now; }
+  return ui.routine;
+}
 function renderResources() {
   const run = state.run, res = run.res;
   let h = '';
@@ -82,6 +88,7 @@ function renderResources() {
   patch($('res'), h);
   const bar = $('res'); bar.classList.toggle('more', bar.scrollWidth > bar.clientWidth + 1 && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
   patch($('clickval'), '+' + fmt(clickValue()));
+  $('clicker').hidden = hallLevel() >= 2; // a flourish for the first minutes: from the Manor on the strip belongs to the inspector
   patch($('subtitle'), esc(hallName(hallLevel()) + ' of ' + Math.floor(run.pop) + ' souls'));
 }
 
@@ -156,7 +163,7 @@ function renderInspector() {
     const k = sel.tile, t = tileAt(k), kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
     if (t.kind === 'hall') {
       const next = BUILD_ORDER.filter(b => BUILDINGS[b].hall === t.level + 1).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name);
-      h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production and makes tax collection richer.</p>
+      h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
         <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
         <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} 🍞/s</b> per villager. Bigger towns eat more per head.</p>
         ${next.length ? `<p class="stat">Next level unlocks: <b>${next.join(', ')}</b></p>` : ''}
@@ -213,9 +220,9 @@ function renderPanel() {
   const run = state.run, meta = state.meta, hall = hallLevel();
   let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
-    const routine = routineUpgrades(true); // one tap for the cheap upgrades, so the list below is about choices
+    const routine = routinePreview(), span = ROUTINE_SECONDS >= 3600 ? ROUTINE_SECONDS / 3600 + ' hours' : Math.round(ROUTINE_SECONDS / 60) + ' minutes';
     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
-      <div class="muted">Makes every cheap upgrade at once: those costing under ${Math.round(ROUTINE_SECONDS / 60)} minutes of income each.</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
+      <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
@@ -498,6 +505,7 @@ function bindInput() {
     requestPersistence();
     const el = e.target.closest('[data-act]');
     if (!el || ui.paused || el.classList.contains('locked')) return;
+    ui.routine = null; // anything tapped may change what counts as routine
     if (el.closest('#buildbar')) {
       const now = performance.now();
       const near = Math.hypot(e.clientX - ui.barTapX, e.clientY - ui.barTapY) < 40;

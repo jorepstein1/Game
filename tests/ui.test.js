@@ -91,7 +91,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- routine upgrades: one card at the top of Build makes every cheap upgrade
   const rtn = await page.evaluate(() => { const run = state.run; let k = null;
     for (let x = 0; x < 11 && !k; x++) for (let y = 4; y < 11; y++) if (!run.tiles[x + ',' + y] && run.terrain[x][y] === 'plain') { k = x + ',' + y; break; }
-    run.tiles[k] = { kind: 'building', id: 'cottage', level: 1 }; ui.tab = 'build'; ui.sel = {}; render();
+    run.tiles[k] = { kind: 'building', id: 'cottage', level: 1 }; ui.tab = 'build'; ui.sel = {}; ui.routine = null; render();
     const card = document.querySelector('#panel .card[data-act="routine"]'), first = document.querySelector('#panel .card'), n = routineUpgrades(true).count, lv = run.tiles[k].level, text = card.textContent.replace(/\s+/g, ' ').trim();
     const sum = () => Object.values(run.tiles).reduce((a, t) => a + t.level, 0), before = sum(), hall = hallLevel();
     document.getElementById('toasts').innerHTML = ''; card.click();
@@ -99,9 +99,19 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       after: routineUpgrades(true).count, cant: document.querySelector('#panel .card[data-act="routine"]').classList.contains('cant') }; });
   ok(rtn.top && rtn.n >= 1 && rtn.text.includes('×' + rtn.n) && rtn.lvBefore === 1 && rtn.lvAfter > 1 && rtn.gained === rtn.n && rtn.hallSame && /routine upgrade/.test(rtn.toast) && rtn.after === 0 && rtn.cant,
     'the Routine upgrades card leads the Build tab, says how many it will make, makes exactly those and then greys out ' + JSON.stringify(rtn));
+  const previews = await page.evaluate(() => { const real = routineUpgrades; let n = 0; window.routineUpgrades = p => { n++; return real(p); };
+    ui.tab = 'build'; ui.sel = {}; ui.routine = null; for (let i = 0; i < 6; i++) render(); window.routineUpgrades = real; return n; });
+  ok(previews === 1, 'six renders of the Build tab work out the routine upgrades once, not six times (' + previews + ')');
+  const hallText = await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; render(); const t = document.getElementById('inspector').textContent; ui.sel = {}; render(); return t; });
+  ok(!/tax collection richer/.test(hallText) && /to all production/.test(hallText), 'the hall no longer claims to make tax collection richer');
+  // Collect Taxes is a start-of-game button: it is hidden from the Manor on, so the key-repeat check runs at a Village Hall
+  const taxBtn = await page.evaluate(() => { const c = document.getElementById('clicker'), was = getComputedStyle(c).display, lv = state.run.tiles[HALL_KEY].level;
+    state.run.tiles[HALL_KEY].level = 1; render(); return { was, now: getComputedStyle(c).display, lv }; });
+  ok(taxBtn.was === 'none' && taxBtn.now !== 'none', 'Collect Taxes is hidden at a Palace and shown at a Village Hall ' + JSON.stringify(taxBtn));
   const c0 = await page.evaluate(() => state.meta.stats.clicks);
   await page.focus('#clicker'); await page.keyboard.down('Enter'); for (let i = 0; i < 10; i++) await page.keyboard.down('Enter'); await page.keyboard.up('Enter');
   ok(await page.evaluate(() => state.meta.stats.clicks) === c0 + 1, 'holding Enter collects once, not per key repeat');
+  await page.evaluate(lv => { state.run.tiles[HALL_KEY].level = lv; render(); }, taxBtn.lv);
 
   // --- demolish: confirmation above level 1, refund counts upgrades
   const dk = await page.evaluate(() => Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'smith'));
@@ -321,7 +331,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await fresh(p3); await p3.evaluate(() => { state.run.exp = 3; state.run.tiles[HALL_KEY].level = 5; state.meta.crowns = 20; state.run.res = { gold: 1e8, food: 1e6, wood: 1e7, stone: 1e6, iron: 1e5 }; ui.mapN = 0; render(); }); await settle(p3);
   doc = await still();
   const lateLoad = { tax: await reach('#clicker'), realm: await reach('#tabs [data-id="realm"]'), bar: await reach('#bbrow .bb[data-id="cottage"]') };
-  ok(noScroll(doc) && lateLoad.tax.inView && lateLoad.tax.hit && lateLoad.realm.inView && lateLoad.realm.hit && lateLoad.bar.inView, 'late game (11x11, Palace): the page still cannot scroll and Collect Taxes, the bar and the tabs are on screen ' + JSON.stringify(doc));
+  const lateStrip = await p3.evaluate(() => { const s = document.getElementById('strip').getBoundingClientRect(), i = document.getElementById('inspector').getBoundingClientRect(); return { tax: getComputedStyle(document.getElementById('clicker')).display, strip: Math.round(s.width), inspector: Math.round(i.width) }; });
+  ok(noScroll(doc) && lateLoad.realm.inView && lateLoad.realm.hit && lateLoad.bar.inView, 'late game (11x11, Palace): the page still cannot scroll and the bar and the tabs are on screen ' + JSON.stringify(doc));
+  ok(lateStrip.tax === 'none' && !lateLoad.tax.hit && lateStrip.inspector >= lateStrip.strip - 2, 'from the Manor on Collect Taxes is gone and the inspector has the whole strip under the map ' + JSON.stringify(lateStrip));
   await shot(p3, 'shot-390x664-late-closed.png');
   await p3.tap('#tabs [data-id="research"]'); await settle(p3);
   const lateSheet = await p3.evaluate(() => { const p = document.getElementById('panel'); p.scrollTop = p.scrollHeight; const last = p.querySelector('.card[data-act="rep"][data-id="monument"]').getBoundingClientRect(), r = p.getBoundingClientRect();

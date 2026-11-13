@@ -9,6 +9,7 @@
 // and comes back a set number of times a day: N-1 even gaps across a 16-hour day and an 8-hour night (2 a day =
 // every 12 hours). Time away is credited through creditAway, exactly as the game does on load, so the offline
 // cap applies and long runs are quick to simulate. Each check-in is three minutes with the game open.
+// A check-in at which the bot abdicates runs on for an opening session in the new kingdom.
 // With 0 check-ins a day the bot never closes the game and acts every second, as it always used to.
 //
 // The bot is a careful player who wants the next hall. Whenever it acts it:
@@ -21,6 +22,9 @@
 //      (land and a first building of each kind may cost up to a quarter of the wait, anything else 3%).
 //      It never lets a purchase run another hall material short, and it skips producers of a material it
 //      already holds far more of than anything it wants costs (noGlut: true turns that off: a careless buyer).
+// A second, much simpler buyer (buyer: 'simple') cross-checks that the milestones belong to the game and not to
+// rule 4: it keeps rules 1 to 3, buys the hall when it can, and otherwise buys the cheapest thing on offer that
+// costs at most a tenth (share) of what the next hall costs. It estimates nothing.
 // Policy: none = never abdicate; castle = as soon as the game allows; crowns:N = whenever N Crowns are on offer;
 // once:N = the first time only; cycle:N:M = at N Crowns until minute M, then build up; pct:P = when the Crown
 // multiplier would rise by P percent. Taps (option taps): hand collections per second while the game is open.
@@ -40,6 +44,7 @@ function play(seed, opts) {
   const GLUT = !(opts && opts.noGlut);
   // Check-in play: an opening session played second by second, then the bot is away between check-ins. Time away is
   // credited through creditAway, as the game does on load, and each check-in buys what the policy allows at once.
+  const SIMPLE = opts.buyer === 'simple' ? opts.share || 0.1 : 0; // see act()
   const CHECKINS = (opts && opts.checkins) || 0, SESSION = (opts && opts.session) || 25, VISIT = (opts && opts.visit) || 3;
   const GAPS = !CHECKINS ? [] : CHECKINS === 1 ? [24] : CHECKINS === 2 ? [12, 12] : Array(CHECKINS - 1).fill(16 / (CHECKINS - 1)).concat(8); // hours; the last is the night
   const sim = loadSim(patch);
@@ -100,6 +105,9 @@ function play(seed, opts) {
         for (const r in hcost) if (res[r] < hcost[r]) { const w = C.base[r] > 0 ? (hcost[r] - res[r]) / C.base[r] : Infinity; if (w >= eta) { eta = w; L = r; } }
         const steward = c.find(a => a.k === 'research' && a.id === 'steward'); // a full day away counts: the first thing a player who sleeps buys
         if (steward) pick = steward;
+        else if (SIMPLE) { // the cross-check buyer: no estimates at all. The hall when it can, else the cheapest thing on offer, if it costs a small share of the hall
+          pick = !eta ? c.find(a => a.k === 'hall') : c.find(a => a.k !== 'hall' && sum(a.cost) <= SIMPLE * sum(hcost));
+        }
         else if (!eta) pick = c.find(a => a.k === 'hall');
         else {
           // A purchase is worth making if the hall then comes sooner: after paying for it and counting what it adds
@@ -152,11 +160,12 @@ function play(seed, opts) {
       if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold }; }
     if (out.prestiges.length === 0) for (const n of [15, 20]) if (!out.marks['crowns' + n] && sim.pendingCrowns() >= n) out.marks['crowns' + n] = { min: +(t / 60).toFixed(1) };
     for (const n of [100]) if (!out.marks['held' + n] && sim.state.meta.crowns >= n) out.marks['held' + n] = { min: +(t / 60).toFixed(1) };
+    if (out.week === undefined && t >= 168 * 3600) out.week = sim.state.meta.crowns + sim.pendingCrowns();
     if (sim.canPrestige()) {
       const cur = 1 + sim.CROWN_BONUS * sim.state.meta.crowns, next = 1 + sim.CROWN_BONUS * (sim.state.meta.crowns + sim.pendingCrowns());
       if (POLICY === 'castle' || (POLICY.startsWith('pct:') && next / cur >= 1 + POLICY.slice(4) / 100) || sim.pendingCrowns() >= NEED || (CYCLE && t < CYCLE[1] * 60 && sim.pendingCrowns() >= CYCLE[0]) || (POLICY.startsWith('once:') && !out.prestiges.length && sim.pendingCrowns() >= +POLICY.slice(5))) {
         const n = sim.pendingCrowns(); out.prestiges.push({ min: +(t / 60).toFixed(1), runMin: +((t - runStart) / 60).toFixed(1), hall, crowns: n, total: sim.state.meta.crowns + n, boost: '+' + Math.round((next / cur - 1) * 100) + '%' });
-        sim.prestige(); sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.setState(sim.state); hall = 1; runStart = t; reignStart = t; // same map every reign: strategies differ only in timing
+        sim.prestige(); const kept = sim.state.run.research; sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.state.run.research = kept; sim.setState(sim.state); hall = 1; runStart = t; reignStart = t; // same map every reign: strategies differ only in timing
         return true;
       }
     }
@@ -176,13 +185,16 @@ function play(seed, opts) {
     liveUntil(Math.min(HOURS * 3600, SESSION * 60));
     for (let i = 0; t < HOURS * 3600; i++) {
       const gap = GAPS[i % GAPS.length] * 3600, pop0 = run().pop, g0 = sim.calc.base.gold;
-      const r = sim.creditAway(gap); t += gap; now = t; sim.setState(sim.state);
+      const t0 = t, r = sim.creditAway(gap); sim.setState(sim.state);
+      t = t0 + gap; now = t;
       const visit = { hour: +(t / 3600).toFixed(1), reign: out.prestiges.length, away: gap / 3600, credited: r.credited / 3600, hall, starving: run().starving, lostPop: Math.max(0, pop0 - run().pop), bought: 0, goldRate: 0,
         hallShare: 0, limit: '' };
       { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // how many such absences the next hall costs, and the material that sets it
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
-      const b0 = out.buys, r0 = out.routine; liveUntil(t + VISIT * 60); visit.bought = out.buys - b0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
+      const b0 = out.buys, r0 = out.routine, n0 = out.prestiges.length; liveUntil(t + VISIT * 60);
+      if (out.prestiges.length > n0) liveUntil(runStart + SESSION * 60); // having abdicated, the player stays to found the new town, as at the very start
+      visit.bought = out.buys - b0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
       out.visits.push(visit); out.peakGold = Math.max(out.peakGold, visit.goldRate);
     }
@@ -206,7 +218,7 @@ function summary(seed, opts) {
   return { seed, taps: opts.taps || 0, policy: opts.policy || 'none', checkins: opts.checkins || 0, lifetimeGold: r.totalGold, goldRate: r.goldRate, crowns: r.crowns, pending: r.pending, hall: r.hall,
     manorMin: r.marks.Manor ? r.marks.Manor.min : null, keep: at('Keep'), castle: at('Castle'), palace: at('Palace'), crowns15: at('crowns15'), crowns20: at('crowns20'), legend: at('held100'),
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
-    reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : null,
+    reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
     visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, decisions: v.decisions, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
 }
@@ -247,7 +259,7 @@ if (require.main === module) {
     console.log(`  first of each: ${r.firsts.map(f => f.what + ' ' + f.t).join(', ')}`);
     console.log(`  payback (spend-weighted median) by hall level 1 to 5: ${r.payback.map(pb).join(', ')}`);
     if (first.length) console.log(`  purchases per check-in, first reign: median ${median(first.map(v => v.bought))}, most ${Math.max(...first.map(v => v.bought))}; not routine: median ${median(first.map(v => v.decisions))}, most ${Math.max(...first.map(v => v.decisions))}`);
-    for (const v of first) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h (credited ${v.credited.toFixed(1)})  ${String(v.bought).padStart(3)} bought, ${String(v.decisions).padStart(2)} not routine  hall level ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  the next hall was ${v.hallShare === Infinity ? 'out of reach' : v.hallShare.toFixed(1) + ' such absences away (' + v.limit + ')'}  Crowns on offer ${v.pending}${v.starving ? '  STARVING' : ''}`);
+    for (const v of first) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h (credited ${v.credited.toFixed(1)})  ${String(v.bought).padStart(3)} bought, ${String(v.decisions).padStart(2)} not routine  hall level ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  the next hall was ${v.hallShare === null || v.hallShare === Infinity ? 'out of reach' : v.hallShare.toFixed(1) + ' such absences away (' + v.limit + ')'}  Crowns on offer ${v.pending}${v.starving ? '  STARVING' : ''}`);
     if (r.reigns.length) console.log('  reigns (hours, hall level, Crowns): ' + r.reigns.map(x => `${x.hours.toFixed(1)} L${x.hall} +${x.crowns}`).join(', '));
     console.log(`  after ${HOURS}h: ${r.crowns} Crowns held, ${r.pending} on offer, ${fmt(r.goldRate)} gold/s; starving ${r.starvedHours.toFixed(1)}h${r.weekCrowns !== null && HOURS >= 168 ? '; Crowns at 7 days ' + r.weekCrowns : ''}\n`);
   } });

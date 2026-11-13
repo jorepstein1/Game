@@ -85,6 +85,7 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 .tile .bn { position: absolute; left: 2px; top: 1px; font-size: 10px; font-family: system-ui, sans-serif; font-weight: 700; color: #1d4d1d; text-shadow: 0 0 2px #fff; white-space: nowrap; letter-spacing: -.3px; }
 
 #strip { display: flex; }
+#clicker[hidden] { display: none; }
 .sheethead, #inspector .goal { display: none; }
 #clicker {
   flex: 1; padding: 14px; font-size: 20px; font-weight: bold; color: #3a2a05;

@@ -28,9 +28,9 @@ test('crownsFor: log scale on the gold earned this reign, with a threshold that 
   assert.strictEqual(sim.crownsFor(-5, 0), 0);
   assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD, 0), 0);
   assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD * 10, 0), sim.CROWN_RATE, 'ten times the threshold');
-  assert.strictEqual(sim.crownsFor(1.4e9, 0), sim.CROWN_MIN, 'a first Palace (about 1.4B gold earned) offers just enough to abdicate');
-  assert.strictEqual(sim.crownsFor(1.4e12, 0), sim.CROWN_MIN + 3 * sim.CROWN_RATE, 'a thousand times the gold adds three times CROWN_RATE');
-  assert.ok(sim.crownsFor(1.4e9, 30) <= sim.CROWN_MIN && sim.crownsFor(1.4e9, 60) < sim.crownsFor(1.4e9, 30), 'the same reign is worth less once many Crowns are held');
+  assert.strictEqual(sim.crownsFor(sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.001, 0), sim.CROWN_MIN); assert.ok(sim.goldForCrowns(sim.CROWN_MIN, 0) > 5e8 && sim.goldForCrowns(sim.CROWN_MIN, 0) < 2e9, 'a first Palace (about a billion gold earned) offers just enough to abdicate');
+  assert.strictEqual(sim.crownsFor(sim.goldForCrowns(sim.CROWN_MIN, 0) * 1001, 0), sim.CROWN_MIN + 3 * sim.CROWN_RATE, 'a thousand times the gold adds three times CROWN_RATE');
+  { const G = sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.001; assert.ok(sim.crownsFor(G, 30) <= sim.CROWN_MIN && sim.crownsFor(G, 60) < sim.crownsFor(G, 30), 'the same reign is worth less once many Crowns are held'); }
   for (const held of [0, 10, 40]) for (const n of [1, 5, 10, 20]) {
     const g = sim.goldForCrowns(n, held);
     assert.strictEqual(sim.crownsFor(g * 1.0001, held), n, `goldForCrowns(${n}, ${held})`); assert.strictEqual(sim.crownsFor(g * 0.999, held), n - 1);
@@ -284,6 +284,12 @@ test('routine upgrades: only cheap ones, cheapest first, never more than the tow
     assert.ok((def.work && sim.calc.need + def.work > sim.calc.cap) || Object.keys(c).some(r => c[r] > Math.max(0, sim.calc.base[r] + (r === 'food' ? sim.calc.eaten : 0)) * sim.ROUTINE_SECONDS), 'what is left is not cheap: ' + t.id + ' level ' + t.level); }
   for (const r in run.res) run.res[r] = 0;
   assert.strictEqual(sim.routineUpgrades().count, 0, 'and nothing is bought that cannot be paid for');
+});
+
+test('Stewardship is kept when a new kingdom is founded; other research is not', sim => {
+  sim.state.run.research = { steward: 1, axes: 1 }; sim.state.run.tiles[sim.HALL_KEY].level = 4; sim.state.run.gold = sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.01;
+  assert.ok(sim.prestige().ok);
+  assert.deepStrictEqual(plain(sim.state.run.research), { steward: 1 }); assert.strictEqual(sim.researchFx('offlineHours'), 24);
 });
 
 test('decrees advance by id', sim => {

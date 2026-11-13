@@ -345,7 +345,9 @@ function prestige() {
   if (!canPrestige()) return fail();
   const n = pendingCrowns(), meta = state.meta;
   meta.bonusCrowns += repLevel('monument'); meta.crowns += n; meta.stats.prestiges++;
-  state.run = newRun(undefined, meta.crowns); calc = compute();
+  const kept = RESEARCH.filter(r => r.keep && hasResearch(r.id)); // knowledge that outlasts a reign
+  state.run = newRun(undefined, meta.crowns); for (const r of kept) state.run.research[r.id] = 1;
+  calc = compute();
   return { ok: true, crowns: n, msg: `👑 A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
 }
 

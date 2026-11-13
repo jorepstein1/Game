@@ -19,7 +19,7 @@ const HALL_TIERS = [
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
   { gold: 4000, wood: 2000, stone: 500 }, { gold: 1.5e5, wood: 5e4, stone: 1.2e4 },
-  { gold: 4e6, stone: 8e5, iron: 1.2e4 }, { gold: 6e8, stone: 8e7, iron: 1.5e6 },
+  { gold: 3.2e6, stone: 6.5e5, iron: 1e4 }, { gold: 4e8, stone: 5e7, iron: 1e6 },
 ];
 const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -58,7 +58,7 @@ const CROWN_BONUS = 0.05;        // production bonus per Crown
 // last, so starting over pays. CROWN_GOLD is set so that a first reign is offered 15 Crowns about when its Palace
 // stands (about 37 hours at five check-ins a day) and 20 about half a day later.
 const CROWN_RATE = 9;
-const CROWN_GOLD = 2.8e7;
+const CROWN_GOLD = 2.2e7;
 const CROWN_STEEPEN = 0;
 const CROWN_DEAR_FROM = 30;      // past this many Crowns held the threshold also multiplies by (multiplier / multiplier at 30)^CROWN_DEAR,
 const CROWN_DEAR = 4;            // so later reigns must grow further, not just repeat the first reign faster
@@ -84,7 +84,7 @@ const BUILDINGS = {
     adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the village. Thrives beside water and mills.' },
   quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
-  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 150, wood: 100, stone: 30 }, work: 3, out: { gold: 4 },
+  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 600, wood: 400, stone: 120 }, work: 3, out: { gold: 4 },
     adj: { building: { cottage: 0.2, guild: 0.5 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
   mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { wood: 800, stone: 300 }, work: 2, linear: true, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 2 },
     desc: 'Grinds grain and boosts every farm beside it.' },
@@ -102,13 +102,13 @@ const BUILDINGS = {
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
 
 // Research. mult: production multiplier per building id.
-// fx: other effects, read through researchFx(): clearCost (×), offlineHours (max).
+// fx: other effects, read through researchFx(): clearCost (×), offlineHours (max). keep: survives abdication.
 const RESEARCH = [
   { id: 'axes', name: 'Iron-shod Axes', desc: 'Lumber Camps ×2', hall: 1, cost: { gold: 150 }, mult: { lumber: 2 } },
   { id: 'rotation', name: 'Crop Rotation', desc: 'Farms ×2', hall: 1, cost: { gold: 200, wood: 100 }, mult: { farm: 2 } },
   { id: 'tithes', name: 'Tithes', desc: 'Cottage taxes ×2', hall: 1, cost: { gold: 400 }, mult: { cottage: 2 } },
   { id: 'chisels', name: 'Stone Chisels', desc: 'Quarries ×2', hall: 1, cost: { gold: 600, wood: 300 }, mult: { quarry: 2 } },
-  { id: 'steward', name: 'Stewardship', desc: 'Offline progress lasts 24h instead of 8h', hall: 1, cost: { gold: 200 }, fx: { offlineHours: 24 } },
+  { id: 'steward', name: 'Stewardship', desc: 'Offline progress lasts 24h instead of 8h. Kept when you found a new kingdom', hall: 1, cost: { gold: 200 }, fx: { offlineHours: 24 }, keep: true },
   { id: 'plough', name: 'Heavy Plough', desc: 'Farms and Mills ×2', hall: 2, cost: { gold: 12000, stone: 2500 }, mult: { farm: 2, mill: 2 } },
   { id: 'charter', name: 'Market Charter', desc: 'Markets ×2', hall: 2, cost: { gold: 15000, wood: 7500 }, mult: { market: 2 } },
   { id: 'saws', name: 'Two-man Saws', desc: 'Lumber Camps ×2', hall: 2, cost: { gold: 20000, stone: 5000 }, mult: { lumber: 2 } },
