@@ -5,14 +5,17 @@
 // Deterministic: the map comes from the seed and the bot makes no random choices, so the same
 // arguments always print the same numbers. No dependencies.
 //
-// The bot is a cautious player. It never taps and never meets a merchant. Once a second it:
+// The bot is a cautious player. It never taps (unless told to) and never meets a merchant. Once a second it:
 //   1. claims a finished decree;
 //   2. if food income is under 10% of upkeep, buys only food (farms, mills, their research, Granaries);
 //   3. else if housing is within 5% of jobs, buys only housing (cottages, Town Planning);
-//   4. else builds any building type it has none of, then buys hall upgrades, expansions and research
-//      as soon as they are affordable, then the cheapest other purchase costing at most 20% of the next
-//      hall upgrade (repeatable upgrades are also allowed up to half the gold in hand).
-// Policy: none = never abdicate; castle = as soon as allowed; crowns:N = whenever N Crowns are on offer;
+//   4. else builds any building type it has none of (clearing one tile for it if the map is full), then buys
+//      hall upgrades, expansions and research as soon as they are affordable, then the cheapest other purchase
+//      costing at most 20% of the next hall upgrade (repeatable upgrades are also allowed up to half the gold
+//      in hand). It skips producers of a material it already holds far more of than anything it wants costs
+//      (option noGlut: true turns that off, which models a careless buyer), and when it has the gold for
+//      the hall but lacks a material, it upgrades that material's producer (noBottleneck: true turns that off).
+// Policy: none = never abdicate; castle = as soon as the game allows; crowns:N = whenever N Crowns are on offer;
 // once:N = the first time only; cycle:N:M = at N Crowns until minute M, then build up; pct:P = when the Crown
 // multiplier would rise by P percent. Taps: hand collections per second (0 = none).
 const { loadSim } = require('./harness');
@@ -20,13 +23,14 @@ const sum = c => Object.values(c).reduce((a, b) => a + b, 0);
 
 function play(seed, opts) {
   const { hours: HOURS = 4, policy: POLICY = 'none', taps: TAPS = 0, patch } = opts || {};
-  const STAMPS = [10, 60, 180, 240, 360, 480].filter(m => m <= HOURS * 60), NEED = POLICY.startsWith('crowns:') ? +POLICY.slice(7) : Infinity;
+  const STAMPS = ((opts && opts.stamps) || [10, 60, 180, 240, 360, 480]).filter(m => m <= HOURS * 60), NEED = POLICY.startsWith('crowns:') ? +POLICY.slice(7) : Infinity;
   const CYCLE = POLICY.startsWith('cycle:') ? POLICY.slice(6).split(':').map(Number) : null; // cycle:N:M = abdicate at N Crowns until minute M, then build up
+  const BOTTLENECK = !(opts && opts.noBottleneck), GLUT = !(opts && opts.noGlut);
   const sim = loadSim(patch);
   const s = sim.newState(0); s.run = sim.newRun(seed);
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0 } };
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -38,6 +42,11 @@ function play(seed, opts) {
     for (const key in run().tiles) { const t = run().tiles[key], d = t.kind === 'building' ? B[t.id] : null;
       c.push({ k: d ? 'up' : 'hall', id: t.id, cost: sim.upgradeCost(t), food: !!(d && d.out && d.out.food), house: !!(d && d.house), go: () => sim.upgrade(key) }); }
     for (const r of sim.RESEARCH) if (!sim.hasResearch(r.id) && r.hall <= hl) c.push({ k: 'research', id: r.id, cost: r.cost, food: !!(r.mult && (r.mult.farm || r.mult.mill)), go: () => sim.buyResearch(r.id) });
+    if (!ps.length && sim.BUILD_ORDER.some(id => B[id].hall <= hl && sim.count(id) === 0)) { // map full and a new building type is waiting: clear one tile for it
+      const r = sim.mapRadius(); let spot = null;
+      for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r && !spot; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] !== 'plain') { spot = x + ',' + y; break; }
+      if (spot) c.push({ k: 'clear', cost: sim.clearCost(), go: () => sim.clearLand(spot) });
+    }
     if (run().exp < sim.EXPAND_COST.length) c.push({ k: 'expand', cost: sim.EXPAND_COST[run().exp], go: () => sim.expand() });
     for (const r of sim.REPEATABLES) if (r.hall <= hl) c.push({ k: 'rep', id: r.id, cost: sim.repCost(r), food: r.id === 'food', house: r.id === 'housing', go: () => sim.buyRepeatable(r.id) });
     return c;
@@ -54,6 +63,11 @@ function play(seed, opts) {
       else {
         if (C.staff < 1) return; // housing is there: wait for villagers to move in
         const nt = Object.keys(run().tiles).length, nf = sim.count('farm') + sim.count('mill'), roomy = C.cap >= C.need * 1.25 + 10, few = plots().length <= 3;
+        // No point raising output of a material already piled up far beyond anything on the shopping list.
+        const lim = 0.2 * sum(sim.upgradeCost(run().tiles[sim.HALL_KEY])), want = {};
+        for (const a of c) if (a.k === 'hall' || a.k === 'expand' || a.k === 'research' || sum(a.cost) <= lim) for (const r in a.cost) want[r] = Math.max(want[r] || 0, a.cost[r]);
+        const glut = a => GLUT && (a.k === 'up' || a.k === 'build') && B[a.id] && B[a.id].out && sim.count(a.id) > 0 && Object.keys(B[a.id].out).every(r => r !== 'gold' && r !== 'food' && run().res[r] > 5 * (want[r] || 0) + 1000);
+        c = c.filter(a => !glut(a));
         c = c.filter(a => (a.food ? a.k === 'build' && nf < 0.22 * nt : true) && !(a.house && roomy) && !(a.k === 'build' && sim.count(a.id) > 0 && few));
       }
       c = c.filter(a => sim.canAfford(a.cost)).sort((a, b) => sum(a.cost) - sum(b.cost));
@@ -61,8 +75,12 @@ function play(seed, opts) {
       let pick = c[0];
       if (!hungry && !cramped) {
         const cap = 0.2 * sum(sim.upgradeCost(run().tiles[sim.HALL_KEY]));
-        pick = c.find(a => a.k === 'build' && sim.count(a.id) === 0) || c.find(a => a.k === 'hall' || a.k === 'expand' || a.k === 'research')
+        pick = c.find(a => a.k === 'build' && sim.count(a.id) === 0) || c.find(a => a.k === 'clear') || c.find(a => a.k === 'hall' || a.k === 'expand' || a.k === 'research')
           || c.find(a => a.k !== 'hall' && (sum(a.cost) <= cap || (a.k === 'rep' && sum(a.cost) <= 0.5 * run().res.gold)));
+        if (!pick) { // saving for the hall with gold to spare: put it into whatever the hall is short of (a mine, a quarry)
+          const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]), short = Object.keys(hc).filter(r => r !== 'gold' && run().res[r] < hc[r]);
+          if (BOTTLENECK && short.length && run().res.gold >= (hc.gold || 0)) pick = c.find(a => (a.k === 'up' || a.k === 'build') && B[a.id] && B[a.id].out && short.some(r => B[a.id].out[r]) && !short.some(r => a.cost[r]) && run().res.gold - (a.cost.gold || 0) >= (hc.gold || 0));
+        }
         if (!pick) return;
       }
       out.spent[pick.k] += pick.cost.gold || 0; pick.go();
@@ -71,7 +89,8 @@ function play(seed, opts) {
   const snap = () => { sim.setState(sim.state); const C = sim.calc, lv = id => { const a = Object.values(run().tiles).filter(t => id(t)); return a.length + '×' + (a.reduce((p, t) => p + t.level, 0) / (a.length || 1)).toFixed(1); };
     return { hall: sim.hallName(sim.hallLevel()), pop: Math.floor(run().pop), housing: C.cap, jobs: C.need, gold: sim.fmt(C.base.gold) + '/s', food: sim.fmt(C.base.food) + '/s', upkeep: sim.fmt(C.eaten) + '/s',
       farms: lv(t => t.id === 'farm' || t.id === 'mill'), cottages: lv(t => t.id === 'cottage'), other: lv(t => t.kind === 'building' && !['farm', 'mill', 'cottage'].includes(t.id)),
-      pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables) }; };
+      pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
+      stone: sim.fmt(C.base.stone) + '/s', iron: sim.fmt(C.base.iron) + '/s', stock: Object.keys(run().res).map(r => r + ' ' + sim.fmt(run().res[r])).join(', '), plots: plots().length }; };
   let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
   while (t < HOURS * 3600) {
     sim.advance(0.5); t += 0.5;
@@ -98,13 +117,13 @@ function play(seed, opts) {
 // Every reign uses the same map, so the strategies differ only in when they start over. Runs go in parallel.
 const STRATEGIES = [
   ['never abdicate', 'none'],
-  ['at 10 Crowns until 2.5h, then build', 'cycle:10:150'],
-  ['at 10 Crowns, always', 'crowns:10'],
+  ['at 20 Crowns until 2.5h, then build', 'cycle:20:150'],
+  ['at every chance (15 Crowns)', 'castle'],
 ];
 function summary(seed, opts) {
   const r = play(seed, opts);
   return { seed, taps: opts.taps || 0, policy: opts.policy, lifetimeGold: r.totalGold, goldRate: r.goldRate, peakGold: r.peakGold, crowns: r.crowns, pending: r.pending, hall: r.hall,
-    abdications: r.prestiges.map(p => p.min), reigns: r.prestiges.map(p => ({ minutes: p.runMin, hall: p.hall })), castle: r.marks.Castle ? r.marks.Castle.min : null, palace: r.marks.Palace ? r.marks.Palace.min : null, stamps: r.stamps };
+    starvedMin: r.starve / 60, abdications: r.prestiges.map(p => p.min), reigns: r.prestiges.map(p => ({ minutes: p.runMin, hall: p.hall })), castle: r.marks.Castle ? r.marks.Castle.min : null, palace: r.marks.Palace ? r.marks.Palace.min : null, stamps: r.stamps };
 }
 function compare(hours, seeds, tapRates, jobs) {
   const todo = [];

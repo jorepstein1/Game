@@ -174,7 +174,7 @@ const crownThreshold = crowns => CROWN_GOLD * Math.pow(crownMult(crowns), CROWN_
 const crownsFor = (runGold, crownsHeld) => Math.max(0, Math.floor(CROWN_RATE * Math.log10(Math.max(1, runGold) / crownThreshold(crownsHeld || 0)) + 1e-9));
 const goldForCrowns = (n, crownsHeld) => crownThreshold(crownsHeld || 0) * Math.pow(10, n / CROWN_RATE); // reign gold needed for n Crowns
 const pendingCrowns = () => crownsFor(state.run.gold, state.meta.crowns) + repLevel('monument');
-const canPrestige = () => hallLevel() >= PRESTIGE_HALL && pendingCrowns() >= 1;
+const canPrestige = () => hallLevel() >= PRESTIGE_HALL && pendingCrowns() >= CROWN_MIN; // small offers are not worth a reign, so they are not made
 
 // ───────────────────────── Simulation ─────────────────────────
 // Returns the derived snapshot. `base` is what the city makes on its own; `rates` is what it is making

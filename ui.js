@@ -191,6 +191,14 @@ function renderInspector() {
   patch($('inspector'), h);
 }
 
+// One line on whether abdicating now is worth it.
+function offerNote(n) {
+  const gain = Math.round((crownMult(state.meta.crowns + n) / crownMult(state.meta.crowns) - 1) * 100);
+  if (n < CROWN_MIN) return `Not yet: abdication opens at ${CROWN_MIN} Crowns on offer (at ${fmt(goldForCrowns(CROWN_MIN - repLevel('monument'), state.meta.crowns))} gold this reign).`;
+  if (n < CROWN_GOAL) return `Small offer (+${gain}% production). Waiting for ${CROWN_GOAL} or more pays better.`;
+  return `Good offer (+${gain}% production): a fine time to start over.`;
+}
+
 const TABS = { build: '🔨 Build', research: '📜 Research', decrees: '🎯 Decrees', realm: '👑 Realm' };
 function renderTabs() {
   const dots = { decrees: decreeDone(), research: RESEARCH.some(r => !hasResearch(r.id) && r.hall <= hallLevel() && canAfford(r.cost)),
@@ -237,10 +245,11 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>👑 Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns on offer come from the gold earned this reign. Most arrive early and each further one takes more gold, so around ${CROWN_GOAL} is a good time to start over. Past ${CROWN_DEAR_FROM} Crowns each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with extra supplies for every Crown you hold (up to ${HEAD_START_CAP}).</p>
+      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with extra supplies for every Crown you hold (up to ${HEAD_START_CAP}).</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
-      <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
+      <p class="stat">${offerNote(n)}</p>
+      <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
       <hr><h3>Chronicle</h3>
       <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b></p>
       <p class="stat">Buildings raised: <b>${fmt(meta.stats.built)}</b> · Taxes collected by hand: <b>${fmt(meta.stats.clicks)}</b></p>
@@ -431,7 +440,8 @@ const CITY_ACTIONS = {
     const n = pendingCrowns();
     confirmBox('Found a new kingdom?', `You abdicate and start over on fresh land. Buildings, resources and research are lost, but you keep
       <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
-      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, Math.min(HEAD_START_CAP, state.meta.crowns + n)), true)} extra.`, () => {
+      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, Math.min(HEAD_START_CAP, state.meta.crowns + n)), true)} extra.
+      ${n < CROWN_GOAL ? `<br><br><b>This is a small offer.</b> Reigns that wait for ${CROWN_GOAL} Crowns or more pay better.` : ''}`, () => {
       if (!say(prestige()).ok) return;
       ui.sel = {}; ui.mapN = 0; save(); render();
     });

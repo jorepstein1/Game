@@ -17,7 +17,7 @@ const HALL_TIERS = [
 ];
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
   { gold: 500, wood: 300, stone: 100 }, { gold: 6000, wood: 3000, stone: 2000 },
-  { gold: 1.2e5, stone: 4e4, iron: 5000 }, { gold: 2e6, stone: 5e5, iron: 8e4 },
+  { gold: 1.2e5, stone: 4e4, iron: 5000 }, { gold: 1.5e6, stone: 5e5, iron: 5e4 },
 ];
 const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -27,7 +27,7 @@ const PRESTIGE_HALL = 4;         // hall level needed to abdicate
 
 const MAP_SIZE = 11, MAP_MID = 5;
 const MAP_RADIUS = [2, 3, 4, 5]; // unlocked radius around the centre per expansion
-const EXPAND_COST = [{ gold: 2000, wood: 1000 }, { gold: 6e4, stone: 2e4 }, { gold: 2e6, iron: 5e4 }];
+const EXPAND_COST = [{ gold: 2000, wood: 1000 }, { gold: 6e4, stone: 2e4 }, { gold: 1e6, iron: 2e4 }];
 const CLEAR_COST = { gold: 500 }; // clearing forest/hills/water into an open plot
 const CLEAR_GROWTH = 2;           // each clearing costs this many times the last
 
@@ -60,7 +60,8 @@ const CROWN_GOLD = 4000;
 const CROWN_STEEPEN = 3;
 const CROWN_DEAR_FROM = 30;      // past this many Crowns held the threshold also multiplies by (multiplier / multiplier at 30)^CROWN_DEAR,
 const CROWN_DEAR = 6;            // so later reigns must grow further, not just repeat the first hour faster
-const CROWN_GOAL = 10;           // Crowns on offer at which the game suggests abdicating
+const CROWN_MIN = 15;            // Crowns that must be on offer before abdication opens: a first Palace, not a first Castle
+const CROWN_GOAL = 20;           // Crowns on offer at which the game suggests abdicating
 const CLICK_SHARE = 0.004;       // each hand collection adds this share of base gold/s (×5 with Royal Seal = 2%)
 const FESTIVAL_MULT = 3, FESTIVAL_SECONDS = 60;
 const MERCHANT_SECONDS = 120;    // merchant gifts are worth this many seconds of base income
@@ -86,7 +87,7 @@ const BUILDINGS = {
     desc: 'Grinds grain and boosts every farm beside it.' },
   tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 300, wood: 150 }, work: 2, out: { gold: 2 },
     desc: 'Merry villagers pay more tax. Boosts cottages beside it.' },
-  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 800, wood: 400, stone: 200 }, work: 4, out: { iron: 0.4 },
+  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 800, wood: 400, stone: 200 }, work: 4, out: { iron: 0.6 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron ore. Wants hills nearby.' },
   smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 1500, stone: 500, iron: 50 }, work: 4, out: { gold: 25 },
     adj: { building: { mine: 0.3, guild: 0.5 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
@@ -153,9 +154,9 @@ const DECREES = [
   { id: 'treasury', title: 'Royal Treasury', desc: 'Earn 500 gold per second.', progress: () => [calc.base.gold, 500], reward: { gold: 60000 } },
   { id: 'castle', title: 'Seat of Power', desc: 'Raise a Castle.', done: () => hallLevel() >= 4, reward: { iron: 3000 } },
   { id: 'city', title: 'A Thriving City', desc: 'Reach a population of 750. Villagers need housing, and bigger towns eat more per head.', progress: () => [state.run.pop, 750], reward: { gold: 1e5 } },
-  { id: 'dynasty', title: 'A New Dynasty', desc: 'Found a new kingdom from the Realm tab.', done: () => state.meta.stats.prestiges >= 1, reward: { gold: 5000, wood: 2000 } },
   { id: 'guild', title: 'Brotherhood of Trades', desc: 'Build a Guildhall.', done: () => count('guild') >= 1, reward: { gold: 2e5 } },
   { id: 'palace', title: 'Crown Jewel', desc: 'Raise a Palace.', done: () => hallLevel() >= 5, reward: { gold: 5e6 } },
+  { id: 'dynasty', title: 'A New Dynasty', desc: 'Found a new kingdom from the Realm tab. It opens at ' + CROWN_MIN + ' Crowns on offer, about when a Palace stands; ' + CROWN_GOAL + ' or more pays best.', done: () => state.meta.stats.prestiges >= 1, reward: { gold: 5000, wood: 2000 } },
   { id: 'metropolis', title: 'Metropolis', desc: 'Reach a population of 2,000.', progress: () => [state.run.pop, 2000], reward: { gold: 2e7 } },
   { id: 'golden', title: 'Golden Age', desc: 'Earn 1M gold per second.', progress: () => [calc.base.gold, 1e6], reward: { gold: 1e9 } },
   { id: 'legend', title: 'Legend', desc: 'Hold 100 Crowns.', progress: () => [state.meta.crowns, 100], reward: { gold: 1e9 } },

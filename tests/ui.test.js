@@ -133,8 +133,22 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(rt.same && rt.utf === 'żółć ✓ 👑', 'export encodes UTF-8 and decodes back exactly');
   await page.evaluate(() => document.querySelector('#modal [data-act="close"]').click());
 
+  // --- abdication offers: none below the minimum, a warning below the goal, the Realm dot only at the goal
+  const offer = async n => { await page.evaluate(n => { state.run.repeatables = {}; state.run.gold = goldForCrowns(n, state.meta.crowns) * 1.001; closeModal(); ui.tab = 'realm'; render(); }, n);
+    const before = await page.evaluate(() => ({ n: pendingCrowns(), btn: document.querySelector('#panel [data-act="prestige"]').textContent.trim(), cant: document.querySelector('#panel [data-act="prestige"]').classList.contains('cant'),
+      note: [...document.querySelectorAll('#panel .stat')].map(p => p.textContent).find(x => /offer|Not yet/.test(x) && !/Crowns held/.test(x)) || '', dot: !!document.querySelector('#tabs [data-id="realm"] .dot') }));
+    await page.evaluate(() => document.querySelector('#panel [data-act="prestige"]').click());
+    const modal = await page.evaluate(() => { const m = document.getElementById('modal'), open = !!document.querySelector('#modal [data-act="yes"]'), text = open ? m.textContent : ''; closeModal(); return { open, text }; });
+    return Object.assign(before, { modal: modal.open, warns: /small offer/i.test(modal.text) }); };
+  const CROWN = await page.evaluate(() => ({ MIN: CROWN_MIN, GOAL: CROWN_GOAL }));
+  const hallWas = await page.evaluate(() => { const l = hallLevel(); state.run.tiles[HALL_KEY].level = 4; return l; });
+  const low = await offer(CROWN.MIN - 1), mid = await offer(CROWN.MIN), high = await offer(CROWN.GOAL);
+  ok(low.n === CROWN.MIN - 1 && low.cant && /Needs \d+ Crowns/.test(low.btn) && /Not yet/.test(low.note) && !low.dot && !low.modal, 'below the minimum offer the Realm tab says so and abdication stays shut ' + JSON.stringify(low));
+  ok(mid.n === CROWN.MIN && !mid.cant && /Small offer/.test(mid.note) && !mid.dot && mid.modal && mid.warns, 'a small offer can be taken but the tab and the dialog warn, and no dot shows ' + JSON.stringify(mid));
+  ok(high.n === CROWN.GOAL && !high.cant && /Good offer/.test(high.note) && high.dot && high.modal && !high.warns, 'at the goal the Realm dot lights and the dialog has no warning ' + JSON.stringify(high));
+  await page.evaluate(l => { state.run.tiles[HALL_KEY].level = l; render(); }, hallWas);
   // --- prestige round trip: meta kept, run replaced
-  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.gold = 5e7; state.run.repeatables.monument = 2; render(); });
+  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.gold = 5e8; state.run.repeatables.monument = 2; render(); });
   const pend = await page.evaluate(() => pendingCrowns());
   await page.evaluate(() => { document.querySelector('#panel [data-act="prestige"]').click(); document.querySelector('#modal [data-act="yes"]').click(); });
   const after = await page.evaluate(() => ({ c: state.meta.crowns, b: state.meta.bonusCrowns, p: pendingCrowns(), rep: state.run.repeatables, hall: hallLevel(), tiles: Object.keys(state.run.tiles).length, tg: state.meta.stats.totalGold, gold: state.run.res.gold }));
