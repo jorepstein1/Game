@@ -12,13 +12,19 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 
 let lastTick = Date.now(); // wall-clock time the simulation has been advanced to
 
+const BAR_SETTLE_MS = 350; // a second tap on the bottom bar is ignored this long after a tap that swapped its buttons
+
 // UI-only state: nothing here is saved.
 const ui = {
   screen: 'city',
   sel: {},               // { build: id } or { tile: 'x,y' }
   tab: 'build',
   popKey: null,          // tile to play the placement animation on
-  mapN: 0,
+  mapN: 0,               // map size last drawn; 0 forces a recentre on the hall
+  mapPans: false,
+  barMode: '',           // what the bottom bar is showing: 'build', 'tile' or 'terrain'
+  barTapAt: -Infinity,   // when, and in which mode, the bar was last tapped
+  barTapMode: '',
   merchant: { next: 70, left: 0 },
   warnedStarve: false,
   paused: false,         // another tab took over the save
@@ -111,7 +117,10 @@ function renderMap() {
   // Only a map too big for its frame becomes a scroll container; smaller ones let a drag scroll the page.
   const pans = n * 40 + (n - 1) * 3 + 4 > sc.clientWidth + 1;
   sc.classList.toggle('pans', pans);
-  if (n !== ui.mapN) { ui.mapN = n; sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2; sc.scrollTop = (sc.scrollHeight - sc.clientHeight) / 2; }
+  // Recentre on the hall only when the map changes size or first becomes pannable, never on a plain re-render
+  // or resize (mobile browsers fire resize whenever the address bar shows or hides).
+  if (n !== ui.mapN || (pans && !ui.mapPans)) { ui.mapN = n; sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2; sc.scrollTop = (sc.scrollHeight - sc.clientHeight) / 2; }
+  ui.mapPans = pans;
   $('maphint').hidden = !pans;
 }
 
@@ -245,6 +254,9 @@ function renderBuildBar() {
   let h = '';
   const k = ui.sel.tile, t = k && tileAt(k), tr = k && !t ? state.run.terrain[xy(k)[0]][xy(k)[1]] : null;
   const close = '<button class="bb act close" data-act="deselect" aria-label="Close"><span class="ic">✕</span><small>Close</small></button>';
+  // The bar's buttons change meaning by position when it switches mode; the click handler uses this to
+  // drop the second tap of a double tap (Close must not fall through to the Farm button that replaces it).
+  ui.barMode = t ? 'tile' : tr && tr !== 'plain' ? 'terrain' : 'build';
   if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
     const kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
     h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}</button>`;
@@ -463,6 +475,11 @@ function bindInput() {
     requestPersistence();
     const el = e.target.closest('[data-act]');
     if (!el || ui.paused || el.classList.contains('locked')) return;
+    if (el.closest('#buildbar')) {
+      const now = performance.now();
+      if (now - ui.barTapAt < BAR_SETTLE_MS && ui.barTapMode !== ui.barMode) return; // the bar changed under a double tap
+      ui.barTapAt = now; ui.barTapMode = ui.barMode;
+    }
     const fn = SCREENS[ui.screen].actions[el.dataset.act];
     if (!hasOwn(SCREENS[ui.screen].actions, el.dataset.act)) return;
     fn(el.dataset.id, e, el); render();
@@ -489,7 +506,7 @@ function bindInput() {
   $('res').addEventListener('scroll', renderResources, { passive: true });
   window.addEventListener('beforeunload', () => save());
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else { simTick(); if (!ui.paused) render(); } });
-  window.addEventListener('resize', () => { ui.mapN = 0; if (!ui.paused) render(); });
+  window.addEventListener('resize', () => { if (!ui.paused) render(); }); // re-checks whether the map needs to pan; keeps its position
 }
 
 // ───────────────────────── Timers ─────────────────────────

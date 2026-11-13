@@ -237,6 +237,15 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   up = await reach('#buildbar [data-act="up"]');
   ok(up && up.inView && /Upgrade \+5 🏠/.test(up.text), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
   await shot(p3, 'shot-390x664-tile.png');
+  // a double tap on Close must not fall through to the build button that takes its place
+  const dbl = await p3.evaluate(() => { ui.sel = { tile: '6,6' }; render();
+    const c = document.querySelector('#buildbar [data-act="deselect"]'), r = c.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    c.click(); const under = document.elementFromPoint(x, y).closest('[data-act]'); under.click();
+    return { x, y, act: under.dataset.act, id: under.dataset.id, tile: ui.sel.tile, build: ui.sel.build }; });
+  ok(dbl.act === 'pick' && !dbl.tile && !dbl.build, 'second tap of a double tap on Close lands on "' + dbl.id + '" and is ignored');
+  await p3.waitForTimeout(400); await p3.touchscreen.tap(dbl.x, dbl.y); await settle(p3);
+  ok(await p3.evaluate(() => ui.sel.build) === dbl.id, 'the same button works once the bar has settled');
+  await p3.evaluate(() => { ui.sel = {}; render(); });
   // R2: a drag that starts on the map scrolls the page unless the map itself can pan that way
   for (const [exp, n] of [[0, 5], [1, 7]]) {
     await fresh(p3); await p3.evaluate(exp => { state.run.exp = exp; ui.mapN = 0; render(); }, exp); await settle(p3);
@@ -255,6 +264,17 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await drag(cdp, big.x, big.y, 0, -250); await p3.waitForFunction(() => { const y = scrollY; return new Promise(r => setTimeout(() => r(scrollY === y), 150)); });
   const chained = await p3.evaluate(() => scrollY);
   ok(chained >= 150, '11x11 map at its bottom edge: an upward drag chains to the page (' + chained + 'px)');
+  // S1: a resize (address bar showing or hiding) must not recentre a panned map
+  const keptPan = await p3.evaluate(() => { scrollTo(0, 0); const sc = document.getElementById('mapscroll'); sc.scrollLeft = 0; sc.scrollTop = 0;
+    window.dispatchEvent(new Event('resize')); render(); return { left: sc.scrollLeft, top: sc.scrollTop, pans: sc.classList.contains('pans') }; });
+  ok(keptPan.pans && keptPan.left === 0 && keptPan.top === 0, "resize keeps the map where it was panned to " + JSON.stringify(keptPan));
+  await p3.setViewportSize({ width: 390, height: 720 }); await settle(p3);
+  const kept2 = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'); return { left: sc.scrollLeft, top: sc.scrollTop }; });
+  ok(kept2.left === 0 && kept2.top === 0, 'a real viewport height change (664 -> 720) keeps it too ' + JSON.stringify(kept2));
+  await p3.setViewportSize({ width: 390, height: 664 });
+  const grown = await p3.evaluate(() => { state.run.exp = 2; render(); const sc = document.getElementById('mapscroll'); return { left: sc.scrollLeft, max: sc.scrollWidth - sc.clientWidth }; });
+  ok(grown.max > 0 && Math.abs(grown.left - grown.max / 2) <= 1, 'a change of map size still recentres on the hall ' + JSON.stringify(grown));
+  await p3.evaluate(() => { state.run.exp = 3; render(); const sc = document.getElementById('mapscroll'); sc.scrollTop = sc.scrollHeight; scrollTo(0, 0); }); await settle(p3);
   ok(e4.length === 0, 'phone: no console errors ' + JSON.stringify(e4));
   await ph.close();
 
