@@ -10,7 +10,7 @@ function loadSim(patch) {
   let names = [];
   for (const f of ['data.js', 'sim.js']) {
     let src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    for (const k in patch || {}) src = src.replace(new RegExp('^const ' + k + ' = [^;,]+', 'm'), 'const ' + k + ' = ' + patch[k]);
+    for (const k in patch || {}) if (k[0] !== '$') src = src.replace(new RegExp('^const ' + k + ' = [^;,]+', 'm'), 'const ' + k + ' = ' + patch[k]);
     vm.runInContext(src, ctx, { filename: f });
     names = names.concat([...src.matchAll(/^(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]));
     names = names.concat([...src.matchAll(/^const\s+[A-Za-z_$][\w$]*\s*=[^;\n]*?,\s*([A-Z_]+)\s*=/gm)].map(m => m[1])); // `const A = 1, B = 2;`
@@ -19,6 +19,7 @@ function loadSim(patch) {
   names = [...new Set(names)];
   const sim = vm.runInContext('({' + names.map(n => `get ${n}() { return ${n}; }`).join(',') +
     ', setState(s) { state = s; calc = compute(); }, eval(code) { return eval(code); } })', ctx);
+  if (patch && patch.$tweak) sim.eval(patch.$tweak); // what-if code run inside the game, e.g. 'HALL_COST[2].gold = 5e5'
   return sim;
 }
 module.exports = { loadSim, ROOT };

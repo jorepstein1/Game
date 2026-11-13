@@ -1,13 +1,13 @@
 'use strict';
 // Browser checks (layout at phone and desktop sizes, input, saves). Needs Playwright with Chromium:
 //   node tests/ui.test.js            (set SHOTS=<dir> to also write screenshots there)
-// Every page starts from a fixed map seed with merchant visits and smooth scrolling off, so runs are repeatable.
+// Every page starts from a fixed map seed with smooth scrolling off, so runs are repeatable.
 const path = require('path'), { pathToFileURL } = require('url');
 const { chromium, devices } = require('playwright');
 const URL = pathToFileURL(path.join(__dirname, '..', 'index.html')).href, OUT = process.env.SHOTS;
 const shot = (page, name) => OUT ? page.screenshot({ path: path.join(OUT, name) }) : null;
-// A known starting position: same terrain every run, no merchant wandering in mid-test.
-const fresh = page => page.evaluate(() => { startNewGame(Date.now()); state.run = newRun(12345); calc = compute(); ui.sel = {}; ui.tab = 'build'; ui.mapN = 0; ui.merchant.next = 1e9; ui.merchant.left = 0; closeModal(); render(); scrollTo(0, 0); });
+// A known starting position: same terrain every run.
+const fresh = page => page.evaluate(() => { startNewGame(Date.now()); state.run = newRun(12345); calc = compute(); ui.sel = {}; ui.tab = 'build'; ui.mapN = 0; closeModal(); render(); scrollTo(0, 0); });
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 async function drag(cdp, x, y, dx, dy) { // a real touch drag, as a finger would do it
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
@@ -53,15 +53,14 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     return { y: scrollY, sel: ui.sel.build, sheet: ui.sheet, panel: getComputedStyle(document.getElementById('panel')).display, mt: Math.round(m.top), mb: Math.round(m.bottom), bt: Math.round(b.top), rb: Math.round(r.bottom) }; });
   ok(st.sel === 'lumber' && !st.sheet && st.panel === 'none' && st.y === 0 && st.mt >= st.rb - 1 && st.mb <= st.bt + 1, 'picking a card closes the sheet: map visible between res bar and build bar ' + JSON.stringify(st));
 
-  // --- late game state: 11x11 map, all resources, crowns, festival, merchant
-  await page.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12; run.buffUntil = run.clock + 60; ui.merchant.left = 18; ui.merchant.x = 40; ui.merchant.y = 40;
+  // --- late game state: 11x11 map, all resources, crowns
+  await page.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12;
     run.res = { gold: 123456789, food: 2345678, wood: 98765432, stone: 7654321, iron: 345678 }; run.pop = 1234;
     for (let i = 0; i < 9; i++) for (let j = 0; j < 3; j++) if (run.terrain[i][j] === 'plain') run.tiles[i + ',' + j] = { kind: 'building', id: ['cottage', 'smith', 'lumber', 'quarry', 'mine', 'farm'][(i + j) % 6], level: 12 };
     ui.sel = {}; render(); scrollTo(0, 0); });
   await settle(page);
-  ri = await resInfo(); ok(ri.rows === 1 && ri.h <= 48 && ri.n === 9 && ri.sw <= ri.cw, 'late: all 9 chips (merchant, festival, 5 resources, population, Crowns) fit one row without scrolling, h=' + ri.h.toFixed(1) + ' scrollW/clientW=' + ri.sw + '/' + ri.cw);
-  const order = await page.evaluate(() => [...document.getElementById('res').children].slice(0, 2).map(c => c.className));
-  ok(/merchant/.test(order[0]) && /buff/.test(order[1]), 'timed chips lead the resource bar');
+  ri = await resInfo(); ok(ri.rows === 1 && ri.h <= 48 && ri.n === 7 && ri.sw <= ri.cw, 'late: all 7 chips (5 resources, population, Crowns) fit one row without scrolling, h=' + ri.h.toFixed(1) + ' scrollW/clientW=' + ri.sw + '/' + ri.cw);
+  ok(await page.evaluate(() => !document.getElementById('merchant') && !document.querySelector('#res .merchant, #res .buff') && typeof merchantVisit === 'undefined' && !('merchant' in ui)), 'there is no merchant or festival any more: no marker, no chips, no code');
   const mp = await page.evaluate(() => { const t = document.querySelector('.tile').getBoundingClientRect(), sc = document.getElementById('mapscroll');
     return { n: document.querySelectorAll('.tile').length, w: t.width, h: t.height, sw: sc.scrollWidth, cw: sc.clientWidth, sh: sc.scrollHeight, ch: sc.clientHeight, sl: sc.scrollLeft, st: sc.scrollTop, hint: !document.getElementById('maphint').hidden, docW: document.documentElement.scrollWidth }; });
   ok(mp.n === 121 && mp.w >= 40 && mp.h >= 40, '11x11 tiles are ' + mp.w.toFixed(1) + 'x' + mp.h.toFixed(1) + 'px');
@@ -75,9 +74,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.tap('#bbrow .bb[data-id="farm"]'); await settle(page);
   st = await page.evaluate(() => { const m = document.getElementById('mapwrap').getBoundingClientRect(), b = document.getElementById('buildbar').getBoundingClientRect(); return { y: scrollY, mt: m.top, mb: m.bottom, bt: b.top }; });
   ok(st.y === 0 && st.mt >= 0 && st.mb <= st.bt, 'late: map fully visible with build selected ' + JSON.stringify(st));
-  const pt = await page.evaluate(() => { const s = document.getElementById('mapscroll').getBoundingClientRect(), m = document.getElementById('merchant').getBoundingClientRect();
+  const pt = await page.evaluate(() => { const s = document.getElementById('mapscroll').getBoundingClientRect();
     for (const t of document.querySelectorAll('.tile.can')) { const r = t.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-      if (r.left >= s.left && r.right <= s.right && r.top >= s.top && r.bottom <= s.bottom && !(x > m.left && x < m.right && y > m.top && y < m.bottom)) return { x, y }; } });
+      if (r.left >= s.left && r.right <= s.right && r.top >= s.top && r.bottom <= s.bottom) return { x, y }; } });
   const f0 = await page.evaluate(() => count('farm'));
   await page.touchscreen.tap(pt.x, pt.y); await settle(page);
   ok(await page.evaluate(() => count('farm')) === f0 + 1, 'late: tapping a 40px+ tile places the farm');
@@ -86,15 +85,20 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(() => { const sc = document.getElementById('mapscroll'); sc.scrollLeft = (sc.scrollWidth - sc.clientWidth) / 2; });
   await shot(page, 'shot-390-late.png');
 
-  // --- merchant cue in the sticky bar, and the merchant itself
-  ok(await page.evaluate(() => !!document.querySelector('#res .chip.merchant') && !document.getElementById('merchant').hidden), 'merchant shows a chip in the resource bar');
-  const m0 = await page.evaluate(() => state.meta.stats.merchants);
-  await page.evaluate(() => document.getElementById('merchant').click());
-  ok(await page.evaluate(() => state.meta.stats.merchants) === m0 + 1 && await page.evaluate(() => document.getElementById('merchant').hidden && !document.querySelector('#res .chip.merchant')), 'tapping the merchant pays out and removes the cue');
-
-  // --- tapping: small share of base income; key repeat ignored
-  const tap = await page.evaluate(() => { state.run.buffUntil = 0; calc = compute(); const a = clickValue(); state.run.buffUntil = state.run.clock + 60; calc = compute(); return { v: a, fest: clickValue(), base: calc.base.gold, live: calc.rates.gold }; });
-  ok(tap.v === tap.fest && tap.v / tap.base < 0.021 && tap.live > tap.base * 2.9, 'tap is ' + (100 * tap.v / tap.base).toFixed(2) + '% of base gold/s and ignores the festival');
+  // --- tapping: a flat flourish, nothing to do with income; key repeat ignored
+  const tap = await page.evaluate(() => ({ v: clickValue(), base: calc.base.gold, shown: document.getElementById('clickval').textContent }));
+  ok(tap.v === 1 && tap.shown === '+1', 'a tap pays ' + tap.v + ' gold even at a Palace with 12 Crowns, whatever the town earns (' + Math.round(tap.base) + '/s)');
+  // --- routine upgrades: one card at the top of Build makes every cheap upgrade
+  const rtn = await page.evaluate(() => { const run = state.run; let k = null;
+    for (let x = 0; x < 11 && !k; x++) for (let y = 4; y < 11; y++) if (!run.tiles[x + ',' + y] && run.terrain[x][y] === 'plain') { k = x + ',' + y; break; }
+    run.tiles[k] = { kind: 'building', id: 'cottage', level: 1 }; ui.tab = 'build'; ui.sel = {}; render();
+    const card = document.querySelector('#panel .card[data-act="routine"]'), first = document.querySelector('#panel .card'), n = routineUpgrades(true).count, lv = run.tiles[k].level, text = card.textContent.replace(/\s+/g, ' ').trim();
+    const sum = () => Object.values(run.tiles).reduce((a, t) => a + t.level, 0), before = sum(), hall = hallLevel();
+    document.getElementById('toasts').innerHTML = ''; card.click();
+    return { top: card === first, text, n, lvBefore: lv, lvAfter: run.tiles[k].level, gained: sum() - before, hallSame: hallLevel() === hall, toast: document.getElementById('toasts').textContent,
+      after: routineUpgrades(true).count, cant: document.querySelector('#panel .card[data-act="routine"]').classList.contains('cant') }; });
+  ok(rtn.top && rtn.n >= 1 && rtn.text.includes('×' + rtn.n) && rtn.lvBefore === 1 && rtn.lvAfter > 1 && rtn.gained === rtn.n && rtn.hallSame && /routine upgrade/.test(rtn.toast) && rtn.after === 0 && rtn.cant,
+    'the Routine upgrades card leads the Build tab, says how many it will make, makes exactly those and then greys out ' + JSON.stringify(rtn));
   const c0 = await page.evaluate(() => state.meta.stats.clicks);
   await page.focus('#clicker'); await page.keyboard.down('Enter'); for (let i = 0; i < 10; i++) await page.keyboard.down('Enter'); await page.keyboard.up('Enter');
   ok(await page.evaluate(() => state.meta.stats.clicks) === c0 + 1, 'holding Enter collects once, not per key repeat');
@@ -112,7 +116,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
   await page.evaluate(() => document.querySelector('#modal [data-act="yes"]').click());
   const dafter = await page.evaluate(k => ({ gone: !state.run.tiles[k], gold: state.run.res.gold }), dk);
-  ok(dafter.gone && dinfo.refund.gold === Math.floor(dinfo.spent.gold / 2) && dinfo.refund.gold > 1e8 && dafter.gold - dinfo.gold >= dinfo.refund.gold * 0.999, 'confirmed demolish refunds half of build+upgrade costs (' + dinfo.refund.gold + ' gold of ' + dinfo.spent.gold + ' spent)');
+  ok(dafter.gone && dinfo.refund.gold === Math.floor(dinfo.spent.gold * 0.75) && dinfo.refund.gold > 1e8 && dafter.gold - dinfo.gold >= dinfo.refund.gold * 0.999, 'confirmed demolish refunds three quarters of build+upgrade costs (' + dinfo.refund.gold + ' gold of ' + dinfo.spent.gold + ' spent)');
 
   // --- clearing terrain
   const ck = await page.evaluate(() => { for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] !== 'plain') return x + ',' + y; });
@@ -150,11 +154,12 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(high.n === CROWN.GOAL && !high.cant && /Good offer/.test(high.note) && high.dot && high.modal && !high.warns, 'at the goal the Realm dot lights and the dialog has no warning ' + JSON.stringify(high));
   await page.evaluate(l => { state.run.tiles[HALL_KEY].level = l; render(); }, hallWas);
   // --- prestige round trip: meta kept, run replaced
-  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.gold = 5e8; state.run.repeatables.monument = 2; render(); });
+  await page.evaluate(() => { state.meta.stats.totalGold = 5e7; state.run.gold = goldForCrowns(CROWN_GOAL, state.meta.crowns) * 1.01; state.run.repeatables.monument = 2; render(); });
   const pend = await page.evaluate(() => pendingCrowns());
-  await page.evaluate(() => { document.querySelector('#panel [data-act="prestige"]').click(); document.querySelector('#modal [data-act="yes"]').click(); });
+  const headStart = await page.evaluate(() => { document.querySelector('#panel [data-act="prestige"]').click(); const m = /The new kingdom starts with[^.]*extra/.exec(document.getElementById('modal').textContent); document.querySelector('#modal [data-act="yes"]').click(); return m ? m[0] : ''; });
+  const START_GOLD = await page.evaluate(() => START_RES.gold + HEAD_START.gold);
   const after = await page.evaluate(() => ({ c: state.meta.crowns, b: state.meta.bonusCrowns, p: pendingCrowns(), rep: state.run.repeatables, hall: hallLevel(), tiles: Object.keys(state.run.tiles).length, tg: state.meta.stats.totalGold, gold: state.run.res.gold }));
-  ok(pend > 2 && after.c === 12 + pend && after.b === 2 && after.p === 0 && after.hall === 1 && after.tiles === 1 && after.tg >= 5e7 && after.tg < 5.1e7 && after.gold >= 50 + 100 * after.c, 'prestige: pending ' + pend + ' -> ' + JSON.stringify(after));
+  ok(pend > 2 && after.c === 12 + pend && after.b === 2 && after.p === 0 && after.hall === 1 && after.tiles === 1 && after.tg >= 5e7 && after.tg < 5.1e7 && after.gold === START_GOLD && /extra/.test(headStart), 'prestige: the new kingdom starts with the flat head start (' + headStart.replace(/\s+/g, ' ').trim() + '); pending ' + pend + ' -> ' + JSON.stringify(after));
 
   // --- hostile import: markup in fields, out-of-range values (review M3)
   const evil = { v: 2, last: '<img src=x onerror=alert(1)>', meta: { crowns: '<img src=x onerror="window.__xss=1">', bonusCrowns: {}, decree: '<script>window.__xss=1</script>', stats: { totalGold: '"><svg onload=window.__xss=1>', clicks: null } },
@@ -163,8 +168,8 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       research: { axes: 1, '<img onerror=window.__xss=1 src=x>': 1 }, repeatables: { prod: '<img>', food: 1e9 }, buffUntil: 1e99, clock: 5 } };
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
-    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: festivalLeft(), ok: isFinite(calc.rates.gold) }; });
-  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 50 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff <= 60 && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
   ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
@@ -199,10 +204,10 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: Date.now() - 1e7 } };
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
-  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: festivalOn(), terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
+  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
   ok(mig.v === 2 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
-  const stored = await page.evaluate(() => { ui.merchant.next = 1e9; save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
+  const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
   ok(stored.v === 2 && stored.grid && stored.decree === 'dynasty' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
@@ -323,10 +328,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     return { scrollable: p.scrollHeight > p.clientHeight + 100, scrolled: p.scrollTop > 100, lastIn: last.top >= r.top && last.bottom <= r.bottom, y: scrollY }; });
   ok(lateSheet.scrollable && lateSheet.scrolled && lateSheet.lastIn && lateSheet.y === 0, 'late Research: the long list scrolls inside the sheet down to the last repeatable upgrade ' + JSON.stringify(lateSheet));
   await p3.evaluate(() => { document.getElementById('panel').scrollTop = 0; }); await shot(p3, 'shot-390x664-late-sheet.png');
-  await p3.evaluate(() => { ui.merchant.left = 15; ui.merchant.x = 40; ui.merchant.y = 70; render(); }); await settle(p3);
-  const hidden = await reach('#merchant'); await p3.tap('#res .chip.merchant'); await settle(p3); const shown = await reach('#merchant');
-  ok(hidden && !hidden.hit && shown.inView && shown.hit && await p3.evaluate(() => !ui.sheet), 'a merchant behind the sheet: tapping its chip in the resource bar closes the sheet and the merchant is tappable ' + JSON.stringify(shown));
-  await p3.evaluate(() => { ui.merchant.left = 0; ui.sel = {}; render(); });
+  await p3.evaluate(() => { ui.sel = {}; ui.sheet = false; render(); }); await settle(p3);
   const big = await p3.evaluate(() => { const sc = document.getElementById('mapscroll'), r = sc.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, pans: sc.classList.contains('pans'), left: sc.scrollLeft }; });
   await drag(cdp, big.x, big.y, -60, 0); await p3.waitForFunction(() => { const sc = document.getElementById('mapscroll'), v = sc.scrollLeft; return new Promise(r => setTimeout(() => r(sc.scrollLeft === v), 150)); });
   const panned = await p3.evaluate(() => ({ left: document.getElementById('mapscroll').scrollLeft, y: scrollY }));

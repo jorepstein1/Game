@@ -26,7 +26,6 @@ const ui = {
   barMode: '',           // what the bottom bar is showing: 'build', 'tile' or 'terrain'
   barTapAt: -Infinity,   // when, and in which mode, the bar was last tapped
   barTapMode: '', barTapX: 0, barTapY: 0,
-  merchant: { next: 70, left: 0 },
   warnedStarve: false,
   paused: false,         // another tab took over the save
   saveFailed: false,
@@ -71,9 +70,6 @@ const tileAt = key => state.run.tiles[key];
 function renderResources() {
   const run = state.run, res = run.res;
   let h = '';
-  // Timed chips lead the row so they are never the ones pushed off a narrow screen.
-  if (ui.merchant.left > 0) h += `<button class="chip merchant timed" data-act="showMerchant" title="A merchant is visiting: tap to find them on the map"><span>🐪</span><small><b>${Math.ceil(ui.merchant.left)}s</b></small></button>`;
-  if (festivalOn()) h += `<div class="chip buff timed" title="Festival: all production ×${FESTIVAL_MULT}"><span>🎪×${FESTIVAL_MULT}</span><small><b>${Math.ceil(festivalLeft())}s</b></small></div>`;
   for (const r in RESOURCES) {
     if (r === 'iron' && hallLevel() < 3 && !res.iron) continue;
     if (r === 'stone' && !res.stone && !count('quarry')) continue;
@@ -161,7 +157,7 @@ function renderInspector() {
     if (t.kind === 'hall') {
       const next = BUILD_ORDER.filter(b => BUILDINGS[b].hall === t.level + 1).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name);
       h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production and makes tax collection richer.</p>
-        <p class="stat">Realm bonus: <b>×${(calc.mult * calc.festival).toFixed(2)}</b></p>
+        <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
         <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} 🍞/s</b> per villager. Bigger towns eat more per head.</p>
         ${next.length ? `<p class="stat">Next level unlocks: <b>${next.join(', ')}</b></p>` : ''}
         ${t.level === PRESTIGE_HALL - 1 ? '<p class="stat">A Castle lets you found a new kingdom for 👑 Crowns.</p>' : ''}
@@ -217,6 +213,9 @@ function renderPanel() {
   const run = state.run, meta = state.meta, hall = hallLevel();
   let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
+    const routine = routineUpgrades(true); // one tap for the cheap upgrades, so the list below is about choices
+    h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
+      <div class="muted">Makes every cheap upgrade at once: those costing under ${Math.round(ROUTINE_SECONDS / 60)} minutes of income each.</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
@@ -252,7 +251,7 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>👑 Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with extra supplies for every Crown you hold (up to ${HEAD_START_CAP}).</p>
+      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       <p class="stat">${offerNote(n)}</p>
@@ -260,7 +259,7 @@ function renderPanel() {
       <hr><h3>Chronicle</h3>
       <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b></p>
       <p class="stat">Buildings raised: <b>${fmt(meta.stats.built)}</b> · Taxes collected by hand: <b>${fmt(meta.stats.clicks)}</b></p>
-      <p class="stat">Merchants met: <b>${fmt(meta.stats.merchants)}</b> · Kingdoms founded: <b>${fmt(meta.stats.prestiges + 1)}</b></p>
+      <p class="stat">Kingdoms founded: <b>${fmt(meta.stats.prestiges + 1)}</b></p>
       <hr><div class="row"><button class="btn alt" data-act="save">Save now</button><button class="btn alt" data-act="export">Export</button>
       <button class="btn alt" data-act="import">Import</button><button class="btn" data-act="wipe">Hard reset</button></div>
       <p class="muted">The game saves itself in this browser every 10 seconds and keeps working while you are away. Browsers can clear that storage, so export a copy now and then.</p>`;
@@ -298,14 +297,9 @@ function renderBuildBar() {
   patch($('bbinfo'), ui.sel.build ? `<b>${BUILDINGS[ui.sel.build].icon} ${BUILDINGS[ui.sel.build].name}</b> ${costHTML(buildCost(ui.sel.build))}<span class="hint">tap a plot</span>`
     : '<span class="hint">Tap a building, then an open plot on the map</span>');
 }
-function renderMerchant() {
-  const el = $('merchant'), on = ui.merchant.left > 0;
-  if (on) { el.style.left = ui.merchant.x + '%'; el.style.top = ui.merchant.y + '%'; }
-  el.hidden = !on;
-}
 function renderCity() {
   calc = compute();
-  renderResources(); renderMap(); renderMerchant(); renderInspector(); renderTabs(); renderPanel(); renderBuildBar();
+  renderResources(); renderMap(); renderInspector(); renderTabs(); renderPanel(); renderBuildBar();
 }
 
 // ───────────────────────── Feedback: toasts, floating text, dialog ─────────────────────────
@@ -450,6 +444,7 @@ const CITY_ACTIONS = {
   research(id) { say(buyResearch(id)); },
   rep(id) { buyRepeatable(id); },
   expand() { say(expand()); },
+  routine() { say(routineUpgrades()); },
   clear(k) { say(clearLand(k)); },
   claim() { say(claimDecree()); },
   prestige() {
@@ -457,7 +452,7 @@ const CITY_ACTIONS = {
     const n = pendingCrowns();
     confirmBox('Found a new kingdom?', `You abdicate and start over on fresh land. Buildings, resources and research are lost, but you keep
       <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
-      The new kingdom starts with ${costHTML(scaleCost(HEAD_START, Math.min(HEAD_START_CAP, state.meta.crowns + n)), true)} extra.
+      The new kingdom starts with ${costHTML(HEAD_START, true)} extra.
       ${n < CROWN_GOAL ? `<br><br><b>This is a small offer.</b> Reigns that wait for ${CROWN_GOAL} Crowns or more pay better.` : ''}`, () => {
       if (!say(prestige()).ok) return;
       ui.sel = {}; ui.mapN = 0; save(); render();
@@ -467,8 +462,6 @@ const CITY_ACTIONS = {
     const g = collectTaxes().gold, r = el.getBoundingClientRect();
     floatText((e.clientX || r.left + r.width / 2) - 10 + (Math.random() * 30 - 15), (e.clientY || r.top) - 20, '+' + fmt(g));
   },
-  merchant() { ui.merchant.left = 0; say(merchantVisit()); },
-  showMerchant() { showMap(); },
   save() { if (save(true)) toast('💾 Saved.'); },
   export() {
     openModal(`<h2 id="modaltitle">Export save</h2><p class="muted">Keep this text somewhere safe. Paste it into Import to restore your kingdom.</p>
@@ -545,14 +538,6 @@ function bindInput() {
 
 // ───────────────────────── Timers ─────────────────────────
 // Three independent timers: the simulation step, drawing, and autosave.
-function stepMerchant(dt) {
-  const m = ui.merchant;
-  if (m.left > 0) { m.left -= dt; return; }
-  if ((m.next -= dt) > 0) return;
-  m.next = (60 + Math.random() * 90) / researchFx('merchantRate'); m.left = 20;
-  m.x = 8 + Math.random() * 70; m.y = 8 + Math.random() * 70;
-  toast('🐪 A merchant has arrived! Tap the 🐪 at the top to find them.');
-}
 // A hidden tab does not step at all: browsers wake its timers about once a minute, which would turn one long
 // absence into many small uncapped gaps. The whole hidden span arrives as a single gap when the tab is shown.
 function simTick() {
@@ -561,14 +546,13 @@ function simTick() {
   if (ui.paused) return;
   if (dt > OFFLINE_REPORT_SECONDS) { catchUp(dt); render(); } // the tab was asleep: same capped path as a page load
   else advance(dt);
-  stepMerchant(Math.min(dt, 1));
   if (state.run.starving && !ui.warnedStarve) { toast('🍞 Your villagers are starving! Work slows to half — build more farms.'); ui.warnedStarve = true; }
   if (!state.run.starving) ui.warnedStarve = false;
 }
 let drawCount = 0;
 function drawTick() {
   if (ui.paused || document.hidden) return;
-  if (++drawCount % 4 === 0) render(); else { renderResources(); renderMerchant(); }
+  if (++drawCount % 4 === 0) render(); else renderResources();
 }
 
 placeInspector();

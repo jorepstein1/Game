@@ -28,9 +28,9 @@ test('crownsFor: log scale on the gold earned this reign, with a threshold that 
   assert.strictEqual(sim.crownsFor(-5, 0), 0);
   assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD, 0), 0);
   assert.strictEqual(sim.crownsFor(sim.CROWN_GOLD * 10, 0), sim.CROWN_RATE, 'ten times the threshold');
-  assert.strictEqual(sim.crownsFor(1.3e6, 0), 10, 'a first Castle (about 1.3M gold) offers 10 Crowns');
-  assert.strictEqual(sim.crownsFor(1.3e9, 0), 22, 'a thousand times the gold only adds 12 more');
-  assert.ok(sim.crownsFor(1.3e6, 10) < 10 && sim.crownsFor(1.3e6, 30) < sim.crownsFor(1.3e6, 10), 'the same reign is worth less once Crowns are held');
+  assert.strictEqual(sim.crownsFor(1.4e9, 0), sim.CROWN_MIN, 'a first Palace (about 1.4B gold earned) offers just enough to abdicate');
+  assert.strictEqual(sim.crownsFor(1.4e12, 0), sim.CROWN_MIN + 3 * sim.CROWN_RATE, 'a thousand times the gold adds three times CROWN_RATE');
+  assert.ok(sim.crownsFor(1.4e9, 30) <= sim.CROWN_MIN && sim.crownsFor(1.4e9, 60) < sim.crownsFor(1.4e9, 30), 'the same reign is worth less once many Crowns are held');
   for (const held of [0, 10, 40]) for (const n of [1, 5, 10, 20]) {
     const g = sim.goldForCrowns(n, held);
     assert.strictEqual(sim.crownsFor(g * 1.0001, held), n, `goldForCrowns(${n}, ${held})`); assert.strictEqual(sim.crownsFor(g * 0.999, held), n - 1);
@@ -39,8 +39,8 @@ test('crownsFor: log scale on the gold earned this reign, with a threshold that 
 });
 
 test('pendingCrowns and abdication: Crowns banked, Monuments counted, head start granted', sim => {
-  sim.state.run.gold = 1.3e6; sim.state.meta.stats.totalGold = 1.3e6;
-  assert.strictEqual(sim.pendingCrowns(), 10);
+  sim.state.run.gold = sim.goldForCrowns(11, 0) * 1.01; sim.state.meta.stats.totalGold = 5e7;
+  assert.strictEqual(sim.pendingCrowns(), 11);
   assert.strictEqual(sim.canPrestige(), false, 'needs a Castle');
   sim.state.run.tiles[sim.HALL_KEY].level = 4;
   assert.strictEqual(sim.canPrestige(), false, 'a Castle with a small offer is not enough');
@@ -53,18 +53,20 @@ test('pendingCrowns and abdication: Crowns banked, Monuments counted, head start
   assert.strictEqual(sim.state.meta.crowns, n); assert.strictEqual(sim.state.meta.bonusCrowns, 2);
   assert.strictEqual(sim.pendingCrowns(), 0, 'a new reign starts from nothing on offer');
   assert.strictEqual(sim.hallLevel(), 1); assert.strictEqual(Object.keys(sim.state.run.tiles).length, 1);
-  assert.strictEqual(sim.state.meta.stats.totalGold, 1.3e6, 'meta survives abdication');
-  assert.deepStrictEqual(plain(sim.state.run.res), { gold: 50 + n * sim.HEAD_START.gold, food: 30 + n * sim.HEAD_START.food, wood: 30 + n * sim.HEAD_START.wood, stone: n * sim.HEAD_START.stone, iron: 0 });
-  assert.deepStrictEqual(plain(sim.newRun(1).res), plain(sim.START_RES), 'a first kingdom gets no head start');
-  assert.deepStrictEqual(plain(sim.newRun(1, 500).res), plain(sim.newRun(1, sim.HEAD_START_CAP).res), 'the head start stops growing at the cap');
-  near(sim.crownThreshold(30) / sim.crownThreshold(0), Math.pow(2.5, sim.CROWN_STEEPEN), 1e-6, 'up to 30 Crowns the threshold follows the multiplier cubed;');
+  assert.strictEqual(sim.state.meta.stats.totalGold, 5e7, 'meta survives abdication');
+  const S = sim.START_RES, H = sim.HEAD_START;
+  assert.deepStrictEqual(plain(sim.state.run.res), { gold: S.gold + H.gold, food: S.food + H.food, wood: S.wood + H.wood, stone: H.stone, iron: 0 });
+  assert.deepStrictEqual(plain(sim.newRun(1).res), plain(S), 'a first kingdom gets no head start');
+  assert.deepStrictEqual(plain(sim.newRun(1, 500).res), plain(sim.newRun(1, 1).res), 'the head start is the same however many Crowns are held');
+  assert.ok(H.gold < sim.HALL_COST[0].gold && H.wood < sim.HALL_COST[0].wood, 'and it does not pay for a Manor');
+  near(sim.crownThreshold(30) / sim.crownThreshold(0), Math.pow(2.5, sim.CROWN_STEEPEN), 1e-6, 'up to 30 Crowns the threshold follows the multiplier to the power CROWN_STEEPEN;');
   near(sim.crownThreshold(60) / sim.crownThreshold(30), Math.pow(4 / 2.5, sim.CROWN_STEEPEN + sim.CROWN_DEAR), 1e-6, 'past 30 Crowns it climbs much faster;');
 });
 
 test('high levels cost extra, linear buildings are exempt', sim => {
   const up = (id, level) => sim.upgradeCost({ kind: 'building', id, level });
   const step = (id, level) => Object.values(up(id, level + 1))[0] / Object.values(up(id, level))[0];
-  near(step('smith', 5), sim.UPGRADE_GROWTH, 0.01, 'below the creep');
+  near(step('smith', sim.UPGRADE_CREEP_FROM - 2), sim.UPGRADE_GROWTH, 0.01, 'below the creep');
   near(step('smith', sim.UPGRADE_CREEP_FROM), sim.UPGRADE_GROWTH * sim.UPGRADE_CREEP, 0.01, 'first creeping level');
   assert.ok(step('smith', 14) > step('smith', 10) && step('smith', 10) > step('smith', 8), 'each level steeper than the last');
   near(step('cottage', 14), sim.LINEAR_UPGRADE_GROWTH, 0.01, 'cottage');
@@ -100,18 +102,19 @@ test('creditAway: caps at 8h, 24h with Stewardship; reports the cap', sim => {
   for (const bad of [-5, NaN, Infinity, undefined]) assert.strictEqual(sim.creditAway(bad).credited, 0, 'bad gap ' + bad);
 });
 
-test('demolish refunds half of the build price and every upgrade', sim => {
+test('demolish refunds three quarters of the build price and every upgrade', sim => {
   town(sim);
   const run = sim.state.run, key = Object.keys(run.tiles).find(k => run.tiles[k].id === 'quarry');
   const paid = plain(sim.buildCost('quarry')); // price of a second quarry...
-  const first = { gold: 60, wood: 40 };        // ...the first cost the base price
+  const first = plain(sim.BUILDINGS.quarry.cost); // ...the first cost the base price
   let spent = Object.assign({}, first);
   for (let i = 0; i < 7; i++) { const c = plain(sim.upgradeCost(run.tiles[key])); for (const r in c) spent[r] += c[r]; assert.ok(sim.upgrade(key).ok); }
   assert.strictEqual(run.tiles[key].level, 8);
   assert.deepStrictEqual(plain(sim.spentOn(run.tiles[key])), spent);
   assert.ok(paid.gold > first.gold);
   const before = plain(run.res), refund = plain(sim.demolishRefund(run.tiles[key]));
-  assert.deepStrictEqual(refund, { gold: Math.floor(spent.gold / 2), wood: Math.floor(spent.wood / 2) });
+  assert.strictEqual(sim.REFUND_SHARE, 0.75);
+  assert.deepStrictEqual(refund, { gold: Math.floor(spent.gold * 0.75), wood: Math.floor(spent.wood * 0.75) });
   assert.ok(refund.gold > 100 * first.gold, 'upgrades dominate the refund');
   assert.ok(sim.demolish(key).ok); assert.strictEqual(run.tiles[key], undefined);
   assert.strictEqual(run.res.gold, before.gold + refund.gold);
@@ -137,15 +140,15 @@ test('sanitizeSave coerces and clamps every field', sim => {
   assert.deepStrictEqual(Object.keys(s).sort(), ['last', 'meta', 'run', 'v']);
   assert.strictEqual(s.last, 1000);
   assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, null);
-  assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, merchants: 0, prestiges: 0, built: 3, started: 1000 });
+  assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, started: 1000 });
   assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
-  assert.deepStrictEqual(plain(s.run.res), { gold: 50, food: 0, wood: 30, stone: 0, iron: 12.5 });
+  assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
   assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['0,0', '5,4', '5,5']);
   assert.strictEqual(s.run.tiles['5,5'].level, sim.MAX_LEVEL); assert.strictEqual(s.run.tiles['5,5'].kind, 'hall');
   assert.strictEqual(s.run.tiles['5,4'].level, 1); assert.strictEqual(s.run.tiles['0,0'].level, 1);
   assert.deepStrictEqual(plain(s.run.research), { axes: 1 });
   assert.deepStrictEqual(plain(s.run.repeatables), { food: sim.MAX_REPEATABLE });
-  assert.strictEqual(s.run.buffUntil, 5 + sim.FESTIVAL_SECONDS);
+  assert.strictEqual(s.run.buffUntil, undefined, 'festival timers from older saves are dropped');
   assert.strictEqual(s.run.terrain.length, 11); assert.ok(s.run.terrain.every(col => col.length === 11 && col.every(c => c in sim.TERRAIN)));
   assert.strictEqual(s.run.terrain[5][4], 'plain', 'buildings always stand on open plots');
   assert.ok(notes.some(n => /5 buildings in this save were not recognised/.test(n)), notes.join('|'));
@@ -178,7 +181,7 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   const fresh = plain(sim.genTerrain(12345)), got = plain(s.run.terrain);
   for (const k in s.run.tiles) { const [x, y] = k.split(',').map(Number); fresh[x][y] = 'plain'; }
   assert.deepStrictEqual(got, fresh);
-  assert.strictEqual(s.run.buffUntil, 0, 'wall-clock festival times are dropped');
+  assert.strictEqual(s.run.buffUntil, undefined, 'festival times are dropped');
   assert.strictEqual(s.run.gold, 3e6); assert.deepStrictEqual(plain(s.run.research), { axes: 1, tithes: 1 });
   assert.ok(notes.some(n => /predates the rebalance/.test(n)) && notes.some(n => /1 building in this save was not recognised/.test(n)), notes.join('|'));
   sim.setState(s); assert.strictEqual(sim.pendingCrowns(), sim.crownsFor(3e6, 19));
@@ -225,15 +228,62 @@ test('linear buildings: flat gain per level and gentler upgrade prices', sim => 
   near(q2 / q1, sim.UPGRADE_GROWTH, 0.05, 'quarry step');
 });
 
-test('base rates exclude the festival; taps and merchant gifts use base rates', sim => {
+test('hand collection is a flourish: it does not grow with income, and there is no merchant or festival', sim => {
+  assert.strictEqual(sim.clickValue(), 1);
   town(sim, 3); sim.advance(60);
-  const base = sim.calc.base.gold, tap = sim.clickValue();
-  sim.state.run.buffUntil = sim.state.run.clock + 60; sim.setState(sim.state);
-  near(sim.calc.rates.gold, base * sim.FESTIVAL_MULT, 1e-6, 'live rate');
-  near(sim.calc.base.gold, base, 1e-9, 'base rate'); assert.strictEqual(sim.clickValue(), tap);
-  const gold = sim.state.run.res.gold; sim.merchantVisit(0.1);
-  near(sim.state.run.res.gold - gold, Math.max(30, base * sim.MERCHANT_SECONDS), 1e-6, 'merchant gold');
-  sim.advance(61); assert.strictEqual(sim.festivalOn(), false, 'festival ends on the run clock');
+  assert.ok(sim.calc.base.gold > 1); assert.strictEqual(sim.clickValue(), sim.CLICK_GOLD, 'the same single coin, whatever the town earns');
+  const gold = sim.state.run.res.gold; assert.strictEqual(sim.collectTaxes().gold, 1); assert.strictEqual(sim.state.run.res.gold, gold + 1);
+  sim.state.meta.crowns = 20; assert.strictEqual(sim.clickValue(), 1, 'and whatever Crowns are held');
+  for (const gone of ['merchantVisit', 'festivalOn', 'FESTIVAL_MULT', 'MERCHANT_SECONDS', 'CLICK_SHARE']) assert.strictEqual(sim[gone], undefined, gone);
+  assert.deepStrictEqual(sim.calc.rates, sim.calc.base, 'nothing temporary multiplies production');
+  assert.ok(!sim.RESEARCH.some(r => r.id === 'seal' || r.id === 'caravan' || /merchant|by hand/i.test(r.desc)));
+});
+
+test('a save holding research that no longer exists (Royal Seal, Caravan Routes) loads without it', sim => {
+  sim.state.run.research = { axes: 1, seal: 1, caravan: 1 }; sim.state.run.buffUntil = 500; sim.state.meta.stats.merchants = 7;
+  const { state: s, notes } = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000);
+  assert.deepStrictEqual(plain(s.run.research), { axes: 1 }); assert.strictEqual(notes.length, 0);
+  assert.strictEqual(s.meta.stats.merchants, undefined); assert.strictEqual(s.run.buffUntil, undefined);
+  sim.setState(s); sim.advance(10); assert.ok(Number.isFinite(sim.calc.base.gold));
+  assert.strictEqual(sim.researchFx('offlineHours'), sim.OFFLINE_HOURS);
+});
+
+test('Royal Surveyors halve the price of clearing land', sim => {
+  const before = sim.clearCost().gold; sim.state.run.tiles[sim.HALL_KEY].level = 2;
+  sim.state.run.res.gold = 1e9; sim.state.run.res.wood = 1e9;
+  assert.ok(sim.buyResearch('survey').ok); assert.strictEqual(sim.clearCost().gold, before / 2);
+});
+
+test('adjacency from a building grows with the square root of its level; cottage upgrades need stone from level 3', sim => {
+  const run = sim.state.run; run.terrain = run.terrain.map(col => col.map(() => 'plain'));
+  run.tiles['4,4'] = { kind: 'building', id: 'cottage', level: 1 }; run.tiles['4,3'] = { kind: 'building', id: 'tavern', level: 1 };
+  near(sim.adjBonus('cottage', 4, 4), 0.5, 1e-9, 'level 1');
+  run.tiles['4,3'].level = 4; near(sim.adjBonus('cottage', 4, 4), 1, 1e-9, 'level 4 gives twice level 1, not four times');
+  run.tiles['4,3'].level = 9; near(sim.adjBonus('cottage', 4, 4), 1.5, 1e-9, 'level 9');
+  const up = level => plain(sim.upgradeCost({ kind: 'building', id: 'cottage', level }));
+  assert.deepStrictEqual(Object.keys(up(2)), ['wood']); assert.deepStrictEqual(Object.keys(up(3)).sort(), ['stone', 'wood']);
+  near(up(4).stone / up(3).stone, sim.LINEAR_UPGRADE_GROWTH, 0.01, 'the stone grows like the wood');
+  run.tiles['4,4'].level = 5; const spent = plain(sim.spentOn(run.tiles['4,4']));
+  assert.strictEqual(spent.stone, up(3).stone + up(4).stone, 'and comes back with the refund');
+});
+
+test('routine upgrades: only cheap ones, cheapest first, never more than the town can staff', sim => {
+  assert.strictEqual(sim.routineUpgrades().ok, false, 'nothing to upgrade in an empty town');
+  town(sim, 3); sim.advance(120);
+  const run = sim.state.run, levels = () => Object.values(run.tiles).filter(t => t.kind === 'building').reduce((a, t) => a + t.level, 0);
+  for (const r in run.res) run.res[r] = 1e12;
+  const before = levels(), res = plain(run.res), tiles = JSON.stringify(run.tiles);
+  const look = sim.routineUpgrades(true);
+  assert.ok(look.count > 0); assert.strictEqual(JSON.stringify(run.tiles), tiles, 'a preview changes nothing'); assert.deepStrictEqual(plain(run.res), res);
+  const hall = sim.hallLevel(), done = sim.routineUpgrades();
+  assert.ok(done.ok); assert.strictEqual(done.count, look.count); assert.deepStrictEqual(plain(done.spent), plain(look.spent));
+  assert.strictEqual(levels(), before + done.count); assert.strictEqual(sim.hallLevel(), hall, 'the hall is never routine');
+  for (const r in done.spent) near(res[r] - run.res[r], done.spent[r], 1e-3, r);
+  assert.ok(sim.calc.need <= sim.calc.cap, 'jobs never outrun housing');
+  for (const k in run.tiles) { const t = run.tiles[k]; if (t.kind !== 'building') continue; const c = sim.upgradeCost(t), def = sim.BUILDINGS[t.id];
+    assert.ok((def.work && sim.calc.need + def.work > sim.calc.cap) || Object.keys(c).some(r => c[r] > Math.max(0, sim.calc.base[r] + (r === 'food' ? sim.calc.eaten : 0)) * sim.ROUTINE_SECONDS), 'what is left is not cheap: ' + t.id + ' level ' + t.level); }
+  for (const r in run.res) run.res[r] = 0;
+  assert.strictEqual(sim.routineUpgrades().count, 0, 'and nothing is bought that cannot be paid for');
 });
 
 test('decrees advance by id', sim => {
