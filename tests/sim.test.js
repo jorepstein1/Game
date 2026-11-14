@@ -94,7 +94,7 @@ test('creditAway: caps at 8h, 24h with Stewardship; reports the cap and the rest
   town(sim);
   let r = sim.creditAway(20 * 3600);
   assert.strictEqual(r.credited, 8 * 3600); assert.strictEqual(r.capped, true); assert.strictEqual(r.capHours, 8); assert.strictEqual(r.away, 20 * 3600);
-  const rest = h => sim.REST_BONUS * Math.max(0, h - sim.REST_AFTER_HOURS) * 3600;
+  const rest = h => (sim.REST_BONUS * Math.max(0, h - sim.REST_AFTER_HOURS) + sim.REST_LONG_BONUS * Math.max(0, h - sim.REST_LONG_AFTER_HOURS)) * 3600;
   assert.strictEqual(r.rested, rest(8)); near(sim.state.run.clock, 8 * 3600 + rest(8), 1e-6, 'clock: the capped time plus the rested bonus on it');
   sim.state.run.away = 0; r = sim.creditAway(30);
   assert.strictEqual(r.credited, 30); assert.strictEqual(r.capped, false); assert.strictEqual(r.rested, 0, 'a short absence earns no bonus');
