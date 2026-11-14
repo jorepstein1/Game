@@ -4,6 +4,7 @@
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
 const SAVE_VERSION = 3;
+const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
 // state = { v, last, meta, run }
@@ -20,7 +21,7 @@ function newMeta(now) {
 // A kingdom founded with Crowns held gets a small head start in resources (none for a first kingdom).
 function newRun(seed, crowns) {
   if (seed === undefined) seed = (Math.random() * 2 ** 31) | 0;
-  const run = { seed, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
+  const run = { seed, gen: TERRAIN_GEN, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
     research: {}, repeatables: {}, cleared: 0, starving: false,
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
     away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
@@ -58,22 +59,24 @@ const sumOf = o => Object.values(o).reduce((a, b) => a + b, 0);
 // Features, not single tiles: groves, hill ranges and a lake or river, placed by the seeded RNG. The value of a
 // feature is in the open plots on its edges, so none is left solid: a grove's inner tiles become clearings, ranges
 // jog and fork, rivers bend. The hall's tile and its four neighbours stay open.
+let terrainAttempts = 0; // maps drawn by the last genTerrain call (1 = the first draw passed); read by the tests
 function genTerrain(seed) {
   const rnd = mulberry(seed), pick = a => a[(rnd() * a.length) | 0];
   const fixed = (x, y) => Math.abs(x - MAP_MID) + Math.abs(y - MAP_MID) <= 1;
   let g;
   for (let attempt = 0; attempt < 30; attempt++) { // a map the repair pass cannot fix is drawn again from the same RNG
+    terrainAttempts = attempt + 1;
     g = []; for (let x = 0; x < MAP_SIZE; x++) g.push(Array(MAP_SIZE).fill('plain'));
     const have = { forest: 0, hill: 0, water: 0 }; // tiles of each so far; the last feature of a kind may be cut short
     const put = (x, y, t) => { if (onMap(x, y) && !fixed(x, y) && g[x][y] === 'plain' && have[t] < BIOME_TILES[t]) { g[x][y] = t; have[t]++; return true; } return false; };
-    const blob = (t, size) => { // grown from a seed tile, then its inner tiles are cleared
+    const blob = (t, size) => { // grown from a seed tile by orthogonal steps; a grove's inner tiles are then cleared
       const cells = [[(rnd() * MAP_SIZE) | 0, (rnd() * MAP_SIZE) | 0]];
       for (let guard = 0; cells.length < size && guard < 40; guard++) { const [x, y] = pick(cells), [dx, dy] = pick(STEPS4), a = x + dx, b = y + dy;
         if (onMap(a, b) && !fixed(a, b) && !cells.some(([p, q]) => p === a && q === b)) cells.push([a, b]); }
       const inSet = (a, b) => cells.some(([p, q]) => p === a && q === b);
-      for (const [x, y] of cells) if (!STEPS4.every(([dx, dy]) => inSet(x + dx, y + dy))) put(x, y, t);
+      for (const [x, y] of cells) if (t === 'water' || !STEPS4.every(([dx, dy]) => inSet(x + dx, y + dy))) put(x, y, t); // a lake stays whole: a cleared middle could cut it into pieces
     };
-    const line = (t, len, wiggle, thick) => { // a range or river: walks one way, now and then stepping aside
+    const line = (t, len, wiggle, thick) => { // a range or river: walks one way, now and then stepping aside (a bend is an L, never a diagonal)
       let x = (rnd() * MAP_SIZE) | 0, y = (rnd() * MAP_SIZE) | 0; const [dx, dy] = pick(STEPS4), side = rnd() < 0.5 ? 1 : -1;
       for (let i = 0; i < len; i++) {
         put(x, y, t); if (rnd() < thick) put(x + dy * side, y + dx * side, t);
@@ -81,19 +84,24 @@ function genTerrain(seed) {
         x += dx; y += dy;
       }
     };
+    // Water first, so no grove or range lies across a river and breaks it into pieces.
+    for (let guard = 0; guard < 60 && have.water < BIOME_TILES.water; guard++) if (rnd() < 0.5) blob('water', 4 + ((rnd() * 3) | 0)); else line('water', 4 + ((rnd() * 4) | 0), 0.4, 0);
     for (let guard = 0; guard < 60 && have.forest < BIOME_TILES.forest; guard++) blob('forest', 4 + ((rnd() * 5) | 0));
     for (let guard = 0; guard < 60 && have.hill < BIOME_TILES.hill; guard++) line('hill', 3 + ((rnd() * 3) | 0), 0.3, 0.35);
-    for (let guard = 0; guard < 60 && have.water < BIOME_TILES.water; guard++) if (rnd() < 0.5) blob('water', 4 + ((rnd() * 3) | 0)); else line('water', 4 + ((rnd() * 4) | 0), 0.4, 0);
-    // Features that overlap can still close up into a solid mass: open its inner tiles too (clearings).
-    const inner = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] !== 'plain' && STEPS4.every(([dx, dy]) => onMap(x + dx, y + dy) && g[x + dx][y + dy] === g[x][y])) inner.push([x, y]);
+    // Groves and ranges that overlap can still close up into a solid mass: open its inner tiles too (clearings).
+    const inner = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] !== 'plain' && g[x][y] !== 'water' && STEPS4.every(([dx, dy]) => onMap(x + dx, y + dy) && g[x + dx][y + dy] === g[x][y])) inner.push([x, y]);
     for (const [x, y] of inner) g[x][y] = 'plain';
     if (repairTerrain(g, rnd, fixed)) break;
   }
+  // If all 30 draws fail (none does for seeds tested, and the tests hold the count to a handful), the last map is kept
+  // as it is: a valid grid with its features, short of some guarantee, rather than no map at all.
   return g;
 }
 // The guarantees (see data.js): the start area has some of every terrain, a double forest site and enough plots;
 // by the first expansion every terrain has a double site;
 // every expansion adds a triple site and BIOME_DOUBLES double sites; the full map has a triple site of each terrain.
+// Water is never a lone tile: each has an orthogonal water neighbour (inside the start area, one inside it too), so
+// lakes and rivers read as such and a farm between two of their tiles has a double site.
 // Each failure is fixed by turning the fewest open tiles around one plot into that terrain, then everything is
 // checked again, since a fix can spoil an earlier ring. Returns false if the map cannot be fixed this way.
 function repairTerrain(g, rnd, fixed) {
@@ -111,7 +119,9 @@ function repairTerrain(g, rnd, fixed) {
         open.sort((p, q) => (ringOf(q[0], q[1]) > prev) - (ringOf(p[0], p[1]) > prev)); // turn new land first, so inner rings keep their sites
         const use = open.slice(0, need);
         if (prev >= 0 && ringOf(x, y) <= prev && sameAround(g, x, y, prev, t) + use.filter(([a, b]) => ringOf(a, b) <= prev).length >= k) continue; // would be as good before: no gain
-        const cost = need + 0.5 * use.filter(([a, b]) => ringOf(a, b) <= prev).length + rnd() * 0.4;
+        const wet = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && (g[a + dx][b + dy] === 'water' || use.some(([p, q]) => p === a + dx && q === b + dy)));
+        const lone = t === 'water' ? use.filter(u => !wet(u)).length : 0; // each lone water tile will need a partner: extending a lake is cheaper
+        const cost = need + lone + 0.5 * use.filter(([a, b]) => ringOf(a, b) <= prev).length + rnd() * 0.4;
         if (cost < bestCost) { bestCost = cost; best = { t, use }; }
       }
     }
@@ -119,13 +129,23 @@ function repairTerrain(g, rnd, fixed) {
     for (const [a, b] of best.use) g[a][b] = best.t;
     return true;
   };
-  for (let fix = 0; fix < 40; fix++) {
+  for (let fix = 0; fix < 60; fix++) {
     const s = R.map(r => siteCounts(g, r)); let ok = true;
     for (const t of T) { let n = 0; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === t) n++;
       if (n < BIOME_START[t]) { ok = false; // an odd tile is enough here: the start area is small
         const free = []; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === 'plain' && !fixed(x, y)) free.push([x, y]);
-        if (!free.length) return false; const [x, y] = free[(rnd() * free.length) | 0]; g[x][y] = t; break; } }
+        if (!free.length) return false;
+        const near = t === 'water' ? free.filter(([x, y]) => STEPS4.some(([dx, dy]) => g[x + dx][y + dy] === 'water' && ringOf(x + dx, y + dy) <= R[0])) : []; // water joins water
+        const from = near.length ? near : free, [x, y] = from[(rnd() * from.length) | 0]; g[x][y] = t; break; } }
     if (!ok) continue;
+    if (lonelyWater(g).length) { // join it to the water beside it diagonally if there is some, else give it a partner tile
+      const [x, y] = lonelyWater(g)[0], inner = ringOf(x, y) <= R[0];
+      const opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => onMap(a, b) && g[a][b] === 'plain' && !fixed(a, b) && (!inner || ringOf(a, b) <= R[0]));
+      if (!opts.length) { g[x][y] = 'plain'; continue; }
+      const joins = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && !(a + dx === x && b + dy === y) && g[a + dx][b + dy] === 'water');
+      const best = opts.filter(joins); const [a, b] = (best.length ? best : opts)[(rnd() * (best.length || opts.length)) | 0];
+      g[a][b] = 'water'; continue;
+    }
     if (s[0].double.forest < 1) { if (!pocket(R[0], 2, 'forest', -1)) return false; continue; }
     { const sa = siteCounts(g, BIOME_ALL_DOUBLE), short = T.find(t => !sa.double[t]);
       if (short) { if (!pocket(BIOME_ALL_DOUBLE, 2, short, -1)) return false; continue; } }
@@ -140,6 +160,13 @@ function repairTerrain(g, rnd, fixed) {
     return s[0].open >= BIOME_START_OPEN;
   }
   return false;
+}
+// Water tiles with no orthogonal water neighbour; a tile in the start area needs that neighbour inside the start area.
+function lonelyWater(g) {
+  const o = [], r0 = MAP_RADIUS[0];
+  for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] === 'water' &&
+    !STEPS4.some(([dx, dy]) => { const a = x + dx, b = y + dy; return onMap(a, b) && g[a][b] === 'water' && (ringOf(x, y) > r0 || ringOf(a, b) <= r0); })) o.push([x, y]);
+  return o;
 }
 // The original generator, one roll per tile. Only version-1 saves use it: they stored no grid, just the seed.
 function genTerrainLegacy(seed) {
@@ -554,7 +581,8 @@ function sanitizeSave(raw, now) {
   run.seed = int(r.seed, run.seed, -(2 ** 31), 2 ** 31);
   const grid = r.terrain;
   const gridOk = Array.isArray(grid) && grid.length === MAP_SIZE && grid.every(col => Array.isArray(col) && col.length === MAP_SIZE && col.every(c => typeof c === 'string' && hasOwn(TERRAIN, c)));
-  run.terrain = gridOk ? grid.map(col => col.slice()) : genTerrainLegacy(run.seed); // version 1 regenerated terrain from the seed, with the old generator
+  run.gen = int(r.gen, 1, 1, TERRAIN_GEN); // saves from before the marker had their map from the old generator
+  run.terrain = gridOk ? grid.map(col => col.slice()) : run.gen === 2 ? genTerrain(run.seed) : genTerrainLegacy(run.seed); // a missing grid (version 1) is regrown from the seed by the generator that made it
   run.terrain[MAP_MID][MAP_MID] = 'plain';
   run.exp = int(r.exp, 0, 0, EXPAND_COST.length);
   run.cleared = int(r.cleared, 0, 0, MAP_SIZE * MAP_SIZE);

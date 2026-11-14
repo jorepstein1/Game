@@ -381,26 +381,39 @@ function recount(g, r) {
   return o;
 }
 
-test('terrain comes in features with guaranteed sites: start area, every expansion and the full map (seeds 1 to 300)', sim => {
-  const R = sim.MAP_RADIUS, N = 300, open = R.map(() => 0), tiles = { forest: 0, hill: 0, water: 0 }, bad = [];
+// Every guarantee for one seed: returns the broken ones (empty when all hold), the grid and its site counts.
+function terrainCheck(sim, seed) {
+  const R = sim.MAP_RADIUS, g = sim.genTerrain(seed), attempts = sim.terrainAttempts, c = R.map(r => recount(g, r)), why = [];
+  assert.ok(g.length === 11 && g.every(col => col.length === 11 && col.every(t => t in sim.TERRAIN)), 'the grid format is unchanged');
+  for (const [x, y] of [[5, 5], [4, 5], [6, 5], [5, 4], [5, 6]]) if (g[x][y] !== 'plain') why.push('hall or a neighbour not open');
+  for (const t in sim.BIOME_START) { let n = 0; for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === t) n++; if (n < sim.BIOME_START[t]) why.push(`start area has ${n} ${t}`); }
+  if (!Object.keys(c[0].k).some(k => k.endsWith('forest') && c[0].k[k] >= 2)) why.push('no double forest site at the start');
+  if (c[0].open < 12) why.push('start area has ' + c[0].open + ' plots');
+  { const a = recount(g, sim.BIOME_ALL_DOUBLE); for (const t of ['forest', 'hill', 'water']) if (!Object.keys(a.k).some(k => k.endsWith(t) && a.k[k] >= 2)) why.push(`no double ${t} site within radius ${sim.BIOME_ALL_DOUBLE}`); }
+  for (let e = 1; e < R.length; e++) {
+    if (c[e].tri - c[e - 1].tri < 1) why.push(`expansion ${e} adds ${c[e].tri - c[e - 1].tri} triple sites`);
+    if (c[e].dbl - c[e - 1].dbl < 3) why.push(`expansion ${e} adds ${c[e].dbl - c[e - 1].dbl} double sites`);
+  }
+  for (const t of ['forest', 'hill', 'water']) if (!Object.keys(c[3].k).some(k => k.endsWith(t) && c[3].k[k] >= 3)) why.push('no triple ' + t + ' site on the full map');
+  // Water in orthogonal groups of two or more; a group in the start area counts only its tiles inside the start area.
+  const start = (x, y) => Math.abs(x - 5) <= 2 && Math.abs(y - 5) <= 2;
+  for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (g[x][y] === 'water' &&
+    ![[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].some(([a, b]) => a >= 0 && b >= 0 && a < 11 && b < 11 && g[a][b] === 'water' && (!start(x, y) || start(a, b)))) why.push(`water at ${x},${y} has no water beside it${start(x, y) ? ' in the start area' : ''}`);
+  if (attempts > 8) why.push(attempts + ' maps drawn');
+  return { why, g, c, attempts };
+}
+
+test('terrain comes in features with guaranteed sites, water in orthogonal groups, few redraws (seeds 1 to 300, negative and large seeds)', sim => {
+  const R = sim.MAP_RADIUS, N = 300, open = R.map(() => 0), tiles = { forest: 0, hill: 0, water: 0 }, bad = []; let most = 0;
   for (let seed = 1; seed <= N; seed++) {
-    const g = sim.genTerrain(seed), c = R.map(r => recount(g, r)), why = [];
-    assert.ok(g.length === 11 && g.every(col => col.length === 11 && col.every(t => t in sim.TERRAIN)), 'the grid format is unchanged');
-    for (const [x, y] of [[5, 5], [4, 5], [6, 5], [5, 4], [5, 6]]) if (g[x][y] !== 'plain') why.push('hall or a neighbour not open');
-    for (const t in sim.BIOME_START) { let n = 0; for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === t) n++; if (n < sim.BIOME_START[t]) why.push(`start area has ${n} ${t}`); }
-    if (!Object.keys(c[0].k).some(k => k.endsWith('forest') && c[0].k[k] >= 2)) why.push('no double forest site at the start');
-    if (c[0].open < 12) why.push('start area has ' + c[0].open + ' plots');
-    { const a = recount(g, sim.BIOME_ALL_DOUBLE); for (const t of ['forest', 'hill', 'water']) if (!Object.keys(a.k).some(k => k.endsWith(t) && a.k[k] >= 2)) why.push(`no double ${t} site within radius ${sim.BIOME_ALL_DOUBLE}`); }
-    for (let e = 1; e < R.length; e++) {
-      if (c[e].tri - c[e - 1].tri < 1) why.push(`expansion ${e} adds ${c[e].tri - c[e - 1].tri} triple sites`);
-      if (c[e].dbl - c[e - 1].dbl < 3) why.push(`expansion ${e} adds ${c[e].dbl - c[e - 1].dbl} double sites`);
-    }
-    for (const t of ['forest', 'hill', 'water']) if (!Object.keys(c[3].k).some(k => k.endsWith(t) && c[3].k[k] >= 3)) why.push('no triple ' + t + ' site on the full map');
+    const { why, g, c, attempts } = terrainCheck(sim, seed); most = Math.max(most, attempts);
     R.forEach((r, i) => { open[i] += c[i].open; });
     for (const col of g) for (const t of col) if (t !== 'plain') tiles[t]++;
     if (why.length) bad.push(seed + ': ' + why.join(', '));
   }
+  for (const seed of [-1, -2, -77, -12345, -(2 ** 31), 2 ** 31 - 1, 2 ** 31 - 2, 2147000000, 1e9, 123456789]) { const { why, attempts } = terrainCheck(sim, seed); most = Math.max(most, attempts); if (why.length) bad.push(seed + ': ' + why.join(', ')); }
   assert.deepStrictEqual(bad, [], 'every seed meets every guarantee');
+  assert.ok(most >= 1 && most <= 8, 'the repair pass fixes nearly every first draw: at most ' + most + ' maps drawn');
   [15, 32, 55, 83].forEach((was, i) => near(open[i] / N, was, was * 0.1, `open plots at radius ${R[i]} stay near the old average;`));
   const share = (tiles.forest + tiles.hill + tiles.water) / N / 121;
   assert.strictEqual(sim.BIOME_ALL_DOUBLE, 3, 'every terrain has a double site once the first expansion is open');
@@ -418,6 +431,17 @@ test('terrain is deterministic per seed; version-1 saves keep the old generator'
     'ppppppfpppp/ppppwpppppp/pppfphpfwfp/pphfppfpppf/pppppwwpppf/ppphfpppppf/pppppfphphp/pwpppphpppf/ppppppppppw/wpphfpwpwpp/pppphfpfppp');
   const s = sim.newState(0); s.run = sim.newRun(99); s.run.terrain[0][0] = 'water'; s.run.terrain[0][1] = 'plain';
   assert.deepStrictEqual(plain(sim.sanitizeSave(plain(s), 1000).state.run.terrain), plain(s.run.terrain), 'a saved grid is kept as it is, whichever generator made it');
+});
+
+test('a missing grid is regrown by the generator that made the map (run.gen)', sim => {
+  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 3);
+  const s = sim.newState(0); s.run = run; const raw = plain(s); delete raw.run.terrain;
+  let got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 2); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 2: genTerrain');
+  raw.run.terrain = [['<img>']]; assert.deepStrictEqual(plain(sim.sanitizeSave(raw, 1000).state.run.terrain), plain(sim.genTerrain(4242)), 'an invalid grid too');
+  for (const gen of [undefined, 1, 'x', -3]) { if (gen === undefined) delete raw.run.gen; else raw.run.gen = gen;
+    got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 1, 'gen ' + gen + ' reads as the old generator'); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrainLegacy(4242)), 'gen ' + gen + ': genTerrainLegacy'); }
+  raw.run.gen = 99; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.gen, 2, 'clamped to a known generator');
+  const back = sim.sanitizeSave(JSON.parse(JSON.stringify(s)), 1000).state; assert.strictEqual(back.run.gen, 2, 'kept through a save');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -33,7 +33,9 @@ const EXPAND_COST = [{ gold: 3e4, wood: 1e4 }, { gold: 3e7, stone: 3e6 }, { gold
 // Terrain comes in features (groves, hill ranges, a lake or river) rather than single tiles, so that plots touching
 // two or three tiles of one kind exist on every map. BIOME_TILES is how many tiles of each the features cover before
 // the repair pass (about 28% of the map, as the old per-tile rolls did: more terrain would mean fewer plots and a slower game).
-const BIOME_TILES = { forest: 13, hill: 8, water: 5 };
+// It is a budget before repair: the repair pass adds tiles for its guarantees (and partners for lone water), so the
+// finished maps hold more; tests/sim.test.js holds the measured total (about 29% over seeds 1 to 300) to 25-32%.
+const BIOME_TILES = { forest: 12, hill: 8, water: 4 };
 const BIOME_START = { forest: 3, hill: 2, water: 2 }; // the starting 5×5 always has something of everything to play with
 const BIOME_START_OPEN = 12;      // ...and at least this many open plots
 const BIOME_ALL_DOUBLE = 3;      // within this radius (the first expansion) every terrain has a double site: no map starves stone or food
