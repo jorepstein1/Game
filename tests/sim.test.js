@@ -182,7 +182,7 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 0);
   assert.deepStrictEqual(plain(s.run.tiles), { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'cottage', level: 8 },
     '4,5': { kind: 'building', id: 'farm', level: 6 }, '6,5': { kind: 'building', id: 'smith', level: 3 } });
-  const fresh = plain(sim.genTerrain(12345)), got = plain(s.run.terrain);
+  const fresh = plain(sim.genTerrainLegacy(12345)), got = plain(s.run.terrain); // the old generator: a v1 save keeps the map it had
   for (const k in s.run.tiles) { const [x, y] = k.split(',').map(Number); fresh[x][y] = 'plain'; }
   assert.deepStrictEqual(got, fresh);
   assert.strictEqual(s.run.buffUntil, undefined, 'festival times are dropped');
@@ -366,6 +366,75 @@ test('the next hall: hallWait, and routine upgrades hold its price back once it 
   near(w, Math.max(...Object.keys(cost).map(r => cost[r] / sim.calc.base[r])), 1, 'the slowest material sets the wait');
   run.res.gold = 1e9; run.res.wood = 1e9; run.res.stone = 1e9; assert.ok(sim.routineUpgrades().count > 0 || true);
   run.tiles[sim.HALL_KEY].level = sim.MAX_LEVEL; assert.strictEqual(sim.hallWait(), Infinity);
+});
+
+// ── Terrain ──
+// A direct count, written apart from sim.js: same-terrain neighbours of each open plot inside radius r.
+function recount(g, r) {
+  const M = 5, inR = (x, y) => Math.abs(x - M) <= r && Math.abs(y - M) <= r, o = { open: 0, k: {} };
+  for (let x = M - r; x <= M + r; x++) for (let y = M - r; y <= M + r; y++) {
+    if (g[x][y] !== 'plain' || (x === M && y === M)) continue;
+    o.open++;
+    for (const t of ['forest', 'hill', 'water']) o.k[x + ',' + y + ',' + t] = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].filter(([a, b]) => inR(a, b) && g[a][b] === t).length;
+  }
+  o.dbl = Object.values(o.k).filter(k => k >= 2).length; o.tri = Object.values(o.k).filter(k => k >= 3).length;
+  return o;
+}
+
+test('terrain comes in features with guaranteed sites: start area, every expansion and the full map (seeds 1 to 300)', sim => {
+  const R = sim.MAP_RADIUS, N = 300, open = R.map(() => 0), tiles = { forest: 0, hill: 0, water: 0 }, bad = [];
+  for (let seed = 1; seed <= N; seed++) {
+    const g = sim.genTerrain(seed), c = R.map(r => recount(g, r)), why = [];
+    assert.ok(g.length === 11 && g.every(col => col.length === 11 && col.every(t => t in sim.TERRAIN)), 'the grid format is unchanged');
+    for (const [x, y] of [[5, 5], [4, 5], [6, 5], [5, 4], [5, 6]]) if (g[x][y] !== 'plain') why.push('hall or a neighbour not open');
+    for (const t in sim.BIOME_START) { let n = 0; for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === t) n++; if (n < sim.BIOME_START[t]) why.push(`start area has ${n} ${t}`); }
+    if (!Object.keys(c[0].k).some(k => k.endsWith('forest') && c[0].k[k] >= 2)) why.push('no double forest site at the start');
+    if (c[0].open < 12) why.push('start area has ' + c[0].open + ' plots');
+    for (let e = 1; e < R.length; e++) {
+      if (c[e].tri - c[e - 1].tri < 1) why.push(`expansion ${e} adds ${c[e].tri - c[e - 1].tri} triple sites`);
+      if (c[e].dbl - c[e - 1].dbl < 3) why.push(`expansion ${e} adds ${c[e].dbl - c[e - 1].dbl} double sites`);
+    }
+    for (const t of ['forest', 'hill', 'water']) if (!Object.keys(c[3].k).some(k => k.endsWith(t) && c[3].k[k] >= 3)) why.push('no triple ' + t + ' site on the full map');
+    R.forEach((r, i) => { open[i] += c[i].open; });
+    for (const col of g) for (const t of col) if (t !== 'plain') tiles[t]++;
+    if (why.length) bad.push(seed + ': ' + why.join(', '));
+  }
+  assert.deepStrictEqual(bad, [], 'every seed meets every guarantee');
+  [15, 32, 55, 83].forEach((was, i) => near(open[i] / N, was, was * 0.1, `open plots at radius ${R[i]} stay near the old average;`));
+  const share = (tiles.forest + tiles.hill + tiles.water) / N / 121;
+  assert.ok(share >= 0.25 && share <= 0.32, 'terrain share ' + share.toFixed(3)); assert.ok(tiles.forest > tiles.hill && tiles.hill > tiles.water, JSON.stringify(tiles));
+});
+
+test('terrain is deterministic per seed; version-1 saves keep the old generator', sim => {
+  for (const seed of [1, 11, 12345, -7, 2 ** 31 - 1]) {
+    assert.deepStrictEqual(plain(sim.genTerrain(seed)), plain(sim.genTerrain(seed)), 'seed ' + seed);
+    assert.deepStrictEqual(plain(sim.newRun(seed).terrain), plain(sim.genTerrain(seed)));
+  }
+  assert.notDeepStrictEqual(plain(sim.genTerrain(1)), plain(sim.genTerrain(2)));
+  // genTerrainLegacy is the generator of save versions 1 to 3 before biomes, byte for byte (its map for seed 12345)
+  assert.strictEqual(sim.genTerrainLegacy(12345).map(c => c.map(t => t[0]).join('')).join('/'),
+    'ppppppfpppp/ppppwpppppp/pppfphpfwfp/pphfppfpppf/pppppwwpppf/ppphfpppppf/pppppfphphp/pwpppphpppf/ppppppppppw/wpphfpwpwpp/pppphfpfppp');
+  const s = sim.newState(0); s.run = sim.newRun(99); s.run.terrain[0][0] = 'water'; s.run.terrain[0][1] = 'plain';
+  assert.deepStrictEqual(plain(sim.sanitizeSave(plain(s), 1000).state.run.terrain), plain(s.run.terrain), 'a saved grid is kept as it is, whichever generator made it');
+});
+
+test('expansionPreview matches a direct recount after expand()', sim => {
+  for (const seed of [11, 22, 33, 44, 12345, 5]) {
+    const s = sim.newState(0); s.run = sim.newRun(seed); sim.setState(s);
+    const run = sim.state.run;
+    if (seed === 5) { const k = Object.keys(recount(run.terrain, 2).k)[0].split(','); run.tiles[k[0] + ',' + k[1]] = { kind: 'building', id: 'cottage', level: 1 }; } // buildings change nothing
+    for (let e = 0; e < sim.EXPAND_COST.length; e++) {
+      const p = plain(sim.expansionPreview()), before = recount(run.terrain, sim.MAP_RADIUS[e]);
+      run.res = { gold: 1e12, food: 1e6, wood: 1e12, stone: 1e12, iron: 1e12 }; assert.ok(sim.expand().ok);
+      const after = recount(run.terrain, sim.mapRadius()), want = { plots: after.open - before.open, sites: {} };
+      for (const t of ['forest', 'hill', 'water']) want.sites[t] = { double: 0, triple: 0 };
+      for (const key in after.k) { const t = key.split(',')[2], was = before.k[key] || 0, now = after.k[key];
+        if (now >= 3 && was < 3) want.sites[t].triple++; else if (now === 2 && was < 2) want.sites[t].double++; }
+      assert.deepStrictEqual(p, want, `seed ${seed}, expansion ${e + 1}`);
+      assert.ok(Object.values(p.sites).reduce((a, x) => a + x.triple, 0) >= 1, 'every expansion shows a triple site');
+    }
+    assert.strictEqual(sim.expansionPreview(), null, 'nothing at the widest border');
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

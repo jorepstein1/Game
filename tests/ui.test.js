@@ -245,7 +245,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: Date.now() - 1e7 } };
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
-  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
+  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
   ok(mig.v === 3 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
   const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
@@ -490,6 +490,21 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   });
   ok(!art.missing.length && !art.tables.length && !art.text.length && art.welcome && art.kinds >= 30 && art.fit, 'every resource, terrain, hall level and building has a sprite that resolves, tiles show them at size, and no emoji is on screen (welcome-back dialog included) ' + JSON.stringify(art));
   ok(e2.length === 0, 'sprites: no console errors ' + JSON.stringify(e2));
+
+  // --- the Expand card previews what the next ring reveals, on one line of a 360px phone
+  const cx = await br.newContext({ viewport: { width: 360, height: 740 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
+  const px = await cx.newPage(); const ex = []; watch(px, ex);
+  await px.goto(URL); await px.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
+  const pv = await px.evaluate(() => { const bad = [], seen = [];
+    for (let seed = 1; seed <= 100; seed++) for (let e = 0; e < EXPAND_COST.length; e++) {
+      startNewGame(Date.now()); state.run = newRun(seed); state.run.exp = e; state.run.tiles[HALL_KEY].level = 3; calc = compute(); ui.tab = 'build'; ui.sheet = true; ui.sel = {}; render();
+      const line = document.querySelectorAll('#panel [data-act="expand"] .muted')[1], h = line.getBoundingClientRect().height, p = expansionPreview();
+      if (h > parseFloat(getComputedStyle(line).fontSize) * 1.6 || !line.textContent.startsWith('New: ' + p.plots + ' plots') || !/triple/.test(line.textContent)) bad.push(seed + '/' + e + ' ' + line.textContent + ' h=' + h);
+      if (seed <= 2) seen.push(line.textContent); }
+    state.run.exp = EXPAND_COST.length; render(); const last = !document.querySelector('#panel [data-act="expand"]');
+    return { bad: bad.slice(0, 5), n: bad.length, seen, last }; });
+  ok(!pv.n && pv.last, 'the Expand card says how many plots and which double and triple sites the next ring reveals, on one line at 360px (100 maps) ' + JSON.stringify(pv));
+  ok(ex.length === 0, 'expand preview: no console errors ' + JSON.stringify(ex));
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();

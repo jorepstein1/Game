@@ -30,6 +30,13 @@ const PRESTIGE_HALL = 4;         // hall level needed to abdicate
 const MAP_SIZE = 11, MAP_MID = 5;
 const MAP_RADIUS = [2, 3, 4, 5]; // unlocked radius around the centre per expansion
 const EXPAND_COST = [{ gold: 3e4, wood: 1e4 }, { gold: 3e7, stone: 3e6 }, { gold: 5e8, iron: 3e6 }];
+// Terrain comes in features (groves, hill ranges, a lake or river) rather than single tiles, so that plots touching
+// two or three tiles of one kind exist on every map. BIOME_TILES is how many tiles of each the features cover before
+// the repair pass (about 28% of the map, as the old per-tile rolls did: more terrain would mean fewer plots and a slower game).
+const BIOME_TILES = { forest: 13, hill: 8, water: 5 };
+const BIOME_START = { forest: 3, hill: 2, water: 2 }; // the starting 5×5 always has something of everything to play with
+const BIOME_START_OPEN = 12;      // ...and at least this many open plots
+const BIOME_DOUBLES = 3, BIOME_TRIPLES = 1; // each expansion adds at least this many plots with 2+ / 3+ neighbours of one terrain
 const CLEAR_COST = { gold: 500 }; // clearing forest/hills/water into an open plot
 const CLEAR_GROWTH = 2;           // each clearing costs this many times the last
 

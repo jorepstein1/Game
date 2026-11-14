@@ -36,7 +36,110 @@ function mulberry(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
+// ── Terrain ──
+// Sites: an open plot with k neighbours of one terrain, counting only tiles inside radius r of the centre (what the
+// player has unlocked). k >= 2 is a double site, k >= 3 a triple: where a camp, quarry or farm earns +100% or more.
+const STEPS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const ringOf = (x, y) => Math.max(Math.abs(x - MAP_MID), Math.abs(y - MAP_MID));
+const onMap = (x, y) => x >= 0 && y >= 0 && x < MAP_SIZE && y < MAP_SIZE;
+function sameAround(g, x, y, r, t) { let k = 0; for (const [dx, dy] of STEPS4) { const a = x + dx, b = y + dy; if (onMap(a, b) && ringOf(a, b) <= r && g[a][b] === t) k++; } return k; }
+// Per terrain, how many open plots within radius r are double (2+) and triple (3+) sites. The hall's tile is not a plot.
+function siteCounts(g, r) {
+  const o = { open: 0, double: { forest: 0, hill: 0, water: 0 }, triple: { forest: 0, hill: 0, water: 0 } };
+  for (let x = MAP_MID - r; x <= MAP_MID + r; x++) for (let y = MAP_MID - r; y <= MAP_MID + r; y++) {
+    if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+    o.open++;
+    for (const t in o.double) { const k = sameAround(g, x, y, r, t); if (k >= 2) o.double[t]++; if (k >= 3) o.triple[t]++; }
+  }
+  return o;
+}
+const sumOf = o => Object.values(o).reduce((a, b) => a + b, 0);
+
+// Features, not single tiles: groves, hill ranges and a lake or river, placed by the seeded RNG. The value of a
+// feature is in the open plots on its edges, so none is left solid: a grove's inner tiles become clearings, ranges
+// jog and fork, rivers bend. The hall's tile and its four neighbours stay open.
 function genTerrain(seed) {
+  const rnd = mulberry(seed), pick = a => a[(rnd() * a.length) | 0];
+  const fixed = (x, y) => Math.abs(x - MAP_MID) + Math.abs(y - MAP_MID) <= 1;
+  let g;
+  for (let attempt = 0; attempt < 30; attempt++) { // a map the repair pass cannot fix is drawn again from the same RNG
+    g = []; for (let x = 0; x < MAP_SIZE; x++) g.push(Array(MAP_SIZE).fill('plain'));
+    const have = { forest: 0, hill: 0, water: 0 }; // tiles of each so far; the last feature of a kind may be cut short
+    const put = (x, y, t) => { if (onMap(x, y) && !fixed(x, y) && g[x][y] === 'plain' && have[t] < BIOME_TILES[t]) { g[x][y] = t; have[t]++; return true; } return false; };
+    const blob = (t, size) => { // grown from a seed tile, then its inner tiles are cleared
+      const cells = [[(rnd() * MAP_SIZE) | 0, (rnd() * MAP_SIZE) | 0]];
+      for (let guard = 0; cells.length < size && guard < 40; guard++) { const [x, y] = pick(cells), [dx, dy] = pick(STEPS4), a = x + dx, b = y + dy;
+        if (onMap(a, b) && !fixed(a, b) && !cells.some(([p, q]) => p === a && q === b)) cells.push([a, b]); }
+      const inSet = (a, b) => cells.some(([p, q]) => p === a && q === b);
+      for (const [x, y] of cells) if (!STEPS4.every(([dx, dy]) => inSet(x + dx, y + dy))) put(x, y, t);
+    };
+    const line = (t, len, wiggle, thick) => { // a range or river: walks one way, now and then stepping aside
+      let x = (rnd() * MAP_SIZE) | 0, y = (rnd() * MAP_SIZE) | 0; const [dx, dy] = pick(STEPS4), side = rnd() < 0.5 ? 1 : -1;
+      for (let i = 0; i < len; i++) {
+        put(x, y, t); if (rnd() < thick) put(x + dy * side, y + dx * side, t);
+        if (rnd() < wiggle) { x += dy * side; y += dx * side; put(x, y, t); }
+        x += dx; y += dy;
+      }
+    };
+    for (let guard = 0; guard < 60 && have.forest < BIOME_TILES.forest; guard++) blob('forest', 4 + ((rnd() * 5) | 0));
+    for (let guard = 0; guard < 60 && have.hill < BIOME_TILES.hill; guard++) line('hill', 3 + ((rnd() * 3) | 0), 0.3, 0.35);
+    for (let guard = 0; guard < 60 && have.water < BIOME_TILES.water; guard++) if (rnd() < 0.5) blob('water', 4 + ((rnd() * 3) | 0)); else line('water', 4 + ((rnd() * 4) | 0), 0.4, 0);
+    // Features that overlap can still close up into a solid mass: open its inner tiles too (clearings).
+    const inner = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] !== 'plain' && STEPS4.every(([dx, dy]) => onMap(x + dx, y + dy) && g[x + dx][y + dy] === g[x][y])) inner.push([x, y]);
+    for (const [x, y] of inner) g[x][y] = 'plain';
+    if (repairTerrain(g, rnd, fixed)) break;
+  }
+  return g;
+}
+// The guarantees (see data.js): the start area has some of every terrain, a double forest site and enough plots;
+// every expansion adds a triple site and BIOME_DOUBLES double sites; the full map has a triple site of each terrain.
+// Each failure is fixed by turning the fewest open tiles around one plot into that terrain, then everything is
+// checked again, since a fix can spoil an earlier ring. Returns false if the map cannot be fixed this way.
+function repairTerrain(g, rnd, fixed) {
+  const R = MAP_RADIUS, T = ['forest', 'hill', 'water'];
+  // Make a new k-site (better than it was at radius `prev`) within radius r, of terrain `want` or any.
+  const pocket = (r, k, want, prev) => {
+    let best = null, bestCost = Infinity;
+    for (let x = MAP_MID - r; x <= MAP_MID + r; x++) for (let y = MAP_MID - r; y <= MAP_MID + r; y++) {
+      if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+      for (const t of want ? [want] : T) {
+        if (sameAround(g, x, y, r, t) >= k || (prev >= 0 && ringOf(x, y) <= prev && sameAround(g, x, y, prev, t) >= k)) continue;
+        const nb = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => onMap(a, b) && ringOf(a, b) <= r);
+        const open = nb.filter(([a, b]) => g[a][b] === 'plain' && !fixed(a, b)), need = k - sameAround(g, x, y, r, t);
+        if (open.length < need) continue;
+        open.sort((p, q) => (ringOf(q[0], q[1]) > prev) - (ringOf(p[0], p[1]) > prev)); // turn new land first, so inner rings keep their sites
+        const use = open.slice(0, need);
+        if (prev >= 0 && ringOf(x, y) <= prev && sameAround(g, x, y, prev, t) + use.filter(([a, b]) => ringOf(a, b) <= prev).length >= k) continue; // would be as good before: no gain
+        const cost = need + 0.5 * use.filter(([a, b]) => ringOf(a, b) <= prev).length + rnd() * 0.4;
+        if (cost < bestCost) { bestCost = cost; best = { t, use }; }
+      }
+    }
+    if (!best) return false;
+    for (const [a, b] of best.use) g[a][b] = best.t;
+    return true;
+  };
+  for (let fix = 0; fix < 40; fix++) {
+    const s = R.map(r => siteCounts(g, r)); let ok = true;
+    for (const t of T) { let n = 0; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === t) n++;
+      if (n < BIOME_START[t]) { ok = false; // an odd tile is enough here: the start area is small
+        const free = []; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === 'plain' && !fixed(x, y)) free.push([x, y]);
+        if (!free.length) return false; const [x, y] = free[(rnd() * free.length) | 0]; g[x][y] = t; break; } }
+    if (!ok) continue;
+    if (s[0].double.forest < 1) { if (!pocket(R[0], 2, 'forest', -1)) return false; continue; }
+    let i = 1;
+    for (; i < R.length; i++) {
+      if (sumOf(s[i].triple) - sumOf(s[i - 1].triple) < BIOME_TRIPLES) { if (!pocket(R[i], 3, null, R[i - 1])) return false; break; }
+      if (sumOf(s[i].double) - sumOf(s[i - 1].double) < BIOME_DOUBLES) { if (!pocket(R[i], 2, null, R[i - 1])) return false; break; }
+    }
+    if (i < R.length) continue;
+    const lone = T.find(t => !s[R.length - 1].triple[t]);
+    if (lone) { if (!pocket(R[R.length - 1], 3, lone, -1)) return false; continue; }
+    return s[0].open >= BIOME_START_OPEN;
+  }
+  return false;
+}
+// The original generator, one roll per tile. Only version-1 saves use it: they stored no grid, just the seed.
+function genTerrainLegacy(seed) {
   const rnd = mulberry(seed), g = [];
   for (let x = 0; x < MAP_SIZE; x++) { g.push([]); for (let y = 0; y < MAP_SIZE; y++) {
     const r = rnd(); g[x].push(r < 0.14 ? 'forest' : r < 0.23 ? 'hill' : r < 0.29 ? 'water' : 'plain'); } }
@@ -300,6 +403,21 @@ function expand() {
   state.run.exp++;
   return { ok: true, icon: 'map', msg: 'Your borders grow!' };
 }
+// What the next expansion would reveal on today's terrain grid, or null at the widest border. plots: new open plots.
+// Per terrain, triple: plots that become triple sites; double: plots that become double sites (from less than double).
+// Buildings are ignored (a site is a plain tile, built on or not), so the counts depend on the terrain alone.
+function expansionPreview() {
+  const run = state.run; if (run.exp >= EXPAND_COST.length) return null;
+  const g = run.terrain, r0 = MAP_RADIUS[run.exp], r1 = MAP_RADIUS[run.exp + 1], o = { plots: 0, sites: {} };
+  for (const t in TERRAIN) if (t !== 'plain') o.sites[t] = { double: 0, triple: 0 };
+  for (let x = MAP_MID - r1; x <= MAP_MID + r1; x++) for (let y = MAP_MID - r1; y <= MAP_MID + r1; y++) {
+    if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+    const fresh = ringOf(x, y) > r0; if (fresh) o.plots++;
+    for (const t in o.sites) { const was = fresh ? 0 : sameAround(g, x, y, r0, t), now = sameAround(g, x, y, r1, t);
+      if (now >= 3 && was < 3) o.sites[t].triple++; else if (now === 2 && was < 2) o.sites[t].double++; }
+  }
+  return o;
+}
 // Turning forest, hills or water into an open plot: the way forward once the map is full.
 const clearCost = () => scaleCost(CLEAR_COST, Math.pow(CLEAR_GROWTH, state.run.cleared) * researchFx('clearCost'));
 function clearLand(key) {
@@ -448,7 +566,7 @@ function sanitizeSave(raw, now) {
   run.seed = int(r.seed, run.seed, -(2 ** 31), 2 ** 31);
   const grid = r.terrain;
   const gridOk = Array.isArray(grid) && grid.length === MAP_SIZE && grid.every(col => Array.isArray(col) && col.length === MAP_SIZE && col.every(c => typeof c === 'string' && hasOwn(TERRAIN, c)));
-  run.terrain = gridOk ? grid.map(col => col.slice()) : genTerrain(run.seed); // version 1 regenerated terrain from the seed
+  run.terrain = gridOk ? grid.map(col => col.slice()) : genTerrainLegacy(run.seed); // version 1 regenerated terrain from the seed, with the old generator
   run.terrain[MAP_MID][MAP_MID] = 'plain';
   run.exp = int(r.exp, 0, 0, EXPAND_COST.length);
   run.cleared = int(r.cleared, 0, 0, MAP_SIZE * MAP_SIZE);
