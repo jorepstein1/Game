@@ -1,7 +1,7 @@
 'use strict';
 /* Hearthold — simulation: state, rules, actions and the save format.
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
-   Actions return { ok, msg } and leave it to the caller to show anything. */
+   Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
 const SAVE_VERSION = 3;
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
@@ -267,7 +267,7 @@ function upgrade(key) {
   const t = state.run.tiles[key];
   if (!t || t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
   t.level++;
-  return { ok: true, msg: t.kind === 'hall' ? `🎉 Your seat is now a ${hallName(t.level)}!` : undefined };
+  return { ok: true, icon: 'crown', msg: t.kind === 'hall' ? `Your seat is now a ${hallName(t.level)}!` : undefined };
 }
 // Everything paid for a building: its build price plus each upgrade. Demolition returns REFUND_SHARE of it.
 function spentOn(t) {
@@ -287,7 +287,7 @@ function buyResearch(id) {
   const r = RESEARCH.find(r => r.id === id);
   if (!r || hasResearch(id) || r.hall > hallLevel() || !pay(r.cost)) return fail();
   state.run.research[id] = 1;
-  return { ok: true, msg: '📜 Researched ' + r.name };
+  return { ok: true, icon: 'research', msg: 'Researched ' + r.name };
 }
 function buyRepeatable(id) {
   const r = repeatable(id);
@@ -298,7 +298,7 @@ function buyRepeatable(id) {
 function expand() {
   if (state.run.exp >= EXPAND_COST.length || !pay(EXPAND_COST[state.run.exp])) return fail();
   state.run.exp++;
-  return { ok: true, msg: '🗺️ Your borders grow!' };
+  return { ok: true, icon: 'map', msg: 'Your borders grow!' };
 }
 // Turning forest, hills or water into an open plot: the way forward once the map is full.
 const clearCost = () => scaleCost(CLEAR_COST, Math.pow(CLEAR_GROWTH, state.run.cleared) * researchFx('clearCost'));
@@ -306,7 +306,7 @@ function clearLand(key) {
   const [x, y] = xy(key);
   if (!unlocked(x, y) || state.run.tiles[key] || state.run.terrain[x][y] === 'plain' || !pay(clearCost())) return fail();
   state.run.terrain[x][y] = 'plain'; state.run.cleared++;
-  return { ok: true, msg: '🪓 The land is cleared.' };
+  return { ok: true, icon: 'lumber', msg: 'The land is cleared.' };
 }
 
 // Routine upgrades: the cheap building upgrades nobody needs to think about, made in one action so they do not
@@ -342,7 +342,7 @@ function routineUpgrades(preview) {
   }
   if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; run.away = o.away; }
   calc = compute();
-  return n ? { ok: true, count: n, spent, msg: `⬆️ ${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
+  return n ? { ok: true, count: n, spent, icon: 'up', msg: `${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
 }
 
 // Decrees: DECREE_CHOICES of them are open at a time (the earliest ones not yet claimed). Any open decree can be
@@ -363,7 +363,7 @@ function claimDecree(id) {
   if (!d) return fail();
   grant(d.reward); state.meta.decreesDone[d.id] = 1;
   const next = currentDecree(); state.meta.decree = next ? next.id : null;
-  return { ok: true, msg: '✅ ' + d.title + ' — reward claimed' };
+  return { ok: true, icon: 'decrees', msg: d.title + ' — reward claimed' };
 }
 
 // Abdicate: bank the Crowns in meta and start a fresh run.
@@ -374,7 +374,7 @@ function prestige() {
   const kept = RESEARCH.filter(r => r.keep && hasResearch(r.id)); // knowledge that outlasts a reign
   state.run = newRun(undefined, meta.crowns); for (const r of kept) state.run.research[r.id] = 1;
   calc = compute();
-  return { ok: true, crowns: n, msg: `👑 A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
+  return { ok: true, crowns: n, icon: 'crown', msg: `A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
 }
 
 // Hand collection: a little gold per tap, there for the first minutes of a reign. It does not grow with income,

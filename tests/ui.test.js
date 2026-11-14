@@ -105,14 +105,14 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const hallText = await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; render(); const t = document.getElementById('inspector').textContent; ui.sel = {}; render(); return t; });
   ok(!/tax collection richer/.test(hallText) && /to all production/.test(hallText), 'the hall no longer claims to make tax collection richer');
   // --- the next hall's price and wait lead the Build tab; cards say what a purchase adds; decrees come three at a time
-  const guide = await page.evaluate(() => { const keep = JSON.stringify(state);
+  const guide = await page.evaluate(() => { const keep = JSON.stringify(state), said = el => { const c = el.cloneNode(true); c.querySelectorAll('svg[aria-label]').forEach(v => v.replaceWith('[' + v.getAttribute('aria-label') + ']')); return c.textContent; };
     startNewGame(Date.now()); state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; ui.tab = 'build'; ui.sel = {}; ui.routine = null; render();
     const firstCard = document.querySelector('#panel .card').dataset.id, noRoutine = !document.querySelector('#panel .card.routine'), hint = document.querySelector('#panel .card.hallhint'), isHint = !!(document.querySelector('#panel .card[data-id="quarry"]').compareDocumentPosition(hint) & 4), none = hint.textContent.replace(/\s+/g, ' ');
     for (const [k, id] of [['4,5', 'cottage'], ['6,5', 'quarry'], ['5,4', 'lumber']]) { state.run.terrain[+k[0]][+k[2]] = 'plain'; state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; build(k, id); }
     state.run.pop = 5; calc = compute(); render();
-    const hint2 = document.querySelector('#panel .card.hallhint').textContent.replace(/\s+/g, ' '), farm = document.querySelector('#panel .card[data-id="farm"] .adds').textContent, cot = document.querySelector('#panel .card[data-id="cottage"] .adds').textContent;
+    const hint2 = document.querySelector('#panel .card.hallhint').textContent.replace(/\s+/g, ' '), farm = said(document.querySelector('#panel .card[data-id="farm"] .adds')), cot = said(document.querySelector('#panel .card[data-id="cottage"] .adds'));
     document.querySelector('#panel .card.hallhint').click(); const sel = ui.sel.tile;
-    ui.tab = 'research'; render(); const res = document.querySelector('#panel .card[data-id="axes"] .adds').textContent;
+    ui.tab = 'research'; render(); const res = said(document.querySelector('#panel .card[data-id="axes"] .adds'));
     ui.tab = 'decrees'; ui.sel = {}; render(); const ds = [...document.querySelectorAll('#panel .decree')], titles = ds.map(d => d.querySelector('h3').textContent.trim());
     const claimable = ds.map(d => d.querySelector('[data-act="claim"]').classList.contains('glow')); const wood = state.run.res.wood;
     document.querySelector('#panel [data-act="pursue"][data-id="bread"]').click(); const pinned = state.meta.decree, goal = document.querySelector('#inspector .goal').textContent;
@@ -132,7 +132,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     'with the Manor within reach a Cottage card says what buying it does to the wait; workplaces the town could not staff make no such claim ' + JSON.stringify([guide.near.cottage, guide.near.lumber, guide.near.quarry]));
   ok(/Rest begins after 6h 0m more away/.test(guide.near.rest0) && /Rested: time away counts double until you next buy/.test(guide.near.rest1), 'the next-hall card says where the rested bonus stands');
   ok(/You can abdicate: 20 Crowns on offer/.test(guide.near.abd) && /You can abdicate: 20 Crowns on offer/.test(guide.near.realm || ''), 'when abdication is open the next-hall card and the Realm tab say so, with the Crowns on offer ' + JSON.stringify(guide.near.realm));
-  ok(/adds \+\d.*🍞/.test(guide.farm || '') && /adds \+\d.*💰/.test(guide.cot || '') && /adds \+\d.*🪵/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
+  ok(/adds \+\d.*\[Food\]/.test(guide.farm || '') && /adds \+\d.*\[Gold\]/.test(guide.cot || '') && /adds \+\d.*\[Wood\]/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
   ok(guide.titles.length === 3 && /A Roof Overhead/.test(guide.titles[0]) && guide.claimable.join() === 'true,true,false' && guide.pinned === 'bread' && /Daily Bread/.test(guide.goal) && guide.after.done.join() === 'timber' && guide.after.open.join() === 'roof,bread,hamlet' && guide.after.pinned === 'bread',
     'three decrees are open at once; any can be claimed, one can be pursued, and claiming one brings the next ' + JSON.stringify(guide.after));
   // Collect Taxes is a start-of-game button: it is hidden from the Manor on, so the key-repeat check runs at a Village Hall
@@ -209,7 +209,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       research: { axes: 1, '<img onerror=window.__xss=1 src=x>': 1 }, repeatables: { prod: '<img>', food: 1e9 }, buffUntil: 1e99, clock: 5 } };
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
-    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
+    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app script, #toasts img').length + [...document.querySelectorAll('#app svg, #toasts svg')].filter(v => !(v.children.length === 1 && v.firstElementChild.localName === 'use' && /^#sp-\w+$/.test(v.firstElementChild.getAttribute('href')) && [...v.attributes].every(a => !/^on/i.test(a.name)))).length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
   ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
@@ -262,7 +262,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- failed writes are reported, "Saved." only on success
   await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('quota'); }; ui.tab = 'realm'; render(); document.getElementById('toasts').innerHTML = ''; document.querySelector('#panel [data-act="save"]').click(); });
   const tt = await page.evaluate(() => document.getElementById('toasts').textContent);
-  ok(/Saving failed/.test(tt) && !/💾 Saved/.test(tt), 'failed save is reported and not announced as saved');
+  ok(/Saving failed/.test(tt) && !/Saved/.test(tt), 'failed save is reported and not announced as saved');
 
   // --- two tabs: the older one pauses
   const ctx2 = await br.newContext({ viewport: { width: 390, height: 844 } });
@@ -340,7 +340,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(await p3.evaluate(() => state.run.tiles['6,5'].level) === 5, 'tapping Upgrade in the bar upgrades the Blacksmith');
   await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage', level: 2 }; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
   up = await reach('#buildbar [data-act="up"]');
-  ok(up && up.inView && /Upgrade \+5 🏠/.test(up.text), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
+  ok(up && up.inView && /Upgrade \+5/.test(up.text) && await p3.evaluate(() => !!document.querySelector('#bbrow [data-act="up"] svg[aria-label="housing"]')), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
   await shot(p3, 'shot-390x664-tile.png');
   // a double tap on Close must not fall through to the build button that takes its place
   const dbl = await p3.evaluate(() => { ui.sel = { tile: '6,6' }; render();
@@ -466,6 +466,30 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     'desktop keeps the side panel open with the inspector above it; narrowing the window switches to the phone shell and back ' + JSON.stringify({ wideL, narrowL, backL }));
   ok(e2.length === 0, 'desktop: no console errors ' + JSON.stringify(e2));
   await shot(p2, 'shot-1280.png');
+
+  // --- sprites: every icon is a drawing that exists, and no emoji is left anywhere on screen
+  const art = await p2.evaluate(() => {
+    const missing = [], emoji = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}️]/u, seen = new Set(), text = [];
+    const need = [...Object.keys(RESOURCES), ...Object.keys(BUILDINGS), ...Object.keys(TERRAIN).filter(t => t !== 'plain'), ...HALL_TIERS.map((_, i) => 'hall' + (i + 1))];
+    for (const id of need) if (!SPRITES[id]) missing.push(id);
+    const tables = [RESOURCES, BUILDINGS, HALL_TIERS, TERRAIN].flatMap(t => Object.values(t)).filter(d => d.icon && !d.icon.startsWith('<svg')).map(d => d.name);
+    const scan = () => { for (const u of document.querySelectorAll('use')) { const id = u.getAttribute('href'); seen.add(id); if (!document.querySelector(id)) missing.push(id); }
+      const t = document.body.innerText; if (emoji.test(t)) text.push(t.match(emoji)[0]); };
+    state.run.res = { gold: 1e9, food: 1e9, wood: 1e9, stone: 1e9, iron: 1e9 }; state.meta.crowns = 3; state.run.tiles[HALL_KEY].level = 5; state.run.exp = 3; ui.mapN = 0;
+    let i = 0; for (const id of BUILD_ORDER) { for (let x = 0; x < MAP_SIZE && i >= 0; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] === 'plain' && !state.run.tiles[x + ',' + y]) { state.run.tiles[x + ',' + y] = { kind: 'building', id, level: 2 }; x = MAP_SIZE; break; } }
+    calc = compute();
+    for (const lv of [1, 2, 3, 4, 5]) { state.run.tiles[HALL_KEY].level = lv; calc = compute(); ui.routine = null;
+      for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; ui.sel = {}; render(); scan(); }
+      ui.sel = { tile: HALL_KEY }; render(); scan(); }
+    const k = Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'cottage'); ui.sel = { tile: k }; render(); scan();
+    ui.sel = { build: 'farm' }; render(); scan();
+    for (const r of [upgrade(HALL_KEY), claimDecree(), expand(), routineUpgrades()]) say(r); toast('x', 'warn'); scan();
+    state.run.away = 0; catchUp(8 * 3600); scan(); const welcome = !document.getElementById('modal').hidden && !!document.querySelector('#modal use[href="#sp-rest"]'); closeModal(); render();
+    const sp = document.querySelector('.tile.built > .sp').getBoundingClientRect(), tl = document.querySelector('.tile.built').getBoundingClientRect();
+    return { missing, tables, text, welcome, kinds: seen.size, fit: sp.width > tl.width * 0.6 && sp.width <= tl.width && sp.height <= tl.height };
+  });
+  ok(!art.missing.length && !art.tables.length && !art.text.length && art.welcome && art.kinds >= 30 && art.fit, 'every resource, terrain, hall level and building has a sprite that resolves, tiles show them at size, and no emoji is on screen (welcome-back dialog included) ' + JSON.stringify(art));
+  ok(e2.length === 0, 'sprites: no console errors ' + JSON.stringify(e2));
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();

@@ -21,6 +21,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 /* Every control is a button: no double-tap zoom delay, no accidental text selection while tapping. */
+/* Sprites size with the text around them, like the emoji they replace. */
+/* Negative margins keep a sprite from stretching the line of text it sits in. */
+.sp { width: 1.25em; height: 1.25em; vertical-align: -.27em; margin: -.3em 0; flex: none; pointer-events: none; }
+/* On the dark bars the ink outline would vanish, so sprites there get a parchment halo. */
+#tabs .sp, .toast .sp, #bbinfo .sp, header .sp { filter: drop-shadow(0 0 .7px var(--parch)) drop-shadow(0 0 .7px var(--parch)); }
+.ic > .sp { width: 1.25em; height: 1.25em; vertical-align: middle; margin: 0; }
 button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 
 /* Screens: #app fills the viewport and shows one .screen at a time; insets keep content clear of notches. */
@@ -68,8 +74,9 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
   box-shadow: inset 0 -3px 0 #0002; transition: transform .08s, filter .08s;
 }
 @media (hover: hover) { .tile:hover { filter: brightness(1.1); transform: scale(1.04); z-index: 2; } }
-.tile.forest { background: #4f8a45; }
-.tile.hill { background: #9a917d; }
+.tile.forest { background: #6f9f55; }
+.tile.hill { background: #b3ab8f; }
+.tile > .sp { width: 80%; height: 80%; }
 .tile.water { background: #5d9fd0; }
 .tile.built { background: #c9b17a; }
 .tile.hall { background: #e2c35e; }
@@ -197,8 +204,6 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   #inspector .goal, #inspector .lead { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 2px 0 0; }
   #inspector .goal ~ .welcome { display: none; }
   #clicker { flex: 0 0 auto; height: 56px; padding: 4px 12px; font-size: 15px; line-height: 1.15; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 3px 0 #6e5510; }
-  #clicker .ic { display: none; }
-  #clicker .lbl::before { content: "💰 "; }
   #clicker small { font-size: 13px; }
 
   /* Tab row along the bottom; the panel is a sheet that rises from it. */

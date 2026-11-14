@@ -66,7 +66,7 @@ function syncChildren(dst, src) {
 const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(r =>
   `<span class="${!plain && state.run.res[r] < cost[r] ? 'lack' : ''}">${RESOURCES[r].icon} ${fmt(cost[r])}</span>`).join('') + '</span>';
 const tileAt = key => state.run.tiles[key];
-// What a purchase would add each second at today's multipliers, for its card: "+4.0 💰/s".
+// What a purchase would add each second at today's multipliers, for its card: "+4.0 gold/s".
 const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0); return ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''; };
 // The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
 const staffAfter = work => Math.min(1, state.run.pop / Math.max(1, calc.need + (work || 0)));
@@ -79,9 +79,9 @@ function researchAdds(r) { const a = {}; if (!r.mult) return a;
   return a; }
 // One line on the rested bonus: what it is doing now, or how far off it is.
 function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
-  return left <= 0 ? '😴 Rested: time away counts double until you next buy.' : `😴 Rest begins after ${fmtDuration(left)} more away without a purchase; from then time away counts double.`; }
+  return left <= 0 ? sprite('rest') + ' Rested: time away counts double until you next buy.' : `${sprite('rest')} Rest begins after ${fmtDuration(left)} more away without a purchase; from then time away counts double.`; }
 // Says so when abdication is open, wherever the player might be wondering what to do next.
-const abdicateLine = () => canPrestige() ? `👑 <b>You can abdicate: ${fmt(pendingCrowns())} Crowns on offer</b>${pendingCrowns() >= CROWN_GOAL ? ', a good offer' : `; ${CROWN_GOAL} or more pays best`}. See the Realm tab.` : '';
+const abdicateLine = () => canPrestige() ? `${sprite('crown')} <b>You can abdicate: ${fmt(pendingCrowns())} Crowns on offer</b>${pendingCrowns() >= CROWN_GOAL ? ', a good offer' : `; ${CROWN_GOAL} or more pays best`}. See the Realm tab.` : '';
 // While the next hall is within HALL_NEAR_HOURS of income: what buying this would do to the wait for it.
 const HALL_NEAR_HOURS = 12;
 function hallDelay(cost, adds, work) {
@@ -117,8 +117,8 @@ function renderResources() {
     h += `<div class="chip${bad ? ' bad' : ''}" title="${RESOURCES[r].name}"><span>${RESOURCES[r].icon}<b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r]).replace('/s', '<i>/s</i>')}</small></div>`;
   }
   const full = foodRateAt(calc.cap), hungry = run.pop < calc.cap - 0.5 && full < 0 && !run.starving;
-  h += `<div class="chip${calc.staff < 1 ? ' bad' : ''}" title="Population of housing${hungry ? ' (short of food, so no one is moving in)' : ''}. Jobs to fill: ${fmt(calc.need)}${calc.staff < 1 ? ' (understaffed)' : ''}. Food upkeep: ${foodPerPop(run.pop).toFixed(2)} per villager per second. At full housing: food ${fmtRate(full)}"><span>👥<b>${fmt(run.pop)}</b></span><small class="${calc.staff < 1 || hungry ? 'neg' : ''}">of ${fmt(calc.cap)}</small></div>`;
-  if (state.meta.crowns) h += `<div class="chip crown timed" title="Crowns: ${pct(CROWN_BONUS)} production each"><span>👑</span><small><b>${fmt(state.meta.crowns)}</b></small></div>`;
+  h += `<div class="chip${calc.staff < 1 ? ' bad' : ''}" title="Population of housing${hungry ? ' (short of food, so no one is moving in)' : ''}. Jobs to fill: ${fmt(calc.need)}${calc.staff < 1 ? ' (understaffed)' : ''}. Food upkeep: ${foodPerPop(run.pop).toFixed(2)} per villager per second. At full housing: food ${fmtRate(full)}"><span>${sprite('pop', 'villagers')}<b>${fmt(run.pop)}</b></span><small class="${calc.staff < 1 || hungry ? 'neg' : ''}">of ${fmt(calc.cap)}</small></div>`;
+  if (state.meta.crowns) h += `<div class="chip crown timed" title="Crowns: ${pct(CROWN_BONUS)} production each"><span>${sprite('crown', 'Crowns')}</span><small><b>${fmt(state.meta.crowns)}</b></small></div>`;
   patch($('res'), h);
   const bar = $('res'); bar.classList.toggle('more', bar.scrollWidth > bar.clientWidth + 1 && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
   patch($('clickval'), '+' + fmt(clickValue()));
@@ -169,9 +169,9 @@ function upgradeAdds(k, t) { const d = BUILDINGS[t.id], info = calc.tiles[k], a 
   for (const r in d.out) a[r] = d.linear ? d.out[r] * info.mult / info.levelMult : d.out[r] * info.mult; return a; }
 function buildingStats(id) {
   const d = BUILDINGS[id]; let h = '';
-  if (d.house) h += `<p class="stat">🏠 Houses <b>${d.house}</b> villagers per level</p>`;
-  if (d.out) h += `<p class="stat">Produces ` + Object.keys(d.out).map(r => `<b>${d.out[r]} ${RESOURCES[r].icon}/s</b>`).join(' ') + (d.linear ? ' per level' : '') + (d.work ? ` · needs ${d.work} 👥` : '') + '</p>';
-  if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob)}</b> · needs ${d.work} 👥</p>`;
+  if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${d.house}</b> villagers per level</p>`;
+  if (d.out) h += `<p class="stat">Produces ` + Object.keys(d.out).map(r => `<b>${d.out[r]} ${RESOURCES[r].icon}/s</b>`).join(' ') + (d.linear ? ' per level' : '') + (d.work ? ` · needs ${d.work} ${sprite('pop', 'villagers')}` : '') + '</p>';
+  if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob)}</b> · needs ${d.work} ${sprite('pop', 'villagers')}</p>`;
   const adj = d.adj || {};
   for (const a in adj.terrain || {}) h += `<p class="stat"><b>${pct(adj.terrain[a])}</b> per adjacent ${TERRAIN[a].name} ${TERRAIN[a].icon}</p>`;
   for (const a in adj.building || {}) h += `<p class="stat"><b>${pct(adj.building[a])}</b> per adjacent ${BUILDINGS[a].name} ${BUILDINGS[a].icon} (per level)</p>`;
@@ -182,13 +182,13 @@ function buildingStats(id) {
 function upgradeGain(k, t) {
   const d = BUILDINGS[t.id], info = calc.tiles[k];
   if (!d.linear) return '×2';
-  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' 🏠';
+  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' ' + sprite('cottage', 'housing');
   return Object.keys(d.out).map(r => '+' + (d.out[r] * info.mult / info.levelMult).toFixed(1) + ' ' + RESOURCES[r].icon + '/s').join(' ');
 }
 // Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
 function housingWarning(extra) {
   const rate = foodRateAt(calc.cap + extra);
-  return rate < 0 ? `<p class="warn small">⚠ Not enough food to fill it: at full housing food would be ${fmtRate(rate)}. Villagers only move in while they can be fed.</p>` : '';
+  return rate < 0 ? `<p class="warn small">${sprite('warn')} Not enough food to fill it: at full housing food would be ${fmtRate(rate)}. Villagers only move in while they can be fed.</p>` : '';
 }
 function renderInspector() {
   const sel = ui.sel; let h;
@@ -202,18 +202,18 @@ function renderInspector() {
       const next = BUILD_ORDER.filter(b => BUILDINGS[b].hall === t.level + 1).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name);
       h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
         <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
-        <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} 🍞/s</b> per villager. Bigger towns eat more per head.</p>
+        <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} ${RESOURCES.food.icon}/s</b> per villager. Bigger towns eat more per head.</p>
         ${next.length ? `<p class="stat">Next level unlocks: <b>${next.join(', ')}</b></p>` : ''}
-        ${t.level === PRESTIGE_HALL - 1 ? '<p class="stat">A Castle lets you found a new kingdom for 👑 Crowns.</p>' : ''}
+        ${t.level === PRESTIGE_HALL - 1 ? `<p class="stat">A Castle lets you found a new kingdom for ${sprite('crown')} Crowns.</p>` : ''}
         <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Raise a ${hallName(t.level + 1)} ${costHTML(c)}</button></div>`;
     } else {
       const d = BUILDINGS[t.id], info = calc.tiles[k] || { adj: 0, mult: 0, levelMult: 1 };
       h = `<h3>${d.icon} ${d.name} <span class="muted">level ${t.level}</span></h3>`;
-      if (d.house) h += `<p class="stat">🏠 Houses <b>${fmt(kind.housing(t))}</b></p>`;
+      if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${fmt(kind.housing(t))}</b></p>`;
       if (d.out) h += '<p class="stat">Making ' + Object.keys(d.out).map(r => `<b>${fmtRate(d.out[r] * info.mult)} ${RESOURCES[r].icon}</b>`).join(' ') + '</p>';
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * t.level * calc.staff)}</b></p>`;
       if (d.adj) h += `<p class="stat">Adjacency bonus: <b>${pct(info.adj)}</b></p>`;
-      if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} 👥${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed — build cottages)</span>` : ''}</p>`;
+      if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} ${sprite('pop', 'villagers')}${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed — build cottages)</span>` : ''}</p>`;
       h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${upgradeGain(k, t)} ${costHTML(c)}</button>${hallDelay(c, upgradeAdds(k, t))}
         <button class="btn alt" data-act="demolish" data-id="${k}">Demolish <span class="cost">refunds</span> ${costHTML(demolishRefund(t), true)}</button></div>`;
       if (d.house) h += housingWarning(d.house * repBonus('housing'));
@@ -231,7 +231,7 @@ function renderInspector() {
   } else {
     // Phones show the current decree here instead of the welcome line (CSS), since the Decrees tab is a tap away.
     const d = currentDecree(), prog = d && d.progress ? d.progress() : null;
-    h = (d ? `<p class="goal">🎯 <b>${d.title}</b>${decreeDone(d.id) ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone(d.id) ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
+    h = (d ? `<p class="goal">${sprite('decrees')} <b>${d.title}</b>${decreeDone(d.id) ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone(d.id) ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
       + '<p class="lead welcome"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
   }
   patch($('inspector'), h);
@@ -245,46 +245,47 @@ function offerNote(n) {
   return `Good offer (+${gain}% production): a fine time to start over.`;
 }
 
-const TABS = { build: '🔨 Build', research: '📜 Research', decrees: '🎯 Decrees', realm: '👑 Realm' };
+const TABS = { build: 'Build', research: 'Research', decrees: 'Decrees', realm: 'Realm' };
+const tabLabel = t => sprite(t) + ' ' + TABS[t];
 function renderTabs() {
   const dots = { decrees: decreeDone(), research: RESEARCH.some(r => !hasResearch(r.id) && r.hall <= hallLevel() && canAfford(r.cost)),
     realm: canPrestige() && pendingCrowns() >= CROWN_GOAL };
   patch($('tabs'), Object.keys(TABS).map(t =>
-    `<button class="${t === ui.tab ? 'on' : ''}" data-act="tab" data-id="${t}">${TABS[t]}${dots[t] ? '<i class="dot"></i>' : ''}</button>`).join(''));
+    `<button class="${t === ui.tab ? 'on' : ''}" data-act="tab" data-id="${t}">${tabLabel(t)}${dots[t] ? '<i class="dot"></i>' : ''}</button>`).join(''));
   $('side').classList.toggle('open', ui.sheet); // only styled on phones, where the panel is a sheet
 }
 function renderPanel() {
   const run = state.run, meta = state.meta, hall = hallLevel();
-  let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
+  let h = `<div class="sheethead"><span>${tabLabel(ui.tab)}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
     const routine = routinePreview(), span = ROUTINE_SECONDS >= 3600 ? ROUTINE_SECONDS / 3600 + ' hours' : Math.round(ROUTINE_SECONDS / 60) + ' minutes';
     // A new player is sent to the Cottage first: the next hall leads the tab only once the first decrees are done.
     const hallFirst = hall > 1 || meta.crowns > 0 || !!meta.decreesDone.learned;
     if (hallFirst) h += hallHint();
-    if (routine.count || routine.saving)     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
+    if (routine.count || routine.saving)     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">${sprite('up')}</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
       <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.${routine.saving ? ' <b>Holding back the price of the ' + hallName(hall + 1) + ', which is under an hour away.</b>' : ''}</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
-      if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
+      if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">${sprite('lock')}</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
       const c = buildCost(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
         <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work)}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
-      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">🗺️</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
+      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
     else h += '<hr><p class="muted">Your borders are as wide as they go. Tap forest, hills or water to clear it for more room.</p>';
   } else if (ui.tab === 'research') {
     const avail = RESEARCH.filter(r => !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));
     for (const r of avail) h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="research" data-id="${r.id}">
-      <div class="ic">📜</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`;
+      <div class="ic">${sprite('research')}</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`;
     if (!avail.length) h += '<p class="muted">Your scholars have nothing new to offer for now.</p>';
     if (RESEARCH.some(r => r.hall > hall)) h += `<p class="muted">More to discover once you raise a ${hallName(hall + 1)}.</p>`;
     const reps = REPEATABLES.filter(r => r.hall <= hall);
     if (reps.length) h += '<hr><h3>Repeatable upgrades</h3><p class="muted">Each level costs more than the last. Levels reset when you found a new kingdom.</p>';
     for (const r of reps) { const c = repCost(r);
       h += `<button class="card${canAfford(c) ? '' : ' cant'}" data-act="rep" data-id="${r.id}">
-      <div class="ic">🔁</div><div class="bd"><div class="nm">${r.name} <span>level ${repLevel(r.id)}</span></div><div class="muted">${r.desc}</div>${costHTML(c)}${r.id === 'housing' ? housingWarning(Math.floor(calc.rawCap * (repBonus('housing') + r.per)) - calc.cap) : ''}</div></button>`; }
+      <div class="ic">${sprite('repeat')}</div><div class="bd"><div class="nm">${r.name} <span>level ${repLevel(r.id)}</span></div><div class="muted">${r.desc}</div>${costHTML(c)}${r.id === 'housing' ? housingWarning(Math.floor(calc.rawCap * (repBonus('housing') + r.per)) - calc.cap) : ''}</div></button>`; }
     if (owned.length) h += '<hr><p class="muted">Known: ' + owned.map(r => r.name).join(', ') + '</p>';
   } else if (ui.tab === 'decrees') {
     const open = openDecrees(), cur = currentDecree();
@@ -300,12 +301,12 @@ function renderPanel() {
     h += `<hr><p class="muted">Decrees fulfilled: ${decreesFulfilled()} / ${DECREES.length}</p>`;
   } else {
     const n = pendingCrowns(), ok = canPrestige();
-    h += `<h3>👑 Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
+    h += `<h3>${sprite('crown')} Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
       <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       ${ok ? `<p class="stat ready">${abdicateLine().replace(' See the Realm tab.', '')}</p>` : ''}<p class="stat">${offerNote(n)}</p>
-      <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
+      <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} ${sprite('crown', 'Crowns')})`}</button></div>
       <hr><h3>Chronicle</h3>
       <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b></p>
       <p class="stat">Buildings raised: <b>${fmt(meta.stats.built)}</b> · Taxes collected by hand: <b>${fmt(meta.stats.clicks)}</b></p>
@@ -328,7 +329,7 @@ function renderBuildBar() {
   if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
     const kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
     h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}${t.kind === 'hall' ? '' : hallDelay(c, upgradeAdds(k, t))}</button>`;
-    if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">🧨</span><small>Demolish</small></button>`;
+    if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">${sprite('demolish')}</span><small>Demolish</small></button>`;
     patch($('bbrow'), h + close);
     patch($('bbinfo'), `<b>${kind.icon(t)} ${kind.name(t)}</b> level ${t.level}`);
     return;
@@ -353,12 +354,13 @@ function renderCity() {
 }
 
 // ───────────────────────── Feedback: toasts, floating text, dialog ─────────────────────────
-function toast(msg) {
+function toast(msg, icon) {
   const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
+  if (icon) el.insertAdjacentHTML('afterbegin', sprite(icon) + ' ');
   const box = $('toasts'); while (box.children.length >= 4) box.firstChild.remove();
   box.appendChild(el); setTimeout(() => el.remove(), 4000);
 }
-const say = result => { if (result && result.msg) toast(result.msg); return result; };
+const say = result => { if (result && result.msg) toast(result.msg, result.icon); return result; };
 function floatText(x, y, text) {
   const el = document.createElement('div'); el.className = 'fx'; el.textContent = text;
   el.style.left = x + 'px'; el.style.top = y + 'px'; document.body.appendChild(el); setTimeout(() => el.remove(), 900);
@@ -386,8 +388,8 @@ function confirmBox(title, body, yes, label) {
 }
 function copyText(text, field) {
   const fallback = () => { let ok = false; try { field.focus(); field.select(); ok = document.execCommand('copy'); } catch (e) { /* not supported */ }
-    toast(ok ? '📋 Save copied.' : 'Could not copy automatically: the text is selected, copy it by hand.'); };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('📋 Save copied.'), fallback);
+    toast(ok ? 'Save copied.' : 'Could not copy automatically: the text is selected, copy it by hand.'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Save copied.'), fallback);
   else fallback();
 }
 const MODAL_ACTIONS = {
@@ -413,7 +415,7 @@ function save(manual) {
     localStorage.setItem(SAVE_KEY, serialize());
     ui.saveFailed = false; return true;
   } catch (e) {
-    if (manual || !ui.saveFailed) toast('⚠️ Saving failed: this browser is not storing data. Use Realm → Export to keep a copy.');
+    if (manual || !ui.saveFailed) toast('Saving failed: this browser is not storing data. Use Realm → Export to keep a copy.', 'warn');
     ui.saveFailed = true; return false;
   }
 }
@@ -427,12 +429,12 @@ const fmtDuration = sec => { const h = Math.floor(sec / 3600), m = Math.floor(se
 function catchUp(sec) {
   const r = creditAway(sec);
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
-  const gains = Object.keys(r.gains).map(k => `<p class="stat">${RESOURCES[k].icon} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
+  const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
-    ${r.rested >= 60 ? `<p class="stat">😴 Rested: the town did <b>${fmtDuration(r.rested)}</b> of extra work. Time away counts double until you next buy.</p>` : `<p class="muted">${restLine()}</p>`}
+    ${r.rested >= 60 ? `<p class="stat">${sprite('rest')} Rested: the town did <b>${fmtDuration(r.rested)}</b> of extra work. Time away counts double until you next buy.</p>` : `<p class="muted">${restLine()}</p>`}
     ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
     ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
-    ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `🏰 You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `🏰 ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
+    ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);
 }
 function loadGame() {
@@ -506,7 +508,7 @@ const CITY_ACTIONS = {
     if (!canPrestige()) return;
     const n = pendingCrowns();
     confirmBox('Found a new kingdom?', `You abdicate and start over on fresh land. Buildings, resources and research are lost, but you keep
-      <b>${fmt(n)} 👑 Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
+      <b>${fmt(n)} ${sprite('crown')} Crown${n > 1 ? 's' : ''}</b>, each worth ${pct(CROWN_BONUS)} to all production forever (×${crownMult(state.meta.crowns).toFixed(2)} → ×${crownMult(state.meta.crowns + n).toFixed(2)}).
       The new kingdom starts with ${costHTML(HEAD_START, true)} extra.
       ${n < CROWN_GOAL ? `<br><br><b>This is a small offer.</b> Reigns that wait for ${CROWN_GOAL} Crowns or more pay better.` : ''}`, () => {
       if (!say(prestige()).ok) return;
@@ -517,7 +519,7 @@ const CITY_ACTIONS = {
     const g = collectTaxes().gold, r = el.getBoundingClientRect();
     floatText((e.clientX || r.left + r.width / 2) - 10 + (Math.random() * 30 - 15), (e.clientY || r.top) - 20, '+' + fmt(g));
   },
-  save() { if (save(true)) toast('💾 Saved.'); },
+  save() { if (save(true)) toast('Saved.'); },
   export() {
     openModal(`<h2 id="modaltitle">Export save</h2><p class="muted">Keep this text somewhere safe. Paste it into Import to restore your kingdom.</p>
       <textarea id="exp" readonly aria-label="Exported save">${esc(encodeSave(serialize()))}</textarea>
@@ -602,7 +604,7 @@ function simTick() {
   if (ui.paused) return;
   if (dt > OFFLINE_REPORT_SECONDS) { catchUp(dt); render(); } // the tab was asleep: same capped path as a page load
   else advance(dt);
-  if (state.run.starving && !ui.warnedStarve) { toast('🍞 Your villagers are starving! Work slows to half — build more farms.'); ui.warnedStarve = true; }
+  if (state.run.starving && !ui.warnedStarve) { toast('Your villagers are starving! Work slows to half — build more farms.', 'food'); ui.warnedStarve = true; }
   if (!state.run.starving) ui.warnedStarve = false;
 }
 let drawCount = 0;

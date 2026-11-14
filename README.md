@@ -27,6 +27,7 @@ Plain script tags, loaded in this order:
 - `index.html` — page shell: one `<section class="screen">` per game mode inside `#app`
 - `style.css` — presentation
 - `data.js` — data tables and balance constants (buildings, research, repeatable upgrades, decrees, costs)
+- `sprites.js` — the art: original vector sprites drawn on a 32×32 grid, one entry per sprite in `SPRITES`. They are injected once as hidden SVG symbols, and `sprite(id, label)` returns a small `<svg><use>` that sizes with the text around it. In the browser it replaces the plain-text `icon` of every resource, terrain, hall level and building in the data tables with its sprite. To add one, add an entry (shapes inherit a dark rounded outline) and call `sprite('its-id')`
 - `sim.js` — state (`state.meta` survives abdication, `state.run` is the current city), rules, actions and the save format. No DOM, so it also runs in Node: load `data.js` then `sim.js` into one `vm` context, call `startNewGame(0)` and drive it with `advance(seconds)` and the action functions
 - `ui.js` — rendering, input, timers and storage
 
