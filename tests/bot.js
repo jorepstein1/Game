@@ -52,7 +52,7 @@ function play(seed, opts) {
   const s = sim.newState(0); s.run = sim.newRun(seed);
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], buys: 0, fresh: 0, routine: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], buys: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -61,8 +61,9 @@ function play(seed, opts) {
   function candidates() {
     const c = [], ps = plots(), hl = sim.hallLevel();
     if (ps.length) for (const id of sim.BUILD_ORDER) if (B[id].hall <= hl) c.push({ k: 'build', id, cost: sim.buildCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.build(bestPlot(id, ps), id) });
-    for (const key in run().tiles) { const t = run().tiles[key], d = t.kind === 'building' ? B[t.id] : null;
-      c.push({ k: d ? 'up' : 'hall', id: t.id, key, cost: sim.upgradeCost(t), food: !!(d && d.out && d.out.food), house: !!(d && d.house), go: () => sim.upgrade(key) }); }
+    c.push({ k: 'hall', id: 'hall', key: sim.HALL_KEY, cost: sim.upgradeCost(run().tiles[sim.HALL_KEY]), go: () => sim.upgrade(sim.HALL_KEY) });
+    for (const id of sim.BUILD_ORDER) if (sim.count(id) > 0 && sim.kindLevel(id) < sim.MAX_LEVEL) // one upgrade raises every building of the kind
+      c.push({ k: 'up', id, cost: sim.kindUpgradeCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.upgradeKind(id) });
     for (const r of sim.RESEARCH) if (!sim.hasResearch(r.id) && r.hall <= hl) c.push({ k: 'research', id: r.id, mult: r.mult, cost: r.cost, food: !!(r.mult && (r.mult.farm || r.mult.mill)), go: () => sim.buyResearch(r.id) });
     if (!ps.length && sim.BUILD_ORDER.some(id => B[id].hall <= hl && sim.count(id) === 0)) { // map full and a new building type is waiting: clear one tile for it
       const r = sim.mapRadius(); let spot = null;
@@ -96,9 +97,13 @@ function play(seed, opts) {
         c = c.filter(a => !glut(a));
         c = c.filter(a => (a.food ? a.k === 'build' && nf < 0.22 * nt : true) && !(a.house && roomy) && !(a.k === 'build' && sim.count(a.id) > 0 && few));
       }
+          if (process.env.DEBUG_AT && Math.abs(now / 3600 - +process.env.DEBUG_AT) < 0.06 && !out.dbg) { out.dbg = 1; // a look at the shopping list at one check-in
+            console.error(`t=${(now / 3600).toFixed(2)}h hall ${sim.hallLevel()} rates ${Object.entries(C.base).map(([k, v]) => k + ' ' + sim.fmt(v)).join(' ')}; stock ${Object.entries(run().res).map(([k, v]) => k + ' ' + sim.fmt(v)).join(' ')}`);
+            for (const a of candidates().filter(a => a.k !== 'hall')) { const hrs = Object.keys(a.cost).map(r => r + ' ' + (C.base[r] > 0 ? (a.cost[r] / C.base[r] / 3600).toFixed(1) + 'h' : 'inf')).join(' ');
+              console.error(`  ${(a.k + ' ' + (a.id || '')).padEnd(20)} cost ${hrs}  afford ${sim.canAfford(a.cost)}`); } }
       c = c.filter(a => sim.canAfford(a.cost)).sort((a, b) => sum(a.cost) - sum(b.cost));
       if (!c.length) return bought;
-      let pick = c[0];
+      let pick = c[0]; pick.why = hungry ? 'hungry' : foodBound ? 'food' : cramped ? 'cramped' : '';
       if (!hungry && !foodBound && !cramped) {
         // The hall is the goal. L is the material it will wait longest for and eta that wait at today's rates.
         const hcost = sim.upgradeCost(run().tiles[sim.HALL_KEY]), res = run().res;
@@ -109,28 +114,39 @@ function play(seed, opts) {
         else if (SIMPLE) { // the cross-check buyer: no estimates at all. The hall when it can, else the cheapest thing on offer, if it costs a small share of the hall
           pick = !eta ? c.find(a => a.k === 'hall') : c.find(a => a.k !== 'hall' && sum(a.cost) <= SIMPLE * sum(hcost));
         }
-        else if (!eta) pick = c.find(a => a.k === 'hall');
+        else if (!eta) { pick = c.find(a => a.k === 'hall'); if (pick) pick.why = ''; }
         else {
           // A purchase is worth making if the hall then comes sooner: after paying for it and counting what it adds
           // (estimated from what the town makes now), the longest wait for any hall material is shorter than before.
           // Things that add nothing the hall needs (land, a first building of a kind) may cost a little of the wait.
           const gain = (a, r) => {
             const def = B[a.id], tiles = run().tiles;
-            if (a.k === 'up' && def) return def.glob ? def.glob * C.base[r] / (1 + def.glob * tiles[a.key].level) : def.out && def.out[r] ? def.out[r] * C.tiles[a.key].mult / (def.linear ? tiles[a.key].level : 1) : 0;
+            if (a.k === 'up' && def) { const L = sim.kindLevel(a.id), step = sim.levelMultAt(a.id, L + 1) / sim.levelMultAt(a.id, L) - 1;
+              if (def.glob) return def.glob * sim.count(a.id) * C.base[r] / (1 + def.glob * sim.count(a.id) * L);
+              let d = 0; if (def.out && def.out[r]) for (const key in C.tiles) if (tiles[key].id === a.id) d += def.out[r] * C.tiles[key].mult * step; return d; }
             if (a.k === 'build') return def.glob ? def.glob * C.base[r] : def.out && def.out[r] ? def.out[r] * C.mult * sim.researchMult(a.id) : 0;
             if (a.k === 'research' && a.mult) { let d = 0; for (const key in C.tiles) { const t = tiles[key], o = B[t.id].out; if (a.mult[t.id] && o && o[r]) d += o[r] * C.tiles[key].mult * (a.mult[t.id] - 1); } return d; }
-            if (a.k === 'rep' && a.id === 'prod') return C.base[r] * 0.05 / sim.repBonus('prod');
+            if (a.k === 'rep' && a.id === 'prod') return C.base[r] * sim.repeatable('prod').per / sim.repBonus('prod');
             return 0;
           };
           const waitAfter = a => { let w = 0;
             for (const r in hcost) { const need = hcost[r] - res[r] + (a.cost[r] || 0); if (need > 0) { const rate = C.base[r] + gain(a, r); w = Math.max(w, rate > 0 ? need / rate : 1 / 0); } }
             return w; };
+          // Among purchases that leave the hall no later without bringing it sooner, a sensible player takes the best
+          // value, not the cheapest: the one that pays for itself soonest in what it makes (land counts as half a day).
+          const own = a => { const def = B[a.id], cost = Object.keys(a.cost).reduce((t, r) => t + (C.base[r] > 0 ? a.cost[r] / C.base[r] : 1e9), 0);
+            if (a.k === 'expand' || a.k === 'clear') return 12 * 3600;
+            let best = 0; for (const r of ['gold', 'food', 'wood', 'stone', 'iron']) { const base = r === 'food' ? C.base.food + C.eaten : C.base[r]; if (base > 0) best = Math.max(best, gain(a, r) / base); }
+            if (a.k === 'rep' && (a.id === 'housing' || a.id === 'food')) best = Math.max(best, 0.1);
+            if (def && def.house && C.cap > 0) best = Math.max(best, (a.k === 'build' ? def.house * sim.levelMultAt(a.id, sim.kindLevel(a.id)) : def.house * sim.count(a.id)) / C.cap * 0.5);
+            return best > 0 ? cost / best : 1e9; };
           let best = 1 / 0; pick = null;
           for (const a of c) { // c is cheapest first, so ties go to the cheapest
             if (a.k === 'hall') continue;
             const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
-            let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * sum(a.cost) : 1 / 0;
-            if (fresh && score < 1 / 0) score = -1;
+            let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
+            a.why = w < eta ? 'helps' : w === eta ? 'free' : eta === 1 / 0 ? 'nohall' : 'slack';
+            if (fresh && score < 1 / 0) { score = -1; a.why = 'fresh'; }
             if (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod') && sim.hallLevel() >= 5) score = -1; // with a Palace the goal is the abdication, not a sixth hall
             if (score < best) { best = score; pick = a; }
           }
@@ -138,20 +154,26 @@ function play(seed, opts) {
         if (!pick) return bought;
       }
       out.spent[pick.k] += pick.cost.gold || 0;
-      if (pick.k === 'up' && Object.keys(pick.cost).every(r => pick.cost[r] <= Math.max(0, C.base[r] + (r === 'food' ? C.eaten : 0)) * sim.ROUTINE_SECONDS)) out.routine++; // what the game's one-tap "routine upgrades" would have covered
+      out.kinds[pick.k === 'build' ? 'build' : pick.k === 'up' ? 'up' : 'other']++;
+      out.names.push((pick.k === 'build' ? B[pick.id].name : pick.k === 'up' ? B[pick.id].name + ' L' + (sim.kindLevel(pick.id) + 1) : pick.k === 'hall' ? sim.hallName(sim.hallLevel() + 1) : pick.k === 'research' ? 'research ' + pick.id : pick.k === 'rep' ? pick.id + ' ' + (sim.repLevel(pick.id) + 1) : pick.k === 'expand' ? 'expansion ' + (run().exp + 1) : pick.k) + (process.env.WHY && pick.why ? ' [' + pick.why + ']' : ''));
       if (pick.k === 'research' || pick.k === 'expand' || pick.k === 'hall' || (pick.k === 'build' && sim.count(pick.id) === 0)) out.fresh++;
       out.buys++; const what = pick.k === 'build' ? pick.id : pick.k === 'research' ? 'research' : pick.k === 'hall' ? 'hall' + (sim.hallLevel() + 1) : null;
       if (what && !seen[what]) { seen[what] = 1; out.firsts.push({ what, t: now < 3600 ? Math.round(now) + 's' : (now / 3600).toFixed(1) + 'h' }); }
       // Payback: the time the town needs to earn the price, divided by the share of gold income the purchase adds.
+      const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
       pick.go(); bought++; sim.setState(sim.state);
       const dg = sim.calc.base.gold - g0;
+      if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
+        const mk = B[pick.id].glob ? 'gold' : Object.keys(B[pick.id].out || { gold: 0 })[0], before = mk === 'food' ? C.base.food + C.eaten : C.base[mk], after = mk === 'food' ? sim.calc.base.food + sim.calc.eaten : sim.calc.base[mk];
+        const cost = Object.keys(pick.cost).reduce((t, r) => t + (rb[r] > 0 ? pick.cost[r] / rb[r] : 0), 0); // seconds of income the price takes to earn, summed over its materials
+        out.felt.push({ t: now, hall: sim.hallLevel(), reign: out.prestiges.length, k: pick.k, id: pick.id, mat: mk, gain: before > 0 ? after / before - 1 : Infinity, payback: after > before ? cost * before / (after - before) / 3600 : Infinity }); }
       if (pick.k !== 'hall' && g0 > 0 && dg > 1e-9 * g0 && isFinite(earn)) out.paybacks.push({ hall: sim.hallLevel(), reign: out.prestiges.length, hours: earn / (dg / g0) / 3600, weight: earn, kind: pick.k });
     }
     return bought;
   }
 
-  const snap = () => { sim.setState(sim.state); const C = sim.calc, lv = id => { const a = Object.values(run().tiles).filter(t => id(t)); return a.length + '×' + (a.reduce((p, t) => p + t.level, 0) / (a.length || 1)).toFixed(1); };
+  const snap = () => { sim.setState(sim.state); const C = sim.calc, lv = id => { const a = Object.values(run().tiles).filter(t => id(t)); return a.length + '×' + (a.reduce((p, t) => p + sim.kindLevel(t.id), 0) / (a.length || 1)).toFixed(1); };
     return { hall: sim.hallName(sim.hallLevel()), pop: Math.floor(run().pop), housing: C.cap, jobs: C.need, gold: sim.fmt(C.base.gold) + '/s', food: sim.fmt(C.base.food) + '/s', upkeep: sim.fmt(C.eaten) + '/s',
       farms: lv(t => t.id === 'farm' || t.id === 'mill'), cottages: lv(t => t.id === 'cottage'), other: lv(t => t.kind === 'building' && !['farm', 'mill', 'cottage'].includes(t.id)),
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
@@ -160,7 +182,7 @@ function play(seed, opts) {
   // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
   function afterStep() {
     if (sim.hallLevel() > hall) { hall = sim.hallLevel(); const name = sim.hallName(hall);
-      if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold }; }
+      if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), buildings: Object.values(run().tiles).filter(x => x.kind === 'building').length, kindsBuilt: sim.BUILD_ORDER.filter(id => sim.count(id) > 0).length, levels: Object.assign({}, run().levels), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold }; }
     if (out.prestiges.length === 0) for (const n of [15, 20]) if (!out.marks['crowns' + n] && sim.pendingCrowns() >= n) out.marks['crowns' + n] = { min: +(t / 60).toFixed(1) };
     for (const n of [100]) if (!out.marks['held' + n] && sim.state.meta.crowns >= n) out.marks['held' + n] = { min: +(t / 60).toFixed(1) };
     if (out.week === undefined && t >= 168 * 3600) out.week = sim.state.meta.crowns + sim.pendingCrowns();
@@ -187,6 +209,7 @@ function play(seed, opts) {
   if (!CHECKINS) liveUntil(HOURS * 3600);
   else {
     liveUntil(Math.min(HOURS * 3600, SESSION * 60));
+    out.opening = { bought: out.buys, names: out.names.slice(), kinds: Object.assign({}, out.kinds), goldRate: sim.calc.base.gold };
     for (let i = 0; t < HOURS * 3600; i++) {
       const gap = GAPS[i % GAPS.length] * 3600, pop0 = run().pop, g0 = sim.calc.base.gold;
       const t0 = t, r = sim.creditAway(gap); sim.setState(sim.state);
@@ -197,9 +220,10 @@ function play(seed, opts) {
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
       buying = !opts.buyEvery || i % opts.buyEvery === opts.buyEvery - 1; // with five check-ins a day and buyEvery 5: the one after the night
-      const b0 = out.buys, r0 = out.routine, n0 = out.prestiges.length, f0 = out.fresh; liveUntil(t + VISIT * 60);
+      const b0 = out.buys, n0 = out.prestiges.length, f0 = out.fresh, k0 = Object.assign({}, out.kinds), nm0 = out.names.length; liveUntil(t + VISIT * 60);
       if (out.prestiges.length > n0) { buying = true; liveUntil(runStart + SESSION * 60); } // having abdicated, the player stays to found the new town, as at the very start
-      visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
+      visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.names = out.names.slice(nm0); visit.abdicated = out.prestiges.length > n0;
+      visit.builds = out.kinds.build - k0.build; visit.ups = out.kinds.up - k0.up; visit.other = out.kinds.other - k0.other;
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
       out.visits.push(visit); out.peakGold = Math.max(out.peakGold, visit.goldRate);
     }
@@ -225,7 +249,8 @@ function summary(seed, opts) {
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
     reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
-    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, fresh: v.fresh, decisions: v.decisions, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
+    opening: r.opening, felt: r.felt, buildingsAt: Object.fromEntries(['Manor', 'Keep', 'Castle', 'Palace'].filter(n => r.marks[n]).map(n => [n, r.marks[n].buildings])), palaceKinds: r.marks.Palace ? r.marks.Palace.kindsBuilt : null, palaceLevels: r.marks.Palace ? r.marks.Palace.levels : null,
+    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
 }
 // Runs a list of { seed, opts } in parallel child processes; resolves to their summaries in the same order.
 function runAll(todo, jobs) {
@@ -248,24 +273,37 @@ if (require.main === module) {
   if (process.argv[2] === '--one') { console.log(JSON.stringify(summary(+process.argv[3], JSON.parse(process.argv[4])))); return; }
   const h = x => x === null ? '   -  ' : (x.toFixed(1) + 'h').padStart(6), pb = x => x === null ? '-' : x < 1 ? Math.round(x * 60) + 'm' : x.toFixed(1) + 'h', fmt = loadSim().fmt;
   if (process.argv[2] === 'compare') {
-    const hours = +(process.argv[3] || 168), seeds = (process.argv[4] || '11,22,33').split(',').map(Number), todo = [];
-    for (const checkins of [5, 2]) for (const seed of seeds) todo.push({ seed, opts: { hours, policy: 'crowns:20', checkins } });
-    console.log(`Hearthold check-in comparison: ${hours}h, abdicating at 20 Crowns, seeds ${seeds.join(', ')}\n`);
+    const hours = +(process.argv[3] || 168), seeds = (process.argv[4] || '11,22,33').split(',').map(Number), todo = [], freqs = (process.argv[5] || '2,5,49,0').split(',').map(Number);
+    for (const checkins of freqs) for (const seed of seeds) todo.push({ seed, opts: { hours, policy: 'crowns:20', checkins } });
+    console.log(`Hearthold check-in comparison: ${hours}h, abdicating at 20 Crowns, seeds ${seeds.join(', ')} (0 = never closed)\n`);
     console.log('check-ins  seed   Keep  Castle  Palace  20 Crowns  Legend  Crowns at 7 days  reign lengths (h)');
     runAll(todo).then(rows => { for (const r of rows)
-      console.log(`${String(r.checkins).padStart(9)} ${String(r.seed).padStart(5)} ${h(r.keep)} ${h(r.castle)}  ${h(r.palace)}     ${h(r.crowns20)}  ${h(r.legend)}  ${String(r.weekCrowns).padStart(16)}  ${r.reigns.map(x => x.hours.toFixed(0)).join(', ')}`); });
+      console.log(`${String(r.checkins).padStart(9)} ${String(r.seed).padStart(5)} ${h(r.keep)} ${h(r.castle)}  ${h(r.palace)}     ${h(r.crowns20)}  ${h(r.legend)}  ${String(r.weekCrowns === null ? r.crowns + r.pending : r.weekCrowns).padStart(16)}  ${r.reigns.map(x => x.hours.toFixed(0)).join(', ')}`);
+      const by = {}; for (const r of rows) (by[r.checkins] = by[r.checkins] || []).push(r.weekCrowns === null ? r.crowns + r.pending : r.weekCrowns);
+      const avg = a => a.reduce((x, y) => x + y, 0) / a.length, five = by[5] ? avg(by[5]) : null;
+      for (const k in by) console.log(`  ${k === '0' ? 'never closed' : k + ' a day'}: mean ${avg(by[k]).toFixed(1)} Crowns at 7 days${five ? ', ' + Math.round(100 * avg(by[k]) / five) + '% of five a day' : ''}`); });
     return;
   }
-  const HOURS = +(process.argv[2] || 72), POLICY = process.argv[3] || 'none', SEEDS = (process.argv[4] || '11,22,33').split(',').map(Number), CHECKINS = process.argv[5] === undefined ? 5 : +process.argv[5];
+  const HOURS = +(process.argv[2] || 72), POLICY = process.argv[3] || 'none', SEEDS = (process.argv[4] || '11,22,33').split(',').map(Number), CHECKINS = process.argv[5] === undefined ? 5 : +process.argv[5], LOG = process.argv.includes('log');
   console.log(`Hearthold balance bot: ${HOURS}h, policy "${POLICY}", ${CHECKINS ? CHECKINS + ' check-ins a day' : 'game always open'}, seeds ${SEEDS.join(', ')}\n`);
+  const all = [];
   runAll(SEEDS.map(seed => ({ seed, opts: { hours: HOURS, policy: POLICY, checkins: CHECKINS } }))).then(rows => { for (const r of rows) {
-    const first = r.visits.filter(v => v.reign === 0);
-    console.log(`seed ${r.seed}: Manor ${r.manorMin === null ? '-' : r.manorMin + ' min'}, Keep ${h(r.keep)}, Castle ${h(r.castle)}, Palace ${h(r.palace)}, 15 Crowns on offer ${h(r.crowns15)}, 20 Crowns ${h(r.crowns20)}, 100 Crowns held ${h(r.legend)}`);
+    const first = r.visits.filter(v => v.reign === 0 && !v.abdicated); all.push(...first);
+    console.log(`seed ${r.seed}: Manor ${r.manorMin === null ? '-' : r.manorMin + ' min'}, Keep ${h(r.keep)}, Castle ${h(r.castle)}, Palace ${h(r.palace)}, 15 Crowns on offer ${h(r.crowns15)}, 20 Crowns ${h(r.crowns20)}`);
+    console.log(`  opening session: ${r.opening.bought} purchases (${r.opening.kinds.build} builds, ${r.opening.kinds.up} upgrades, ${r.opening.kinds.other} other), gold ${fmt(r.opening.goldRate)}/s after`);
     console.log(`  first of each: ${r.firsts.map(f => f.what + ' ' + f.t).join(', ')}`);
-    console.log(`  payback (spend-weighted median) by hall level 1 to 5: ${r.payback.map(pb).join(', ')}`);
-    if (first.length) console.log(`  purchases per check-in, first reign: median ${median(first.map(v => v.bought))}, most ${Math.max(...first.map(v => v.bought))}; not routine: median ${median(first.map(v => v.decisions))}, most ${Math.max(...first.map(v => v.decisions))}`);
-    for (const v of first) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h (credited ${v.credited.toFixed(1)})  ${String(v.bought).padStart(3)} bought, ${String(v.decisions).padStart(2)} not routine  hall level ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  the next hall was ${v.hallShare === null || v.hallShare === Infinity ? 'out of reach' : v.hallShare.toFixed(1) + ' such absences away (' + v.limit + ')'}  Crowns on offer ${v.pending}${v.starving ? '  STARVING' : ''}`);
+    console.log(`  buildings standing at ${Object.entries(r.buildingsAt).map(([k, v]) => k + ' ' + v).join(', ')}; kinds built by the Palace ${r.palaceKinds}; levels ${r.palaceLevels ? Object.entries(r.palaceLevels).map(([k, v]) => k + ' ' + v).join(' ') : '-'}`);
+    if (first.length) { const b = first.map(v => v.bought);
+      console.log(`  purchases per check-in, first reign: median ${median(b)}, most ${Math.max(...b)}, none ${Math.round(100 * b.filter(x => !x).length / b.length)}%, over 4 ${b.filter(x => x > 4).length}; builds median ${median(first.map(v => v.builds))}, kind upgrades median ${median(first.map(v => v.ups))}, other median ${median(first.map(v => v.other))}; histogram ${[0, 1, 2, 3, 4, 5, 6].map(n => n + ':' + b.filter(x => n === 6 ? x >= 6 : x === n).length).join(' ')}`);
+      const night = first.filter(v => v.away === 8).map(v => v.bought), day = first.filter(v => v.away !== 8).map(v => v.bought);
+      if (night.length) console.log(`  after a night: median ${median(night)}, most ${Math.max(...night)}; after 4h: median ${median(day)}`); }
+    const felt = r.felt.filter(f => f.reign === 0 && f.t > 1800);
+    if (felt.length) { const q = (a, p) => { a = a.filter(x => isFinite(x)).sort((x, y) => x - y); return a.length ? a[Math.floor(p * (a.length - 1))] : null; };
+      console.log(`  each build/upgrade after the opening: gain to its material median ${Math.round(100 * q(felt.map(f => f.gain), 0.5))}%, 10th pct ${Math.round(100 * q(felt.map(f => f.gain), 0.1))}%; payback median ${q(felt.map(f => f.payback), 0.5).toFixed(1)}h, 10th pct ${q(felt.map(f => f.payback), 0.1).toFixed(1)}h, 90th ${q(felt.map(f => f.payback), 0.9).toFixed(1)}h; under 10%: ${felt.filter(f => f.gain < 0.095).map(f => f.id + (f.k === 'up' ? '^' : '')).join(' ')}`); }
+    if (LOG) for (const v of r.visits.filter(v => v.reign === 0)) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h  ${String(v.bought).padStart(2)} bought (${v.builds}b ${v.ups}u ${v.other}o)  hall ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  Crowns ${v.pending}${v.starving ? '  STARVING' : ''}  ${v.names.join(', ')}`);
     if (r.reigns.length) console.log('  reigns (hours, hall level, Crowns): ' + r.reigns.map(x => `${x.hours.toFixed(1)} L${x.hall} +${x.crowns}`).join(', '));
-    console.log(`  after ${HOURS}h: ${r.crowns} Crowns held, ${r.pending} on offer, ${fmt(r.goldRate)} gold/s; starving ${r.starvedHours.toFixed(1)}h${r.weekCrowns !== null && HOURS >= 168 ? '; Crowns at 7 days ' + r.weekCrowns : ''}\n`);
-  } });
+    console.log(`  after ${HOURS}h: ${r.crowns} Crowns held, ${r.pending} on offer, ${fmt(r.goldRate)} gold/s; starving ${r.starvedHours.toFixed(1)}h\n`);
+  }
+  if (rows.length > 1 && all.length) { const b = all.map(v => v.bought); console.log(`all seeds: purchases per check-in median ${median(b)}, most ${Math.max(...b)}, none ${Math.round(100 * b.filter(x => !x).length / b.length)}%, over 4: ${b.filter(x => x > 4).length} of ${b.length}`); }
+  });
 }

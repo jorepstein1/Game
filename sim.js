@@ -3,7 +3,7 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
 // state = { v, last, meta, run }
@@ -21,6 +21,7 @@ function newMeta(now) {
 function newRun(seed, crowns) {
   if (seed === undefined) seed = (Math.random() * 2 ** 31) | 0;
   const run = { seed, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
+    levels: newLevels(), // every building of a kind works at its kind's level
     research: {}, repeatables: {}, cleared: 0, starving: false,
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
     away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
@@ -29,6 +30,7 @@ function newRun(seed, crowns) {
   if (crowns > 0) for (const r in HEAD_START) run.res[r] += HEAD_START[r];
   return run;
 }
+function newLevels() { const o = {}; for (const id of BUILD_ORDER) o[id] = 1; return o; }
 function newState(now) { return { v: SAVE_VERSION, last: now || 0, meta: newMeta(now), run: newRun() }; }
 function startNewGame(now) { state = newState(now); calc = compute(); }
 
@@ -186,7 +188,10 @@ const mapRadius = () => MAP_RADIUS[state.run.exp];
 const unlocked = (x, y) => Math.abs(x - MAP_MID) <= mapRadius() && Math.abs(y - MAP_MID) <= mapRadius();
 function neighbors(x, y) { return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].filter(([a, b]) => unlocked(a, b)); }
 
-const levelMult = t => BUILDINGS[t.id].linear ? t.level : Math.pow(2, t.level - 1);
+const kindLevel = id => (state.run.levels && state.run.levels[id]) || 1;
+// Output of one building at its kind's level: linear kinds gain their level-1 amount per level, the rest multiply by OUT_GROWTH.
+const levelMultAt = (id, level) => BUILDINGS[id].linear ? level : Math.pow(BUILDINGS[id].outGrowth || OUT_GROWTH, level - 1);
+const levelMult = t => levelMultAt(t.id, kindLevel(t.id));
 function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.min(BIG, Math.ceil(cost[r] * k)); return o; } // never Infinity
 function addCost(total, cost) { for (const r in cost) total[r] = (total[r] || 0) + cost[r]; return total; }
 const canAfford = cost => Object.keys(cost).every(r => state.run.res[r] >= cost[r]);
@@ -211,16 +216,25 @@ const TILE_KINDS = {
     name: t => BUILDINGS[t.id].name,
     icon: t => BUILDINGS[t.id].icon,
     housing: t => (BUILDINGS[t.id].house || 0) * levelMult(t),
-    jobs: t => (BUILDINGS[t.id].work || 0) * t.level,
-    upgradeCost: t => { const def = BUILDINGS[t.id], k = UPGRADE_BASE * Math.pow(def.upgradeGrowth || UPGRADE_GROWTH, t.level) * upgradeCreep(t), also = def.upgradeAlso;
-      return scaleCost(also && t.level >= also.from ? addCost(Object.assign({}, def.cost), also.cost) : def.cost, k); },
+    jobs: t => (BUILDINGS[t.id].work || 0) * kindLevel(t.id),
+    upgradeCost: t => kindUpgradeCost(t.id),
   },
 };
-const upgradeCreep = t => BUILDINGS[t.id].linear ? 1 : Math.pow(UPGRADE_CREEP, Math.max(0, t.level - UPGRADE_CREEP_FROM) ** 2);
 const tileKind = t => TILE_KINDS[t.kind];
 const upgradeCost = t => tileKind(t).upgradeCost(t);
+// Prices. What a kind has cost in all, with n standing at level L, is one number, its "worth":
+//   worth(n, L) = cost × (1 + g + g² + … + g^(n-1)) × u^(L-1)      (g: build growth, u: upgrade growth)
+// and every purchase costs the rise in worth it causes:
+//   build   (n → n+1)  = cost × g^n × u^(L-1)
+//   upgrade (L → L+1)  = cost × (1 + g + … + g^(n-1)) × (u - 1) × u^(L-1)
+// So the price of reaching n buildings at level L is the same whatever the order (no exploit in building first
+// or upgrading first), and demolishing refunds REFUND_SHARE of the last building's share of the worth.
 const buildGrowth = id => BUILDINGS[id].growth || BUILD_GROWTH;
-const buildCost = id => scaleCost(BUILDINGS[id].cost, Math.pow(buildGrowth(id), count(id)));
+const upgradeGrowth = id => BUILDINGS[id].upgradeGrowth || UPGRADE_GROWTH;
+const copiesWorth = (id, n) => { const g = buildGrowth(id); return g === 1 ? n : (Math.pow(g, n) - 1) / (g - 1); };
+const kindWorth = (id, n, level) => scaleCost(BUILDINGS[id].cost, copiesWorth(id, n) * Math.pow(upgradeGrowth(id), level - 1));
+const buildCost = id => scaleCost(BUILDINGS[id].cost, Math.pow(buildGrowth(id), count(id)) * Math.pow(upgradeGrowth(id), kindLevel(id) - 1));
+const kindUpgradeCost = id => scaleCost(BUILDINGS[id].cost, Math.max(1, copiesWorth(id, count(id))) * (upgradeGrowth(id) - 1) * Math.pow(upgradeGrowth(id), kindLevel(id) - 1));
 
 // Adjacency: terrain and buildings are separate namespaces (def.adj.terrain / def.adj.building).
 function adjBonus(id, x, y) {
@@ -228,7 +242,7 @@ function adjBonus(id, x, y) {
   let s = 0;
   for (const [nx, ny] of neighbors(x, y)) {
     const t = state.run.tiles[nx + ',' + ny];
-    if (t) { if (t.kind === 'building' && a.building && a.building[t.id]) s += a.building[t.id] * Math.sqrt(t.level); }
+    if (t) { if (t.kind === 'building' && a.building && a.building[t.id]) s += a.building[t.id] * Math.sqrt(kindLevel(t.id)); }
     else if (a.terrain && a.terrain[state.run.terrain[nx][ny]]) s += a.terrain[state.run.terrain[nx][ny]];
   }
   return s;
@@ -292,7 +306,7 @@ function compute() {
     cap += kind.housing(t); need += kind.jobs(t);
     if (t.kind !== 'building') continue;
     const [x, y] = xy(k);
-    if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * t.level;
+    if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * kindLevel(t.id);
     tiles[k] = { adj: adjBonus(t.id, x, y), levelMult: levelMult(t), mult: 0 };
   }
   const rawCap = cap;
@@ -366,20 +380,30 @@ function build(key, id) {
   const [x, y] = xy(key), def = hasOwn(BUILDINGS, id) ? BUILDINGS[id] : null;
   if (!def || def.hall > hallLevel() || !unlocked(x, y) || state.run.tiles[key] || state.run.terrain[x][y] !== 'plain') return fail();
   if (!pay(buildCost(id))) return fail('Not enough resources for a ' + def.name + '.');
-  state.run.tiles[key] = { kind: 'building', id, level: 1 }; state.meta.stats.built++;
+  state.run.tiles[key] = { kind: 'building', id }; state.meta.stats.built++;
   return { ok: true };
 }
+// The hall is upgraded on its own tile; buildings are upgraded by kind (upgradeKind).
 function upgrade(key) {
   const t = state.run.tiles[key];
-  if (!t || t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
+  if (!t) return fail();
+  if (t.kind === 'building') return upgradeKind(t.id);
+  if (t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
   t.level++;
-  return { ok: true, icon: 'crown', msg: t.kind === 'hall' ? `Your seat is now a ${hallName(t.level)}!` : undefined };
+  return { ok: true, icon: 'crown', msg: `Your seat is now a ${hallName(t.level)}!` };
 }
-// Everything paid for a building: its build price plus each upgrade. Demolition returns REFUND_SHARE of it.
+// One upgrade raises every building of a kind, standing or yet to be built.
+function upgradeKind(id) {
+  if (!hasOwn(BUILDINGS, id) || count(id) < 1 || kindLevel(id) >= MAX_LEVEL || !pay(kindUpgradeCost(id))) return fail();
+  state.run.levels[id] = kindLevel(id) + 1;
+  return { ok: true, icon: 'up', msg: `Every ${BUILDINGS[id].name} is now level ${state.run.levels[id]}` };
+}
+// A building's share of what its kind has cost: the last copy's rise in worth at today's level. Demolition returns
+// REFUND_SHARE of it. Since every price is a rise in worth, building and demolishing again always loses money.
 function spentOn(t) {
-  const total = addCost({}, scaleCost(BUILDINGS[t.id].cost, Math.pow(buildGrowth(t.id), Math.max(0, count(t.id) - 1))));
-  for (let l = 1; l < t.level; l++) addCost(total, upgradeCost({ kind: t.kind, id: t.id, level: l }));
-  return total;
+  const n = count(t.id), L = kindLevel(t.id), hi = kindWorth(t.id, n, L), lo = kindWorth(t.id, Math.max(0, n - 1), L);
+  for (const r in hi) hi[r] -= lo[r] || 0;
+  return hi;
 }
 function demolishRefund(t) { const o = spentOn(t); for (const r in o) o[r] = Math.min(BIG, Math.floor(o[r] * REFUND_SHARE)); return o; }
 function demolish(key) {
@@ -415,40 +439,12 @@ function clearLand(key) {
   return { ok: true, icon: 'lumber', msg: 'The land is cleared.' };
 }
 
-// Routine upgrades: the cheap building upgrades nobody needs to think about, made in one action so they do not
-// crowd out the real choices. An upgrade is routine when every material it costs is at most ROUTINE_SECONDS of the
-// town's income of that material, so the whole batch can never set the next hall back by much. Cheapest first;
-// workplaces wait while there would be no one to staff them. With `preview` nothing is bought: it only counts.
 // Seconds until the next hall is affordable at today's income (0 if it is; Infinity if a material is not being made).
 function hallWait() {
   const hall = state.run.tiles[HALL_KEY]; if (hall.level >= MAX_LEVEL) return Infinity;
   const cost = upgradeCost(hall); let w = 0;
   for (const r in cost) { const need = cost[r] - state.run.res[r]; if (need > 0) w = Math.max(w, calc.base[r] > 0 ? need / calc.base[r] : Infinity); }
   return w;
-}
-// While the next hall is within ROUTINE_RESERVE_SECONDS of income, routine upgrades leave its price in the stores.
-function routineReserve() { return hallWait() <= ROUTINE_RESERVE_SECONDS ? upgradeCost(state.run.tiles[HALL_KEY]) : {}; }
-function routineUpgrades(preview) {
-  const run = state.run, keep = preview ? JSON.stringify({ tiles: run.tiles, res: run.res, away: run.away }) : null, spent = {};
-  calc = compute(); const reserve = routineReserve();
-  let n = 0;
-  for (; n < ROUTINE_MAX; n++) {
-    calc = compute();
-    const made = r => Math.max(0, calc.base[r] + (r === 'food' ? calc.eaten : 0));
-    let best = null, bestCost = null, bestSum = Infinity;
-    for (const k in run.tiles) {
-      const t = run.tiles[k], def = BUILDINGS[t.id];
-      if (t.kind !== 'building' || t.level >= MAX_LEVEL || (def.work && calc.need + def.work > calc.cap)) continue;
-      const c = upgradeCost(t); let sum = 0, ok = true;
-      for (const r in c) { sum += c[r]; if (c[r] > made(r) * ROUTINE_SECONDS || run.res[r] - (reserve[r] || 0) < c[r]) { ok = false; break; } }
-      if (ok && sum < bestSum) { best = k; bestCost = c; bestSum = sum; }
-    }
-    if (!best) break;
-    pay(bestCost); run.tiles[best].level++; addCost(spent, bestCost);
-  }
-  if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; run.away = o.away; }
-  calc = compute();
-  return n ? { ok: true, count: n, spent, icon: 'up', msg: `${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
 }
 
 // Decrees: DECREE_CHOICES of them are open at a time (the earliest ones not yet claimed). Any open decree can be
@@ -566,14 +562,16 @@ function sanitizeSave(raw, now) {
   run.starving = r.starving === true;
 
   let dropped = 0;
-  const radius = MAP_RADIUS[run.exp], tiles = isObj(r.tiles) ? r.tiles : {};
+  const radius = MAP_RADIUS[run.exp], tiles = isObj(r.tiles) ? r.tiles : {}, levels = isObj(r.levels) ? r.levels : {};
+  for (const id of BUILD_ORDER) if (v >= 4) run.levels[id] = int(levels[id], 1, 1, MAX_LEVEL);
   for (const k in tiles) {
     const t = tiles[k], mt = /^(\d{1,2}),(\d{1,2})$/.exec(k);
     if (!mt || !isObj(t)) { dropped++; continue; }
     const x = +mt[1], y = +mt[2], level = int(t.level, 1, 1, MAX_LEVEL);
     if (k === HALL_KEY) { run.tiles[k].level = level; continue; } // the centre is always the hall
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
-    run.tiles[x + ',' + y] = { kind: 'building', id: t.id, level };
+    run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
+    if (v < 4) run.levels[t.id] = Math.max(run.levels[t.id], level); // version 3 kept a level per building: the kind takes the highest
     run.terrain[x][y] = 'plain';
   }
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
