@@ -18,8 +18,8 @@ const HALL_TIERS = [
 // Hall costs set the pace: Manor in the first session, Keep about 4 hours in, Castle about 12, Palace about 37
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
-  { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.26e5, wood: 8.4e4, stone: 5.04e4 },
-  { gold: 7.56e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
+  { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.1e5, wood: 8.4e4, stone: 5.04e4 },
+  { gold: 6.5e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
 ];
 const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -53,15 +53,24 @@ const FOOD_CROWD = 200;          // upkeep per villager is multiplied by 1 + (po
 const STARVE_PENALTY = 0.5;      // output of non-food workplaces while starving
 const STARVE_LOSS = 0.01;        // share of villagers who leave per second while starving
 const FOOD_RESERVE_SECONDS = 120; // villagers also move in while the stores cover this many seconds of upkeep
-// Upgrades are by kind: one upgrade raises every building of that kind. Prices follow one rule (see kindWorth in
-// sim.js): a kind's worth is cost × (1 + g + … + g^(n-1)) × u^(L-1) for n standing at level L, and each purchase
-// costs the rise in worth, so a new building's price rises with its kind's level and an upgrade's with the count.
+// Upgrades are by kind: one upgrade raises every building of that kind, standing or still to be built. Prices
+// follow one rule (sim.js, "Prices"). A kind with n standing at level L has a worth
+//   worth(n, L) = cost × W(n) × U(L)
+//   W(n) = step(0) + … + step(n-1);  step(i) = g^i, or once i ≥ late.from: g^(late.from-1) × late.growth^(i-late.from+1)
+//   U(1) = 1;  U(L) = lift × u^(L-1) for L ≥ 2
+// and every purchase costs the rise in worth it causes (each material scaled and rounded up):
+//   build   n → n+1: cost × step(n) × U(L)
+//   upgrade L → L+1: cost × max(1, W(n)) × (U(L+1) - U(L))   (needs one standing)
+// So n buildings at level L cost worth(n, L) in whatever order they were built and upgraded. Demolishing refunds
+// REFUND_SHARE of what building that copy again would cost, so building and demolishing always loses money.
+// g, late, u (upgradeGrowth) and lift are set per kind in BUILDINGS below; for example the first Lumber Camp
+// upgrade costs 20 gold × 10 × 18 - 20 = 3.58K gold, the first Farm upgrade 10 gold × (6 - 1) = 50 gold.
 const BUILD_GROWTH = 3;          // g: default worth growth per copy standing
 const UPGRADE_GROWTH = 6;        // u: default worth growth per kind level; a building's own upgradeGrowth overrides it
 const LINEAR_UPGRADE_GROWTH = 6;   // buildings that gain a flat amount per level
 const OUT_GROWTH = 3;            // output multiplier per kind level (buildings that are not linear)
 const MAX_LEVEL = 60;            // keeps every cost, refund and rate a finite number (level 60 costs about 1e155)
-const REFUND_SHARE = 0.75;       // share of build + upgrade costs returned on demolition
+const REFUND_SHARE = 0.75;       // share of the last copy's price returned on demolition
 const CROWN_BONUS = 0.05;        // production bonus per Crown
 // Crowns offered for abdicating = CROWN_RATE × log10(gold earned this reign / threshold), where the threshold is
 // CROWN_GOLD × (Crown multiplier ^ CROWN_STEEPEN). A logarithm means each further Crown takes more gold than the
