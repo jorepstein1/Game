@@ -132,8 +132,8 @@ const SPRITES = {
     <path d="M14 27.500l1-5M18 27.500l-1-5" stroke="#8f9dab" stroke-width="1.200" fill="none"/>`,
   smith: `<path d="M3.500 15h18q3.500 0 7-2v3.500q-3.500 3.500-8.500 4v2.500l3.500 3v2.500h-15v-2.500l3.500-3v-2.500q-6-.500-8.500-5.500z" fill="#55647a"/>
     <path d="M5 16.500h16q3 0 5.500-1.200" stroke="#a9b7c4" stroke-width="1.300" fill="none"/>
-    <path d="M26.500 2.500l-9 7" stroke-width="4.400" fill="none"/><path d="M26.500 2.500l-9 7" stroke="#b07a3e" stroke-width="2" fill="none"/>
-    <rect x="10.500" y="5.500" width="9" height="6" rx="1" fill="#8f9dab" transform="rotate(52 15 8.500)"/>
+    <g transform="translate(15.500 14.500) rotate(40)"><path d="M0 0v-10" stroke-width="4.400" fill="none"/><path d="M0 0v-10" stroke="#b07a3e" stroke-width="2" fill="none"/>
+    <rect x="-4.800" y="-14.200" width="9.600" height="5.200" rx="1" fill="#8f9dab"/><path d="M-3.300-12.700h6.600" stroke="#d5dde4" stroke-width="1.200" fill="none"/></g>
     <path d="M7 9.500l-2.500-1M8.500 6.500l-1.500-2.500M5.500 12.500h-2.500" stroke="#f2a53a" stroke-width="1.500" fill="none"/>`,
   church: `<rect x="4.500" y="18.500" width="23" height="9" fill="#f1e3c0"/><path d="M3 19l3-5.500h20l3 5.500z" fill="#55708f"/>
     <rect x="12" y="10" width="8" height="17.500" fill="#fbf5e2"/><path d="M10.800 10.500l5.200-6.500 5.200 6.500z" fill="#55708f"/>
