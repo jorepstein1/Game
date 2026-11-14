@@ -18,8 +18,8 @@ const HALL_TIERS = [
 // Hall costs set the pace: Manor in the first session, Keep about 4 hours in, Castle about 12, Palace about 37
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
-  { gold: 2500, wood: 1000, stone: 250 }, { gold: 3e4, wood: 2e4, stone: 1.2e4 },
-  { gold: 2e5, stone: 1e5 }, { gold: 3e6, stone: 6e5, iron: 3e4 },
+  { gold: 2500, wood: 1000, stone: 250 }, { gold: 6e4, wood: 4e4, stone: 2.4e4 },
+  { gold: 4e5, stone: 2e5 }, { gold: 3.3e6, stone: 6.6e5, iron: 3.3e4 },
 ];
 const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -29,7 +29,7 @@ const PRESTIGE_HALL = 4;         // hall level needed to abdicate
 
 const MAP_SIZE = 11, MAP_MID = 5;
 const MAP_RADIUS = [2, 3, 4, 5]; // unlocked radius around the centre per expansion
-const EXPAND_COST = [{ gold: 2500, wood: 1000 }, { gold: 1e6, stone: 2e5 }, { gold: 1e7, iron: 1e5 }];
+const EXPAND_COST = [{ gold: 1200, wood: 500 }, { gold: 2e6, stone: 4e5 }, { gold: 2e7, iron: 2e5 }];
 // Terrain comes in features (groves, hill ranges, a lake or river) rather than single tiles, so that plots touching
 // two or three tiles of one kind exist on every map. BIOME_TILES is how many tiles of each the features cover before
 // the repair pass (about 28% of the map, as the old per-tile rolls did: more terrain would mean fewer plots and a slower game).
@@ -74,36 +74,36 @@ const CROWN_MIN = 15;            // Crowns that must be on offer before abdicati
 const CROWN_GOAL = 20;           // Crowns on offer at which the game suggests abdicating
 const CLICK_GOLD = 1;            // gold per hand collection: a flourish for the first minutes, not an income
 const OFFLINE_HOURS = 8;         // offline progress cap without research
-const REST_AFTER_HOURS = 6;      // a rested town: every hour of one absence past this many (within the cap)...
+const REST_AFTER_HOURS = 1;      // a rested town: every hour of one absence past this many (within the cap)...
 const REST_BONUS = 1;            // ...is worth this much extra, so long absences lose less to the wait for the player
 const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a summary
 
 // Buildings. out: per second at level 1. work: villagers needed per level.
 // adj: bonus per adjacent terrain type / per adjacent building, times the square root of that building kind's level.
 // linear: housing/output grows by a flat amount per level instead of doubling. growth: build cost growth.
-// upgradeGrowth: worth growth per kind level (default UPGRADE_GROWTH). outGrowth: output per level (default OUT_GROWTH).
+// upgradeGrowth: worth growth per kind level (default UPGRADE_GROWTH). lift: one-off extra worth step at level 2 (default 1). outGrowth: output per level (default OUT_GROWTH).
 const BUILDINGS = {
   cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { gold: 5, wood: 10 }, house: 5, linear: true, growth: 3, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { gold: 0.4 },
     adj: { building: { tavern: 0.5 } }, desc: 'Houses villagers, who pay a modest tax.' },
-  lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 6, upgradeGrowth: 18, out: { wood: 0.8 },
+  lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 9, upgradeGrowth: 18, lift: 10, out: { wood: 0.8 },
     adj: { terrain: { forest: 0.5 } }, desc: 'Fells timber. Wants forest nearby.' },
-  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 5, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 1.5 },
+  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 7, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 1.5 },
     adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the village. Thrives beside water and mills.' },
-  quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 6, upgradeGrowth: 18, out: { stone: 0.5 },
+  quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 9, upgradeGrowth: 18, lift: 10, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
-  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 3e4, wood: 1e4, stone: 4000 }, work: 3, out: { gold: 2 },
+  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 60000, wood: 20000, stone: 8000 }, work: 3, out: { gold: 2 },
     adj: { building: { cottage: 0.2, guild: 0.5 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
-  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 30000, wood: 45000, stone: 15000 }, work: 2, linear: true, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 3 },
+  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 60000, wood: 90000, stone: 30000 }, work: 2, linear: true, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 3 },
     desc: 'Grinds grain and boosts every farm beside it.' },
-  tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 180000, wood: 90000 }, work: 2, out: { gold: 2 },
+  tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 360000, wood: 180000 }, work: 2, out: { gold: 2 },
     desc: 'Merry villagers pay more tax. Boosts cottages beside it.' },
-  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 1e5, wood: 4e4, stone: 2e4 }, work: 4, out: { iron: 0.4 },
+  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, out: { iron: 0.4 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron ore. Wants hills nearby.' },
-  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 5e5, stone: 1.5e5, iron: 5000 }, work: 4, out: { gold: 12 },
+  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 1e6, stone: 300000, iron: 10000 }, work: 4, out: { gold: 12 },
     adj: { building: { mine: 0.3, guild: 0.5 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
-  church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 600000, stone: 240000, iron: 15000 }, work: 2, glob: 0.05,
+  church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 1.2e6, stone: 480000, iron: 30000 }, work: 2, glob: 0.05,
     desc: 'Inspires the whole realm: +5% to all production per level while fully staffed.' },
-  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 1.5e6, stone: 4e5, iron: 2e4 }, work: 5, out: { gold: 12 },
+  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 3e6, stone: 800000, iron: 40000 }, work: 5, out: { gold: 12 },
     desc: 'Organises the trades. Boosts markets and blacksmiths beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
@@ -114,32 +114,32 @@ const RESEARCH = [
   { id: 'axes', name: 'Iron-shod Axes', desc: 'Lumber Camps ×2', hall: 1, cost: { gold: 150 }, mult: { lumber: 2 } },
   { id: 'rotation', name: 'Crop Rotation', desc: 'Farms ×2', hall: 1, cost: { gold: 200, wood: 100 }, mult: { farm: 2 } },
   { id: 'tithes', name: 'Tithes', desc: 'Cottage taxes ×2', hall: 1, cost: { gold: 400 }, mult: { cottage: 2 } },
-  { id: 'chisels', name: 'Stone Chisels', desc: 'Quarries ×2', hall: 1, cost: { gold: 600, wood: 300 }, mult: { quarry: 2 } },
+  { id: 'chisels', name: 'Stone Chisels', desc: 'Quarries ×2', hall: 1, cost: { gold: 300, wood: 150 }, mult: { quarry: 2 } },
   { id: 'steward', name: 'Stewardship', desc: 'Offline progress lasts 24h instead of 8h. Kept when you found a new kingdom', hall: 1, cost: { gold: 200 }, fx: { offlineHours: 24 }, keep: true },
-  { id: 'plough', name: 'Heavy Plough', desc: 'Farms and Mills ×2', hall: 2, cost: { gold: 150000, stone: 37500 }, mult: { farm: 2, mill: 2 } },
-  { id: 'charter', name: 'Market Charter', desc: 'Markets ×2', hall: 2, cost: { gold: 200000, wood: 100000 }, mult: { market: 2 } },
-  { id: 'saws', name: 'Two-man Saws', desc: 'Lumber Camps ×2', hall: 2, cost: { gold: 250000, stone: 62500 }, mult: { lumber: 2 } },
-  { id: 'survey', name: 'Royal Surveyors', desc: 'Clearing land costs half as much', hall: 2, cost: { gold: 300000, wood: 125000 }, fx: { clearCost: 0.5 } },
-  { id: 'ale', name: 'Strong Ale', desc: 'Taverns and cottage taxes ×2', hall: 2, cost: { gold: 500000, wood: 250000 }, mult: { tavern: 2, cottage: 2 } },
-  { id: 'masonry', name: 'Masonry', desc: 'Quarries ×2', hall: 3, cost: { gold: 2e6, wood: 1e6 }, mult: { quarry: 2 } },
-  { id: 'shafts', name: 'Deep Shafts', desc: 'Mines ×2', hall: 3, cost: { gold: 2.5e6, stone: 750000 }, mult: { mine: 2 } },
-  { id: 'bellows', name: 'Great Bellows', desc: 'Blacksmiths ×2', hall: 3, cost: { gold: 3.75e6, iron: 50000 }, mult: { smith: 2 } },
-  { id: 'almanac', name: "Farmers' Almanac", desc: 'Mills ×2', hall: 4, cost: { gold: 7.5e6, stone: 2e6 }, mult: { mill: 2 } },
-  { id: 'carts', name: 'Ore Carts', desc: 'Mines ×2', hall: 4, cost: { gold: 1e7, stone: 2.5e6 }, mult: { mine: 2 } },
-  { id: 'fields', name: 'Three-field System', desc: 'Farms ×3', hall: 4, cost: { gold: 1.25e7, stone: 3e6 }, mult: { farm: 3 } },
-  { id: 'aqueduct', name: 'Aqueducts', desc: 'Cottage taxes ×2', hall: 4, cost: { gold: 1.5e7, stone: 3.75e6 }, mult: { cottage: 2 } },
-  { id: 'banking', name: 'Banking', desc: 'Markets and Guildhalls ×2', hall: 4, cost: { gold: 2e7, iron: 125000 }, mult: { market: 2, guild: 2 } },
-  { id: 'marks', name: "Maker's Marks", desc: 'Blacksmiths ×2', hall: 4, cost: { gold: 2.5e7, iron: 250000 }, mult: { smith: 2 } },
-  { id: 'steel', name: 'Crucible Steel', desc: 'Mines and Blacksmiths ×2', hall: 5, cost: { gold: 5e7, iron: 500000 }, mult: { mine: 2, smith: 2 } },
-  { id: 'mint', name: 'Royal Mint', desc: 'All gold buildings ×2', hall: 5, cost: { gold: 1e8, stone: 1.25e7 }, mult: { cottage: 2, market: 2, tavern: 2, smith: 2, guild: 2 } },
+  { id: 'plough', name: 'Heavy Plough', desc: 'Farms and Mills ×2', hall: 2, cost: { gold: 300000, stone: 75000 }, mult: { farm: 2, mill: 2 } },
+  { id: 'charter', name: 'Market Charter', desc: 'Markets ×2', hall: 2, cost: { gold: 400000, wood: 200000 }, mult: { market: 2 } },
+  { id: 'saws', name: 'Two-man Saws', desc: 'Lumber Camps ×2', hall: 2, cost: { gold: 500000, stone: 125000 }, mult: { lumber: 2 } },
+  { id: 'survey', name: 'Royal Surveyors', desc: 'Clearing land costs half as much', hall: 2, cost: { gold: 600000, wood: 250000 }, fx: { clearCost: 0.5 } },
+  { id: 'ale', name: 'Strong Ale', desc: 'Taverns and cottage taxes ×2', hall: 2, cost: { gold: 1e6, wood: 500000 }, mult: { tavern: 2, cottage: 2 } },
+  { id: 'masonry', name: 'Masonry', desc: 'Quarries ×2', hall: 3, cost: { gold: 4e6, wood: 2e6 }, mult: { quarry: 2 } },
+  { id: 'shafts', name: 'Deep Shafts', desc: 'Mines ×2', hall: 3, cost: { gold: 5e6, stone: 1.5e6 }, mult: { mine: 2 } },
+  { id: 'bellows', name: 'Great Bellows', desc: 'Blacksmiths ×2', hall: 3, cost: { gold: 7.5e6, iron: 100000 }, mult: { smith: 2 } },
+  { id: 'almanac', name: "Farmers' Almanac", desc: 'Mills ×2', hall: 4, cost: { gold: 1.5e7, stone: 4e6 }, mult: { mill: 2 } },
+  { id: 'carts', name: 'Ore Carts', desc: 'Mines ×2', hall: 4, cost: { gold: 2e7, stone: 5e6 }, mult: { mine: 2 } },
+  { id: 'fields', name: 'Three-field System', desc: 'Farms ×3', hall: 4, cost: { gold: 2.5e7, stone: 6e6 }, mult: { farm: 3 } },
+  { id: 'aqueduct', name: 'Aqueducts', desc: 'Cottage taxes ×2', hall: 4, cost: { gold: 3e7, stone: 7.5e6 }, mult: { cottage: 2 } },
+  { id: 'banking', name: 'Banking', desc: 'Markets and Guildhalls ×2', hall: 4, cost: { gold: 4e7, iron: 250000 }, mult: { market: 2, guild: 2 } },
+  { id: 'marks', name: "Maker's Marks", desc: 'Blacksmiths ×2', hall: 4, cost: { gold: 5e7, iron: 500000 }, mult: { smith: 2 } },
+  { id: 'steel', name: 'Crucible Steel', desc: 'Mines and Blacksmiths ×2', hall: 5, cost: { gold: 1e8, iron: 1e6 }, mult: { mine: 2, smith: 2 } },
+  { id: 'mint', name: 'Royal Mint', desc: 'All gold buildings ×2', hall: 5, cost: { gold: 2e8, stone: 2.5e7 }, mult: { cottage: 2, market: 2, tavern: 2, smith: 2, guild: 2 } },
 ];
 
 // Repeatable upgrades: gold sinks with exponentially scaling costs. Levels reset on abdication.
 const REPEATABLES = [
-  { id: 'food', name: 'Granaries', desc: 'Food production +10% per level', hall: 3, cost: { gold: 2e5 }, growth: 2, per: 0.1 },
-  { id: 'housing', name: 'Town Planning', desc: 'Housing +10% per level', hall: 3, cost: { gold: 4e5 }, growth: 2, per: 0.1 },
-  { id: 'prod', name: 'Royal Roads', desc: 'All production +10% per level', hall: 4, cost: { gold: 2e6 }, growth: 2.5, per: 0.1 },
-  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 2e7 }, growth: 4, per: 1 },
+  { id: 'food', name: 'Granaries', desc: 'Food production +10% per level', hall: 3, cost: { gold: 400000 }, growth: 2, per: 0.1 },
+  { id: 'housing', name: 'Town Planning', desc: 'Housing +10% per level', hall: 3, cost: { gold: 800000 }, growth: 2, per: 0.1 },
+  { id: 'prod', name: 'Royal Roads', desc: 'All production +10% per level', hall: 4, cost: { gold: 4e6 }, growth: 2.5, per: 0.1 },
+  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 4e7 }, growth: 4, per: 1 },
 ];
 const MAX_REPEATABLE = 500;
 

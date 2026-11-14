@@ -223,18 +223,21 @@ const TILE_KINDS = {
 const tileKind = t => TILE_KINDS[t.kind];
 const upgradeCost = t => tileKind(t).upgradeCost(t);
 // Prices. What a kind has cost in all, with n standing at level L, is one number, its "worth":
-//   worth(n, L) = cost × (1 + g + g² + … + g^(n-1)) × u^(L-1)      (g: build growth, u: upgrade growth)
+//   worth(n, L) = cost × (1 + g + g² + … + g^(n-1)) × U(L),  U(1) = 1, U(L) = lift × u^(L-1) from level 2
+//   (g: build growth, u: upgrade growth, lift: a one-off extra step at level 2, so that a cheap first-hall kind
+//   keeps pace with the town once it is upgraded; 1 for most kinds)
 // and every purchase costs the rise in worth it causes:
-//   build   (n → n+1)  = cost × g^n × u^(L-1)
-//   upgrade (L → L+1)  = cost × (1 + g + … + g^(n-1)) × (u - 1) × u^(L-1)
+//   build   (n → n+1)  = cost × g^n × U(L)
+//   upgrade (L → L+1)  = cost × (1 + g + … + g^(n-1)) × (U(L+1) - U(L))
 // So the price of reaching n buildings at level L is the same whatever the order (no exploit in building first
 // or upgrading first), and demolishing refunds REFUND_SHARE of the last building's share of the worth.
 const buildGrowth = id => BUILDINGS[id].growth || BUILD_GROWTH;
 const upgradeGrowth = id => BUILDINGS[id].upgradeGrowth || UPGRADE_GROWTH;
 const copiesWorth = (id, n) => { const g = buildGrowth(id); return g === 1 ? n : (Math.pow(g, n) - 1) / (g - 1); };
-const kindWorth = (id, n, level) => scaleCost(BUILDINGS[id].cost, copiesWorth(id, n) * Math.pow(upgradeGrowth(id), level - 1));
-const buildCost = id => scaleCost(BUILDINGS[id].cost, Math.pow(buildGrowth(id), count(id)) * Math.pow(upgradeGrowth(id), kindLevel(id) - 1));
-const kindUpgradeCost = id => scaleCost(BUILDINGS[id].cost, Math.max(1, copiesWorth(id, count(id))) * (upgradeGrowth(id) - 1) * Math.pow(upgradeGrowth(id), kindLevel(id) - 1));
+const levelWorth = (id, level) => level <= 1 ? 1 : (BUILDINGS[id].lift || 1) * Math.pow(upgradeGrowth(id), level - 1);
+const kindWorth = (id, n, level) => scaleCost(BUILDINGS[id].cost, copiesWorth(id, n) * levelWorth(id, level));
+const buildCost = id => scaleCost(BUILDINGS[id].cost, Math.pow(buildGrowth(id), count(id)) * levelWorth(id, kindLevel(id)));
+const kindUpgradeCost = id => scaleCost(BUILDINGS[id].cost, Math.max(1, copiesWorth(id, count(id))) * (levelWorth(id, kindLevel(id) + 1) - levelWorth(id, kindLevel(id))));
 
 // Adjacency: terrain and buildings are separate namespaces (def.adj.terrain / def.adj.building).
 function adjBonus(id, x, y) {

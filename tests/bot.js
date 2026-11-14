@@ -46,7 +46,7 @@ function play(seed, opts) {
   // Check-in play: an opening session played second by second, then the bot is away between check-ins. Time away is
   // credited through creditAway, as the game does on load, and each check-in buys what the policy allows at once.
   const SIMPLE = opts.buyer === 'greedy' ? Infinity : opts.buyer === 'simple' ? opts.share || 0.1 : 0; // see act()
-  const CHECKINS = (opts && opts.checkins) || 0, SESSION = (opts && opts.session) || 25, VISIT = (opts && opts.visit) || 3;
+  const TICK = (opts && opts.tick) || 0.5, CHECKINS = (opts && opts.checkins) || 0, SESSION = (opts && opts.session) || 25, VISIT = (opts && opts.visit) || 3;
   const GAPS = !CHECKINS ? [] : CHECKINS === 1 ? [24] : CHECKINS === 2 ? [12, 12] : Array(CHECKINS - 1).fill(16 / (CHECKINS - 1)).concat(8); // hours; the last is the night
   const sim = loadSim(patch);
   const s = sim.newState(0); s.run = sim.newRun(seed);
@@ -200,7 +200,7 @@ function play(seed, opts) {
   let buying = true; // buyEvery: N makes the bot buy at every Nth check-in only and just look in (and claim decrees) at the others
   const liveUntil = end => { // played second by second, as with the game open
     while (t < end) {
-      sim.advance(0.5); t += 0.5; now = t;
+      if (TICK > 0.5 && t >= SESSION * 60) { sim.stepCity(TICK); t += TICK; } else { sim.advance(0.5); t += 0.5; } now = t; // tick: a coarser step for long never-closed runs, after the opening
       if (run().starving) out.starve += 0.5;
       if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1) { sim.collectTaxes(); tapDebt--; } if (buying) act(); else while (sim.decreeDone()) sim.claimDecree(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
       afterStep();
@@ -274,7 +274,7 @@ if (require.main === module) {
   const h = x => x === null ? '   -  ' : (x.toFixed(1) + 'h').padStart(6), pb = x => x === null ? '-' : x < 1 ? Math.round(x * 60) + 'm' : x.toFixed(1) + 'h', fmt = loadSim().fmt;
   if (process.argv[2] === 'compare') {
     const hours = +(process.argv[3] || 168), seeds = (process.argv[4] || '11,22,33').split(',').map(Number), todo = [], freqs = (process.argv[5] || '2,5,49,0').split(',').map(Number);
-    for (const checkins of freqs) for (const seed of seeds) todo.push({ seed, opts: { hours, policy: 'crowns:20', checkins } });
+    for (const checkins of freqs) for (const seed of seeds) todo.push({ seed, opts: { hours, policy: 'crowns:20', checkins, tick: checkins ? 0.5 : 5 } }); // never closed: 5 s steps after the opening, acting every 5 s
     console.log(`Hearthold check-in comparison: ${hours}h, abdicating at 20 Crowns, seeds ${seeds.join(', ')} (0 = never closed)\n`);
     console.log('check-ins  seed   Keep  Castle  Palace  20 Crowns  Legend  Crowns at 7 days  reign lengths (h)');
     runAll(todo).then(rows => { for (const r of rows)
