@@ -310,6 +310,8 @@ const repCost = r => scaleCost(r.cost, Math.pow(r.growth, repLevel(r.id)));
 
 const foodPerPop = pop => FOOD_PER_POP * (1 + (pop / FOOD_CROWD) ** 2);
 const upkeep = pop => pop * foodPerPop(pop);
+// The snapshot the town would have with one more level of a kind (used to preview what an upgrade does).
+function afterKindUpgrade(id) { const lv = state.run.levels, keep = lv[id]; lv[id] = kindLevel(id) + 1; const c = compute(); lv[id] = keep; return c; }
 // Base food income if the town held `pop` villagers (used to preview what more housing would do).
 function foodRateAt(pop) { const keep = state.run.pop; state.run.pop = pop; const r = compute().base.food; state.run.pop = keep; return r; }
 // Largest population between lo and hi whose upkeep still fits in `budget` food per second.

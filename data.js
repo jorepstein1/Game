@@ -168,7 +168,7 @@ const DECREES = [
   { id: 'land', title: 'Lay of the Land', desc: 'Give any building an adjacency bonus of 50% or more.', done: () => Object.values(calc.tiles).some(t => t.adj >= 0.5), reward: { wood: 60 } },
   { id: 'bedrock', title: 'Bedrock', desc: 'Build a Quarry.', done: () => count('quarry') >= 1, reward: { gold: 100 } },
   { id: 'learned', title: 'Learned Folk', desc: 'Buy something in the Research tab.', done: () => Object.keys(state.run.research).length >= 1, reward: { gold: 150 } },
-  { id: 'coffers', title: 'A Full Treasury', desc: 'Hold 2,000 gold at once. A Manor costs 4,000 gold, 2,000 wood and 500 stone: leave the small upgrades be for a while and let the stores fill.', progress: () => [state.run.res.gold, 2000], reward: { wood: 300, stone: 100 } },
+  { id: 'coffers', title: 'A Full Treasury', desc: 'Hold 2,000 gold at once. A Manor costs 2,500 gold, 1,000 wood and 250 stone: hold off on small purchases for a while and let the stores fill.', progress: () => [state.run.res.gold, 2000], reward: { wood: 300, stone: 100 } },
   { id: 'manor', title: 'Lord of the Manor', desc: 'Tap your Village Hall and upgrade it into a Manor.', done: () => hallLevel() >= 2, reward: { gold: 300, wood: 200 } },
   { id: 'market', title: 'Market Day', desc: 'Build a Market.', done: () => count('market') >= 1, reward: { gold: 400 } },
   { id: 'grist', title: 'Grist for the Mill', desc: 'Build a Mill right next to a Farm.', done: () => hasPair('mill', 'farm'), reward: { food: 500 } },
