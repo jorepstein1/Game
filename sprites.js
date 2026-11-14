@@ -91,10 +91,10 @@ const SPRITES = {
     <path d="M9.500 14l6.500-6.300" stroke="#dd7a55" stroke-width="1.600" fill="none"/>
     <rect x="13.500" y="20" width="5" height="7.500" fill="#6b4423"/><rect x="8.500" y="19.500" width="3.200" height="3.200" fill="#8fc7e8" stroke-width="1.100"/>
     <rect x="20.300" y="19.500" width="3.200" height="3.200" fill="#8fc7e8" stroke-width="1.100"/>`,
-  lumber: `<path d="M4 19.500v6q0 3.500 12 3.500t12-3.500v-6z" fill="#8a5a2b"/><ellipse cx="16" cy="19.500" rx="12" ry="4.500" fill="#e2b877"/>
-    <ellipse cx="16" cy="19.500" rx="7" ry="2.500" fill="none" stroke="#a8742f" stroke-width="1.100"/>
-    <path d="M9 25v2.300M22.500 25.300v2M15.500 26v2" stroke="#5e3b1a" stroke-width="1.300" fill="none"/>
-    <g transform="translate(11.600 13.300) rotate(-35)"><path d="M0 0h14" stroke-width="4.400" fill="none"/><path d="M0 0h14" stroke="#b07a3e" stroke-width="2" fill="none"/>
+  lumber: `<path d="M7 15.500v10.500q0 3 9 3t9-3v-10.500z" fill="#8a5a2b"/><ellipse cx="16" cy="15.500" rx="9" ry="3.700" fill="#e2b877"/>
+    <ellipse cx="16" cy="15.500" rx="5" ry="1.900" fill="none" stroke="#a8742f" stroke-width="1.100"/>
+    <path d="M11 20.500v4.500M21.500 21v3M16 23v3.500" stroke="#5e3b1a" stroke-width="1.300" fill="none"/>
+    <g transform="translate(12.100 8.800) rotate(-30)"><path d="M0 0h12" stroke-width="4.400" fill="none"/><path d="M0 0h12" stroke="#b07a3e" stroke-width="2" fill="none"/>
     <path d="M-1.700-1.800h3.600v3.500q0 3 2 5.300-3.800 1.300-7.600 0 2-2.300 2-5.300z" fill="#a9b7c4"/><path d="M-2.300 6.300q2.400.600 4.800 0" stroke="#e6edf2" stroke-width="1.200" fill="none"/></g>`,
   farm: `<g fill="#e8bf3a"><ellipse cx="16" cy="9.500" rx="3" ry="6.500" transform="rotate(-32 16 20)"/>
     <ellipse cx="16" cy="9.500" rx="3" ry="6.500" transform="rotate(32 16 20)"/><ellipse cx="16" cy="8.500" rx="3" ry="6.500"/></g>
