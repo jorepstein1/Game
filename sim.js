@@ -1,7 +1,7 @@
 'use strict';
 /* Hearthold — simulation: state, rules, actions and the save format.
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
-   Actions return { ok, msg } and leave it to the caller to show anything. */
+   Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
 const SAVE_VERSION = 2;
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
@@ -260,7 +260,7 @@ function upgrade(key) {
   const t = state.run.tiles[key];
   if (!t || t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
   t.level++;
-  return { ok: true, msg: t.kind === 'hall' ? `🎉 Your seat is now a ${hallName(t.level)}!` : undefined };
+  return { ok: true, icon: 'crown', msg: t.kind === 'hall' ? `Your seat is now a ${hallName(t.level)}!` : undefined };
 }
 // Everything paid for a building: its build price plus each upgrade. Demolition returns REFUND_SHARE of it.
 function spentOn(t) {
@@ -280,7 +280,7 @@ function buyResearch(id) {
   const r = RESEARCH.find(r => r.id === id);
   if (!r || hasResearch(id) || r.hall > hallLevel() || !pay(r.cost)) return fail();
   state.run.research[id] = 1;
-  return { ok: true, msg: '📜 Researched ' + r.name };
+  return { ok: true, icon: 'research', msg: 'Researched ' + r.name };
 }
 function buyRepeatable(id) {
   const r = repeatable(id);
@@ -291,7 +291,7 @@ function buyRepeatable(id) {
 function expand() {
   if (state.run.exp >= EXPAND_COST.length || !pay(EXPAND_COST[state.run.exp])) return fail();
   state.run.exp++;
-  return { ok: true, msg: '🗺️ Your borders grow!' };
+  return { ok: true, icon: 'map', msg: 'Your borders grow!' };
 }
 // Turning forest, hills or water into an open plot: the way forward once the map is full.
 const clearCost = () => scaleCost(CLEAR_COST, Math.pow(CLEAR_GROWTH, state.run.cleared));
@@ -299,7 +299,7 @@ function clearLand(key) {
   const [x, y] = xy(key);
   if (!unlocked(x, y) || state.run.tiles[key] || state.run.terrain[x][y] === 'plain' || !pay(clearCost())) return fail();
   state.run.terrain[x][y] = 'plain'; state.run.cleared++;
-  return { ok: true, msg: '🪓 The land is cleared.' };
+  return { ok: true, icon: 'lumber', msg: 'The land is cleared.' };
 }
 
 const currentDecree = () => DECREES.find(d => d.id === state.meta.decree) || null;
@@ -313,7 +313,7 @@ function claimDecree() {
   if (!decreeDone()) return fail();
   const d = currentDecree(), next = DECREES[DECREES.indexOf(d) + 1];
   grant(d.reward); state.meta.decree = next ? next.id : null;
-  return { ok: true, msg: '✅ ' + d.title + ' — reward claimed' };
+  return { ok: true, icon: 'decrees', msg: d.title + ' — reward claimed' };
 }
 
 // Abdicate: bank the Crowns in meta and start a fresh run.
@@ -322,7 +322,7 @@ function prestige() {
   const n = pendingCrowns(), meta = state.meta;
   meta.bonusCrowns += repLevel('monument'); meta.crowns += n; meta.stats.prestiges++;
   state.run = newRun(undefined, meta.crowns); calc = compute();
-  return { ok: true, crowns: n, msg: `👑 A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
+  return { ok: true, crowns: n, icon: 'crown', msg: `A new dynasty begins with ${fmt(meta.crowns)} Crowns and a head start.` };
 }
 
 // Hand collection: a flat amount plus a small share of base income (never of festival income).
@@ -338,15 +338,15 @@ function merchantVisit(roll) {
   const run = state.run; state.meta.stats.merchants++;
   if (roll < 0.5) {
     const g = Math.max(30, calc.base.gold * MERCHANT_SECONDS); run.res.gold += g; earnGold(g);
-    return { ok: true, msg: `🐪 The merchant pays ${fmt(g)} gold for your wares!` };
+    return { ok: true, icon: 'merchant', msg: `The merchant pays ${fmt(g)} gold for your wares!` };
   }
   if (roll < 0.75) {
     run.buffUntil = run.clock + FESTIVAL_SECONDS;
-    return { ok: true, msg: `🎪 A festival! All production ×${FESTIVAL_MULT} for ${FESTIVAL_SECONDS} seconds.` };
+    return { ok: true, icon: 'festival', msg: `A festival! All production ×${FESTIVAL_MULT} for ${FESTIVAL_SECONDS} seconds.` };
   }
   for (const k of ['food', 'wood', 'stone', 'iron']) if (k !== 'iron' || hallLevel() >= 3)
     run.res[k] += Math.max(k === 'iron' ? 5 : 25, (calc.base[k] + (k === 'food' ? calc.eaten : 0)) * MERCHANT_SECONDS);
-  return { ok: true, msg: '🐪 The merchant unloads a wagon of supplies!' };
+  return { ok: true, icon: 'merchant', msg: 'The merchant unloads a wagon of supplies!' };
 }
 
 // ───────────────────────── Saves ─────────────────────────

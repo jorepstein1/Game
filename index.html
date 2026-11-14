@@ -11,7 +11,7 @@
 <div id="app">
   <section class="screen" id="screen-city" data-screen="city">
     <header>
-      <h1>⚜ Hearthold</h1>
+      <h1><svg class="sp" viewBox="0 0 32 32" aria-hidden="true"><use href="#sp-crown"/></svg> Hearthold</h1>
       <span id="subtitle"></span>
     </header>
     <div id="res" aria-label="Resources"></div>
@@ -20,10 +20,10 @@
         <div id="mapwrap">
           <div id="mapscroll"><div id="map"></div></div>
           <div id="maphint" hidden>Drag the map to pan</div>
-          <button id="merchant" data-act="merchant" hidden title="A travelling merchant!" aria-label="Travelling merchant: tap for a gift">🐪</button>
+          <button id="merchant" data-act="merchant" hidden title="A travelling merchant!" aria-label="Travelling merchant: tap for a gift"><svg class="sp" viewBox="0 0 32 32" aria-hidden="true"><use href="#sp-merchant"/></svg></button>
         </div>
         <!-- On phones ui.js moves #inspector in here, beside the button, so both sit under the map. -->
-        <div id="strip"><button id="clicker" data-act="collect"><span class="ic">💰</span> <span class="lbl">Collect Taxes</span> <small id="clickval"></small></button></div>
+        <div id="strip"><button id="clicker" data-act="collect"><span class="lbl"><svg class="sp" viewBox="0 0 32 32" aria-hidden="true"><use href="#sp-gold"/></svg> Collect Taxes</span> <small id="clickval"></small></button></div>
       </section>
       <!-- Phones only: the build list, or the selected tile's actions. -->
       <div id="buildbar"><div id="bbinfo"></div><div id="bbrow"></div></div>
@@ -39,6 +39,7 @@
 <div id="toasts" role="status" aria-live="polite"></div>
 <div id="modal" hidden><div id="modalbox" role="dialog" aria-modal="true" aria-labelledby="modaltitle"></div></div>
 <script src="data.js"></script>
+<script src="sprites.js"></script>
 <script src="sim.js"></script>
 <script src="ui.js"></script>
 </body>

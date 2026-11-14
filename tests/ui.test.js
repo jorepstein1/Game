@@ -163,7 +163,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       research: { axes: 1, '<img onerror=window.__xss=1 src=x>': 1 }, repeatables: { prod: '<img>', food: 1e9 }, buffUntil: 1e99, clock: 5 } };
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
-    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg, #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: festivalLeft(), ok: isFinite(calc.rates.gold) }; });
+    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app svg:not(.sp), #app script, #toasts img').length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: festivalLeft(), ok: isFinite(calc.rates.gold) }; });
   ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 50 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === 1 && ev.decree === null && ev.tilesShown === 121 && ev.buff <= 60 && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
@@ -294,7 +294,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(await p3.evaluate(() => state.run.tiles['6,5'].level) === 5, 'tapping Upgrade in the bar upgrades the Blacksmith');
   await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage', level: 2 }; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
   up = await reach('#buildbar [data-act="up"]');
-  ok(up && up.inView && /Upgrade \+5 🏠/.test(up.text), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
+  ok(up && up.inView && /Upgrade \+5/.test(up.text) && await p3.evaluate(() => !!document.querySelector('#bbrow [data-act="up"] svg[aria-label="housing"]')), 'a Cottage upgrade says what the level adds: "' + (up && up.text) + '"');
   await shot(p3, 'shot-390x664-tile.png');
   // a double tap on Close must not fall through to the build button that takes its place
   const dbl = await p3.evaluate(() => { ui.sel = { tile: '6,6' }; render();
@@ -408,6 +408,29 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     'desktop keeps the side panel open with the inspector above it; narrowing the window switches to the phone shell and back ' + JSON.stringify({ wideL, narrowL, backL }));
   ok(e2.length === 0, 'desktop: no console errors ' + JSON.stringify(e2));
   await shot(p2, 'shot-1280.png');
+
+  // --- sprites: every icon is a drawing that exists, and no emoji is left anywhere on screen
+  const art = await p2.evaluate(() => {
+    const missing = [], emoji = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}️]/u, seen = new Set(), text = [];
+    const need = [...Object.keys(RESOURCES), ...Object.keys(BUILDINGS), ...Object.keys(TERRAIN).filter(t => t !== 'plain'), ...HALL_TIERS.map((_, i) => 'hall' + (i + 1))];
+    for (const id of need) if (!SPRITES[id]) missing.push(id);
+    const tables = [RESOURCES, BUILDINGS, HALL_TIERS, TERRAIN].flatMap(t => Object.values(t)).filter(d => d.icon && !d.icon.startsWith('<svg')).map(d => d.name);
+    const scan = () => { for (const u of document.querySelectorAll('use')) { const id = u.getAttribute('href'); seen.add(id); if (!document.querySelector(id)) missing.push(id); }
+      const t = document.body.innerText; if (emoji.test(t)) text.push(t.match(emoji)[0]); };
+    state.run.res = { gold: 1e9, food: 1e9, wood: 1e9, stone: 1e9, iron: 1e9 }; state.meta.crowns = 3; state.run.tiles[HALL_KEY].level = 5; state.run.exp = 3; ui.mapN = 0;
+    let i = 0; for (const id of BUILD_ORDER) { for (let x = 0; x < MAP_SIZE && i >= 0; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] === 'plain' && !state.run.tiles[x + ',' + y]) { state.run.tiles[x + ',' + y] = { kind: 'building', id, level: 2 }; x = MAP_SIZE; break; } }
+    calc = compute(); ui.merchant.left = 20; ui.merchant.x = ui.merchant.y = 50;
+    for (const lv of [1, 2, 3, 4, 5]) { state.run.tiles[HALL_KEY].level = lv; calc = compute();
+      for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; ui.sel = {}; render(); scan(); }
+      ui.sel = { tile: HALL_KEY }; render(); scan(); }
+    const k = Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'cottage'); ui.sel = { tile: k }; render(); scan();
+    ui.sel = { build: 'farm' }; render(); scan();
+    for (const r of [upgrade(HALL_KEY), claimDecree(), expand()]) say(r); toast('x', 'warn'); scan();
+    const sp = document.querySelector('.tile.built > .sp').getBoundingClientRect(), tl = document.querySelector('.tile.built').getBoundingClientRect();
+    return { missing, tables, text, kinds: seen.size, fit: sp.width > tl.width * 0.6 && sp.width <= tl.width && sp.height <= tl.height };
+  });
+  ok(!art.missing.length && !art.tables.length && !art.text.length && art.kinds >= 30 && art.fit, 'every resource, terrain, hall level and building has a sprite that resolves, tiles show them at size, and no emoji is on screen ' + JSON.stringify(art));
+  ok(e2.length === 0, 'sprites: no console errors ' + JSON.stringify(e2));
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();
