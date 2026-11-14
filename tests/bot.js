@@ -131,6 +131,7 @@ function play(seed, opts) {
             const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * sum(a.cost) : 1 / 0;
             if (fresh && score < 1 / 0) score = -1;
+            if (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod') && sim.hallLevel() >= 5) score = -1; // with a Palace the goal is the abdication, not a sixth hall
             if (score < best) { best = score; pick = a; }
           }
         }
@@ -174,11 +175,12 @@ function play(seed, opts) {
     while (si < STAMPS.length && t >= STAMPS[si] * 60) out.stamps[STAMPS[si++]] = snap();
     return false;
   }
+  let buying = true; // buyEvery: N makes the bot buy at every Nth check-in only and just look in (and claim decrees) at the others
   const liveUntil = end => { // played second by second, as with the game open
     while (t < end) {
       sim.advance(0.5); t += 0.5; now = t;
       if (run().starving) out.starve += 0.5;
-      if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1) { sim.collectTaxes(); tapDebt--; } act(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
+      if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1) { sim.collectTaxes(); tapDebt--; } if (buying) act(); else while (sim.decreeDone()) sim.claimDecree(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
       afterStep();
     }
   };
@@ -194,8 +196,9 @@ function play(seed, opts) {
       { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // how many such absences the next hall costs, and the material that sets it
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
+      buying = !opts.buyEvery || i % opts.buyEvery === opts.buyEvery - 1; // with five check-ins a day and buyEvery 5: the one after the night
       const b0 = out.buys, r0 = out.routine, n0 = out.prestiges.length, f0 = out.fresh; liveUntil(t + VISIT * 60);
-      if (out.prestiges.length > n0) liveUntil(runStart + SESSION * 60); // having abdicated, the player stays to found the new town, as at the very start
+      if (out.prestiges.length > n0) { buying = true; liveUntil(runStart + SESSION * 60); } // having abdicated, the player stays to found the new town, as at the very start
       visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
       out.visits.push(visit); out.peakGold = Math.max(out.peakGold, visit.goldRate);

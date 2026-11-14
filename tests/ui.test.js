@@ -118,10 +118,20 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     document.querySelector('#panel [data-act="pursue"][data-id="bread"]').click(); const pinned = state.meta.decree, goal = document.querySelector('#inspector .goal').textContent;
     document.querySelector('#panel .decree [data-act="claim"][data-id="timber"]').click(); const after = { done: Object.keys(state.meta.decreesDone), open: openDecrees().map(d => d.id), pinned: state.meta.decree };
     state.meta.decreesDone.learned = 1; ui.tab = 'build'; ui.sel = {}; render(); const later = document.querySelector('#panel .card').classList.contains('hallhint');
-    const out = { isHint, firstCard, noRoutine, later, none, hint2, farm, cot, res, sel, titles, claimable, pinned, goal, after };
+    const T = sel => { const e = document.querySelector(sel); return e ? e.textContent.replace(/\s+/g, ' ').trim() : null; };
+    state.run.res = { gold: 3000, food: 500, wood: 1500, stone: 300, iron: 0 }; calc = compute(); render();
+    const near = { wait: hallWait(), lumber: T('#panel .card[data-id="lumber"] .delay'), lumberCloser: [...document.querySelectorAll('#panel .card[data-id="lumber"] .adds')].map(e => e.textContent).join('|'), quarry: [...document.querySelectorAll('#panel .card[data-id="quarry"] .adds, #panel .card[data-id="quarry"] .delay')].map(e => e.textContent).join('|'), rest0: T('#panel .card.hallhint') };
+    state.run.away = 7 * 3600; render(); near.rest1 = T('#panel .card.hallhint');
+    state.run.tiles[HALL_KEY].level = 4; state.run.gold = goldForCrowns(CROWN_GOAL, 0) * 1.01; render(); near.abd = T('#panel .card.hallhint'); ui.tab = 'realm'; render(); near.realm = T('#panel .stat.ready');
+    state.run.tiles[HALL_KEY].level = 1; state.run.gold = 0; ui.tab = 'build'; render();
+    const out = { near, isHint, firstCard, noRoutine, later, none, hint2, farm, cot, res, sel, titles, claimable, pinned, goal, after };
     adoptSave(JSON.parse(keep), Date.now()); ui.tab = 'build'; ui.sel = {}; ui.routine = null; render(); return out; });
   ok(guide.isHint && guide.firstCard === 'cottage' && guide.noRoutine && guide.later && /bring it closer/.test(guide.none) && /Next: Manor/.test(guide.none) && /4\.00K/.test(guide.none) && /Not all of this is being produced/.test(guide.none) && /At this rate: Manor in about \d/.test(guide.hint2) && guide.sel === '5,5',
     'a new game opens Build on the Cottage, with no Routine card and the next hall (price, and how long at this rate) below the buildings; once the first decrees are done the hall leads the tab; tapping it selects the hall ' + JSON.stringify([guide.none, guide.hint2]));
+  ok(guide.near.wait > 60 && guide.near.wait < 12 * 3600 && /delays the Manor by about|brings the Manor about/.test(guide.near.lumber + guide.near.lumberCloser + guide.near.quarry) && /delays the Manor|brings the Manor/.test(guide.near.quarry),
+    'with the Manor within reach, build cards say whether buying delays it or brings it closer ' + JSON.stringify([guide.near.lumber, guide.near.lumberCloser, guide.near.quarry]));
+  ok(/Rest begins after 6h 0m more away/.test(guide.near.rest0) && /Rested: time away counts double until you next buy/.test(guide.near.rest1), 'the next-hall card says where the rested bonus stands');
+  ok(/You can abdicate: 20 Crowns on offer/.test(guide.near.abd) && /You can abdicate: 20 Crowns on offer/.test(guide.near.realm || ''), 'when abdication is open the next-hall card and the Realm tab say so, with the Crowns on offer ' + JSON.stringify(guide.near.realm));
   ok(/adds \+\d.*🍞/.test(guide.farm || '') && /adds \+\d.*💰/.test(guide.cot || '') && /adds \+\d.*🪵/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
   ok(guide.titles.length === 3 && /A Roof Overhead/.test(guide.titles[0]) && guide.claimable.join() === 'true,true,false' && guide.pinned === 'bread' && /Daily Bread/.test(guide.goal) && guide.after.done.join() === 'timber' && guide.after.open.join() === 'roof,bread,hamlet' && guide.after.pinned === 'bread',
     'three decrees are open at once; any can be claimed, one can be pursued, and claiming one brings the next ' + JSON.stringify(guide.after));
@@ -173,7 +183,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- abdication offers: none below the minimum, a warning below the goal, the Realm dot only at the goal
   const offer = async n => { await page.evaluate(n => { state.run.repeatables = {}; state.run.gold = goldForCrowns(n, state.meta.crowns) * 1.001; closeModal(); ui.tab = 'realm'; render(); }, n);
     const before = await page.evaluate(() => ({ n: pendingCrowns(), btn: document.querySelector('#panel [data-act="prestige"]').textContent.trim(), cant: document.querySelector('#panel [data-act="prestige"]').classList.contains('cant'),
-      note: [...document.querySelectorAll('#panel .stat')].map(p => p.textContent).find(x => /offer|Not yet/.test(x) && !/Crowns held/.test(x)) || '', dot: !!document.querySelector('#tabs [data-id="realm"] .dot') }));
+      note: [...document.querySelectorAll('#panel .stat:not(.ready)')].map(p => p.textContent).find(x => /offer|Not yet/.test(x) && !/Crowns held/.test(x)) || '', dot: !!document.querySelector('#tabs [data-id="realm"] .dot') }));
     await page.evaluate(() => document.querySelector('#panel [data-act="prestige"]').click());
     const modal = await page.evaluate(() => { const m = document.getElementById('modal'), open = !!document.querySelector('#modal [data-act="yes"]'), text = open ? m.textContent : ''; closeModal(); return { open, text }; });
     return Object.assign(before, { modal: modal.open, warns: /small offer/i.test(modal.text) }); };
@@ -209,7 +219,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- H1: a long loop gap goes through the capped offline path
   await fresh(page);
   const gap = await page.evaluate(() => { const c0 = state.run.clock; lastTick = Date.now() - 20 * 3600 * 1000; simTick(); return { clock: state.run.clock - c0, modal: document.getElementById('modalbox').textContent }; });
-  ok(Math.abs(gap.clock - 10 * 3600) < 1 && /capped at 8 hours/.test(gap.modal) && /20h 0m/.test(gap.modal) && /kept working for 8h 0m/.test(gap.modal) && /rested town works harder.*2h 0m/.test(gap.modal), 'resuming after 20h credits exactly 8h, plus 2h for the two rested hours past the sixth, and says so (' + (gap.clock / 3600).toFixed(3) + 'h)');
+  ok(Math.abs(gap.clock - 10 * 3600) < 1 && /capped at 8 hours/.test(gap.modal) && /20h 0m/.test(gap.modal) && /kept working for 8h 0m/.test(gap.modal) && /Rested: the town did 2h 0m of extra work/.test(gap.modal), 'resuming after 20h credits exactly 8h, plus 2h for the two rested hours past the sixth, and says so (' + (gap.clock / 3600).toFixed(3) + 'h)');
 
   // --- R3: a hidden tab does not step; its timers waking every ~61s must not dodge the cap or stack dialogs
   await fresh(page);

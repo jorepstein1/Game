@@ -75,12 +75,26 @@ function buildAdds(id) { const d = BUILDINGS[id], a = {};
 function researchAdds(r) { const a = {}; if (!r.mult) return a;
   for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
   return a; }
+// One line on the rested bonus: what it is doing now, or how far off it is.
+function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
+  return left <= 0 ? '😴 Rested: time away counts double until you next buy.' : `😴 Rest begins after ${fmtDuration(left)} more away without a purchase; from then time away counts double.`; }
+// Says so when abdication is open, wherever the player might be wondering what to do next.
+const abdicateLine = () => canPrestige() ? `👑 <b>You can abdicate: ${fmt(pendingCrowns())} Crowns on offer</b>${pendingCrowns() >= CROWN_GOAL ? ', a good offer' : `; ${CROWN_GOAL} or more pays best`}. See the Realm tab.` : '';
+// While the next hall is within HALL_NEAR_HOURS of income: what buying this would do to the wait for it.
+const HALL_NEAR_HOURS = 12;
+function hallDelay(cost, adds) {
+  const hall = tileAt(HALL_KEY), w = hallWait(); if (hall.level >= MAX_LEVEL || !isFinite(w) || w > HALL_NEAR_HOURS * 3600 || !canAfford(cost)) return '';
+  const hc = upgradeCost(hall); let after = 0;
+  for (const r in hc) { const need = hc[r] - state.run.res[r] + (cost[r] || 0), rate = calc.base[r] + ((adds && adds[r]) || 0); if (need > 0) after = Math.max(after, rate > 0 ? need / rate : Infinity); }
+  const d = after - w, name = hallName(hall.level + 1);
+  return d > 60 ? `<span class="delay">delays the ${name} by about ${isFinite(d) ? fmtDuration(d) : 'a long while'}</span>` : d < -60 ? `<span class="adds">brings the ${name} about ${fmtDuration(-d)} closer</span>` : '';
+}
 // The next hall: its price and how long the town needs to afford it at today's income. Shown at the top of Build.
 function hallHint() {
   const hall = tileAt(HALL_KEY); if (hall.level >= MAX_LEVEL) return '';
   const c = upgradeCost(hall), w = hallWait(), name = hallName(hall.level + 1);
   const when = w === 0 ? '<b class="ready">Ready to raise: tap here.</b>' : isFinite(w) ? `At this rate: ${name} in about <b>${fmtDuration(w)}</b>.` : 'Not all of this is being produced yet.';
-  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div></div></button>`;
+  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div>${abdicateLine() ? `<div class="when">${abdicateLine()}</div>` : ''}<div class="muted when">${restLine()}</div></div></button>`;
 }
 
 // The routine-upgrades preview walks every building, so it is worked out at most once per action or every two seconds.
@@ -146,6 +160,9 @@ function renderMap() {
   $('maphint').hidden = !pans;
 }
 
+// What one more level of a building adds per second (the same sum the Upgrade button shows).
+function upgradeAdds(k, t) { const d = BUILDINGS[t.id], info = calc.tiles[k], a = {}; if (!d.out || !info) return a;
+  for (const r in d.out) a[r] = d.linear ? d.out[r] * info.mult / info.levelMult : d.out[r] * info.mult; return a; }
 function buildingStats(id) {
   const d = BUILDINGS[id]; let h = '';
   if (d.house) h += `<p class="stat">🏠 Houses <b>${d.house}</b> villagers per level</p>`;
@@ -193,7 +210,7 @@ function renderInspector() {
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * t.level * calc.staff)}</b></p>`;
       if (d.adj) h += `<p class="stat">Adjacency bonus: <b>${pct(info.adj)}</b></p>`;
       if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} 👥${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed — build cottages)</span>` : ''}</p>`;
-      h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${upgradeGain(k, t)} ${costHTML(c)}</button>
+      h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${upgradeGain(k, t)} ${costHTML(c)}</button>${hallDelay(c, upgradeAdds(k, t))}
         <button class="btn alt" data-act="demolish" data-id="${k}">Demolish <span class="cost">refunds</span> ${costHTML(demolishRefund(t), true)}</button></div>`;
       if (d.house) h += housingWarning(d.house * repBonus('housing'));
     }
@@ -247,7 +264,7 @@ function renderPanel() {
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
       const c = buildCost(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id))}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
@@ -283,7 +300,7 @@ function renderPanel() {
       <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
-      <p class="stat">${offerNote(n)}</p>
+      ${ok ? `<p class="stat ready">${abdicateLine().replace(' See the Realm tab.', '')}</p>` : ''}<p class="stat">${offerNote(n)}</p>
       <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} 👑)`}</button></div>
       <hr><h3>Chronicle</h3>
       <p class="stat">Gold earned, all time: <b>${fmt(meta.stats.totalGold)}</b></p>
@@ -408,7 +425,8 @@ function catchUp(sec) {
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${RESOURCES[k].icon} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
-    ${r.rested >= 60 ? `<p class="stat">😴 A rested town works harder: after ${REST_AFTER_HOURS} hours away without a purchase every hour counts ${REST_BONUS === 1 ? 'double' : 'for ' + (1 + REST_BONUS)}, worth <b>${fmtDuration(r.rested)}</b> more.</p>` : ''}
+    ${r.rested >= 60 ? `<p class="stat">😴 Rested: the town did <b>${fmtDuration(r.rested)}</b> of extra work. Time away counts double until you next buy.</p>` : `<p class="muted">${restLine()}</p>`}
+    ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
     ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
     ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `🏰 You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `🏰 ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);

@@ -310,6 +310,7 @@ test('rest counts time away since the last purchase, so looking in without buyin
   const k = Object.keys(run.tiles).find(k => run.tiles[k].kind === 'building'); assert.ok(sim.upgrade(k).ok); assert.strictEqual(run.away, 0);
   assert.strictEqual(sim.creditAway(5 * H).rested, 0, 'after buying, the count starts again');
   const s2 = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).state; assert.strictEqual(s2.run.away, 5 * H, 'saved');
+  { const raw = JSON.parse(sim.serialize()); raw.run.away = 1e200; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.away, 1e9, 'clamped'); raw.run.away = -5; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.away, 0); }
   run.tiles[sim.HALL_KEY].level = 4; run.gold = sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.01; assert.ok(sim.prestige().ok); assert.strictEqual(sim.state.run.away, 0, 'a new kingdom starts unrested');
 });
 

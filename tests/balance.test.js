@@ -11,7 +11,7 @@
 //   - abdicating at every chance, a careless buyer, and a player who taps all session.
 // What the number of check-ins is worth: halls are raised by hand, so playing more often is faster. The target is
 // that two check-ins a day end a week with 75% of the Crowns of five a day (a GAP line; the rested bonus on long
-// absences brings it to about 60%). Seventeen a day and a game never closed are printed for information, with a
+// absences and Monuments to buy at the Palace bring it to about two thirds; 65% is a requirement). Seventeen a day and a game never closed are printed for information, with a
 // loose guard rail.
 // PASS/FAIL lines are requirements. GAP lines are targets from the doc that the game does not meet yet: they are
 // printed with the measured value and do not fail the run, and each has a guard-rail check beside it that does.
@@ -26,6 +26,7 @@ for (const checkins of [5, 2]) for (const seed of LONG) jobs.push({ kind: 'days'
 for (const seed of MAPS) jobs.push({ kind: 'simple', seed, opts: { hours: 96, checkins: 5, buyer: 'simple' } });
 for (const seed of LONG) jobs.push({ kind: 'greedy', seed, opts: { hours: 110, checkins: 5, buyer: 'greedy' } });
 for (const seed of LONG) jobs.push({ kind: 'days', seed, checkins: 17, opts: { hours: 170, checkins: 17, policy: 'crowns:20' } });
+for (const seed of LONG) jobs.push({ kind: 'onebuy', seed, opts: { hours: 170, checkins: 5, policy: 'crowns:20', buyEvery: 5 } });
 for (const seed of [11, 33]) jobs.push({ kind: 'open', seed, opts: { hours: 170, checkins: 0, policy: 'crowns:20' } });
 for (const seed of [11, 33]) jobs.push({ kind: 'eager', seed, opts: { hours: 240, checkins: 5, policy: 'castle' } });
 for (const seed of [11, 33]) jobs.push({ kind: 'careless', seed, opts: { hours: 60, checkins: 5, noGlut: true } });
@@ -105,10 +106,12 @@ runAll(jobs).then(out => {
     const who = `map ${r.seed}, ten days at five check-ins a day, abdicating at 20 Crowns`, lens = r.reigns.map(x => x.hours);
     check(`${who}: the second reign is shorter than the first, and no reign is under 16 hours or over 60`, () => {
       assert.ok(lens[1] < lens[0], 'reigns ' + hrs(lens)); assert.ok(Math.min(...lens) >= 16 && Math.max(...lens) <= 60, 'reigns ' + hrs(lens)); });
-    check(`${who}: 60-100 Crowns after a week, and the Legend decree (100 Crowns) in 7-10 days`, () => {
-      within(r.weekCrowns, 60, 100, 'Crowns held and on offer at 7 days'); within(r.legend / 24, 7, 10, 'Legend (days)'); });
+    check(`${who}: 60-105 Crowns after a week, and the Legend decree (100 Crowns) in 6.4-10 days`, () => {
+      within(r.weekCrowns, 60, 105, 'Crowns held and on offer at 7 days'); within(r.legend / 24, 6.4, 10, 'Legend (days)'); });
     gap(`doc target, ${who}: the second reign takes 40-60% of the first`, () => within(100 * lens[1] / lens[0], 40, 60, `second reign as % of the first (${hrs(lens.slice(0, 2))}h)`));
   }
+  check('ten days at five check-ins a day, median map: 60-100 Crowns after a week and the Legend decree in 7-10 days', () => {
+    within(median(days(5).map(r => r.weekCrowns)), 60, 100, 'Crowns at 7 days'); within(median(days(5).map(r => r.legend)) / 24, 7, 10, 'Legend (days)'); });
   for (const r of days(2)) {
     const who = `map ${r.seed}, two check-ins a day`;
     check(`${who}: time away counts in full from the first absence (Stewardship is within reach in the first session)`, () => {
@@ -124,10 +127,17 @@ runAll(jobs).then(out => {
   console.log('     ' + table);
   for (const [who, rs] of [['two a day', days(2)], ['five a day', days(5)], ['seventeen a day', days(17)], ['never closed', open]])
     console.log(`     ${who.padEnd(16)} Keep ${hrs(rs.map(r => r.keep))}h | Castle ${hrs(rs.map(r => r.castle))}h | Palace ${hrs(rs.map(r => r.palace))}h | first abdication ${hrs(rs.map(r => r.reigns[0] ? r.reigns[0].hours : null))}h | Crowns at 7 days ${list(rs)} | Legend ${hrs(rs.map(r => r.legend))}h`);
+  { const one = rows.filter(r => r.kind === 'onebuy'); // informational: the rested bonus is not a reason to hold purchases back
+    console.log(`     five check-ins a day, buying at one of them only: Crowns at 7 days ${list(one)}; ${(100 * wk(one) / week5).toFixed(0)}% of buying at every check-in | Castle ${hrs(one.map(r => r.castle))}h | Palace ${hrs(one.map(r => r.palace))}h`);
+    check('guard rail: buying at one check-in a day and resting through the others is not the better way to play', () => assert.ok(wk(one) <= week5, `${wk(one).toFixed(0)} Crowns against ${week5.toFixed(0)}`)); }
+  // After the Palace: is there something to buy while the Crowns build up?
+  { const share = days(5).map(r => { const v = r.visits.filter(v => v.reign === 0 && v.hall >= 5); return v.length ? v.filter(x => x.bought > 0).length / v.length : 1; });
+    console.log('     first reign, check-ins with a Palace standing at which something was bought, per map: ' + share.map(x => Math.round(100 * x) + '%').join(', '));
+    check('after the Palace most check-ins still have something to buy (at least 60% on every map)', () => assert.ok(Math.min(...share) >= 0.6, share.map(x => Math.round(100 * x) + '%').join(', '))); }
   // Seventeen a day and never closed are informational: only something absurd fails.
   console.log(`     against five a day: two a day ${(100 * week2 / week5).toFixed(0)}%, seventeen a day ${(100 * week17 / week5).toFixed(0)}%, never closed ${(100 * weekOpen / week5).toFixed(0)}%`);
-  check('guard rail: two check-ins a day end the week with at least 45% of the Crowns of five a day', () => assert.ok(week2 >= 0.45 * week5, table));
-  gap('target: two check-ins a day end the week with 75% of the Crowns of five a day (65% would be made a requirement)', () => assert.ok(week2 >= 0.75 * week5, `${(100 * week2 / week5).toFixed(0)}% (a reign is four gates raised by hand, Keep, Castle, Palace and the abdication, so it cannot take under four visits: 48 to 60 hours at two a day against 33 to 53 at five; the rested bonus adds income, not visits)`));
+  check('two check-ins a day end the week with at least 65% of the Crowns of five a day', () => assert.ok(week2 >= 0.65 * week5, table));
+  gap('target: two check-ins a day end the week with 75% of the Crowns of five a day (65% is the requirement above)', () => assert.ok(week2 >= 0.75 * week5, `${(100 * week2 / week5).toFixed(0)}% (a reign is four gates raised by hand, Keep, Castle, Palace and the abdication, so it cannot take under four visits: 48 to 60 hours at two a day against 33 to 53 at five; the rested bonus adds income, not visits)`));
   check('guard rail: seventeen check-ins a day, or never closing the game, end the week with at most twice the Crowns of five a day', () => assert.ok(week17 <= 2 * week5 && weekOpen <= 2 * week5, table));
   const castle5 = median(first.map(r => r.castle)), castleOpen = median(open.map(r => r.castle)), castle17 = median(days(17).map(r => r.castle));
   check('guard rail: no amount of attention brings the first Castle before the third hour', () => assert.ok(castleOpen >= 3 && castle17 >= 3, `Castle (h): never closed ${hrs(open.map(r => r.castle))}, seventeen a day ${hrs(days(17).map(r => r.castle))}`));

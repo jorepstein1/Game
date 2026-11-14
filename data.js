@@ -136,7 +136,7 @@ const REPEATABLES = [
   { id: 'food', name: 'Granaries', desc: 'Food production +10% per level', hall: 3, cost: { gold: 5e5 }, growth: 2, per: 0.1 },
   { id: 'housing', name: 'Town Planning', desc: 'Housing +10% per level', hall: 3, cost: { gold: 1e6 }, growth: 2, per: 0.1 },
   { id: 'prod', name: 'Royal Roads', desc: 'All production +5% per level', hall: 4, cost: { gold: 2e7 }, growth: 2.5, per: 0.05 },
-  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 2e9 }, growth: 4, per: 1 },
+  { id: 'monument', name: 'Monument', desc: '+1 Crown on your next abdication per level', hall: 5, cost: { gold: 6e8 }, growth: 4, per: 1 },
 ];
 const MAX_REPEATABLE = 500;
 

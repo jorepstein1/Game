@@ -456,7 +456,7 @@ function sanitizeSave(raw, now) {
   for (const k in RESOURCES) run.res[k] = num(res[k], run.res[k], 0, BIG);
   run.gold = num(r.gold, 0, 0, BIG);
   run.clock = num(r.clock, 0, 0, BIG);
-  run.away = num(r.away, 0, 0, BIG);
+  run.away = num(r.away, 0, 0, 1e9);
   run.starving = r.starving === true;
 
   let dropped = 0;
