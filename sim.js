@@ -370,7 +370,7 @@ function creditAway(sec) {
   // costs nothing: 6h + 6h is worth the same as 12h in one stretch.
   // The bonus is credited as extra simulated time, which keeps it honest about housing, food and staffing. So
   // run.clock runs ahead of the real time played, and a town that is starving starves for the extra hours too.
-  const rest = s => REST_BONUS * Math.max(0, s - REST_AFTER_HOURS * 3600), run0 = state.run;
+  const rest = s => REST_BONUS * Math.max(0, s - REST_AFTER_HOURS * 3600) + REST_LONG_BONUS * Math.max(0, s - REST_LONG_AFTER_HOURS * 3600), run0 = state.run;
   const rested = rest(run0.away + credited) - rest(run0.away);
   run0.away += credited;
   const before = Object.assign({}, state.run.res);

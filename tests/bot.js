@@ -140,13 +140,13 @@ function play(seed, opts) {
             if (a.k === 'rep' && (a.id === 'housing' || a.id === 'food')) best = Math.max(best, 0.1);
             if (def && def.house && C.cap > 0) best = Math.max(best, (a.k === 'build' ? def.house * sim.levelMultAt(a.id, sim.kindLevel(a.id)) : def.house * sim.count(a.id)) / C.cap * 0.5);
             return best > 0 ? cost / best : 1e9; };
-          let best = 1 / 0; pick = null;
+          let best = 1 / 0; pick = null; const full = plots().length <= 3;
           for (const a of c) { // c is cheapest first, so ties go to the cheapest
             if (a.k === 'hall') continue;
             const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
             a.why = w < eta ? 'helps' : w === eta ? 'free' : eta === 1 / 0 ? 'nohall' : 'slack';
-            if (fresh && score < 1 / 0) { score = -1; a.why = 'fresh'; }
+            if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) { score = -1; a.why = fresh ? 'fresh' : 'full'; } // a town out of plots expands first, as it would build a new kind first
             if (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod') && sim.hallLevel() >= 5) score = -1; // with a Palace the goal is the abdication, not a sixth hall
             if (score < best) { best = score; pick = a; }
           }
@@ -162,6 +162,7 @@ function play(seed, opts) {
       // Payback: the time the town needs to earn the price, divided by the share of gold income the purchase adds.
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
+      if (pick.k === 'expand' && out.prestiges.length === 0) out.marks['exp' + (run().exp + 1)] = { min: +(now / 60).toFixed(1) };
       pick.go(); bought++; sim.setState(sim.state);
       const dg = sim.calc.base.gold - g0;
       if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
@@ -249,7 +250,7 @@ function summary(seed, opts) {
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
     reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
-    opening: r.opening, felt: r.felt, buildingsAt: Object.fromEntries(['Manor', 'Keep', 'Castle', 'Palace'].filter(n => r.marks[n]).map(n => [n, r.marks[n].buildings])), palaceKinds: r.marks.Palace ? r.marks.Palace.kindsBuilt : null, palaceLevels: r.marks.Palace ? r.marks.Palace.levels : null,
+    opening: r.opening, felt: r.felt, buildingsAt: Object.fromEntries(['Manor', 'Keep', 'Castle', 'Palace'].filter(n => r.marks[n]).map(n => [n, r.marks[n].buildings])), palaceKinds: r.marks.Palace ? r.marks.Palace.kindsBuilt : null, expansions: [1, 2, 3].map(i => r.marks['exp' + i] ? r.marks['exp' + i].min / 60 : null), palaceLevels: r.marks.Palace ? r.marks.Palace.levels : null,
     visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
 }
 // Runs a list of { seed, opts } in parallel child processes; resolves to their summaries in the same order.
@@ -292,6 +293,7 @@ if (require.main === module) {
     console.log(`seed ${r.seed}: Manor ${r.manorMin === null ? '-' : r.manorMin + ' min'}, Keep ${h(r.keep)}, Castle ${h(r.castle)}, Palace ${h(r.palace)}, 15 Crowns on offer ${h(r.crowns15)}, 20 Crowns ${h(r.crowns20)}`);
     console.log(`  opening session: ${r.opening.bought} purchases (${r.opening.kinds.build} builds, ${r.opening.kinds.up} upgrades, ${r.opening.kinds.other} other), gold ${fmt(r.opening.goldRate)}/s after`);
     console.log(`  first of each: ${r.firsts.map(f => f.what + ' ' + f.t).join(', ')}`);
+    console.log(`  expansions bought at ${r.expansions.map(x => x === null ? '-' : x.toFixed(1) + 'h').join(', ')}`);
     console.log(`  buildings standing at ${Object.entries(r.buildingsAt).map(([k, v]) => k + ' ' + v).join(', ')}; kinds built by the Palace ${r.palaceKinds}; levels ${r.palaceLevels ? Object.entries(r.palaceLevels).map(([k, v]) => k + ' ' + v).join(' ') : '-'}`);
     if (first.length) { const b = first.map(v => v.bought);
       console.log(`  purchases per check-in, first reign: median ${median(b)}, most ${Math.max(...b)}, none ${Math.round(100 * b.filter(x => !x).length / b.length)}%, over 4 ${b.filter(x => x > 4).length}; builds median ${median(first.map(v => v.builds))}, kind upgrades median ${median(first.map(v => v.ups))}, other median ${median(first.map(v => v.other))}; histogram ${[0, 1, 2, 3, 4, 5, 6].map(n => n + ':' + b.filter(x => n === 6 ? x >= 6 : x === n).length).join(' ')}`);

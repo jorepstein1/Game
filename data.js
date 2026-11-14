@@ -18,8 +18,8 @@ const HALL_TIERS = [
 // Hall costs set the pace: Manor in the first session, Keep about 4 hours in, Castle about 12, Palace about 37
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
-  { gold: 2500, wood: 1000, stone: 250 }, { gold: 8.4e4, wood: 5.6e4, stone: 3.36e4 },
-  { gold: 4.2e5, stone: 1.68e5 }, { gold: 7e6, stone: 1.4e6, iron: 7e4 },
+  { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.26e5, wood: 8.4e4, stone: 5.04e4 },
+  { gold: 7.56e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
 ];
 const HALL_GROWTH = 50;
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -29,7 +29,7 @@ const PRESTIGE_HALL = 4;         // hall level needed to abdicate
 
 const MAP_SIZE = 11, MAP_MID = 5;
 const MAP_RADIUS = [2, 3, 4, 5]; // unlocked radius around the centre per expansion
-const EXPAND_COST = [{ gold: 1200, wood: 500 }, { gold: 2e6, stone: 4e5 }, { gold: 2e7, iron: 2e5 }];
+const EXPAND_COST = [{ gold: 1.2e4, wood: 5000 }, { gold: 5e5, stone: 1e5 }, { gold: 4e6, iron: 4e4 }];
 // Terrain comes in features (groves, hill ranges, a lake or river) rather than single tiles, so that plots touching
 // two or three tiles of one kind exist on every map. BIOME_TILES is how many tiles of each the features cover before
 // the repair pass (about 28% of the map, as the old per-tile rolls did: more terrain would mean fewer plots and a slower game).
@@ -66,7 +66,7 @@ const CROWN_BONUS = 0.05;        // production bonus per Crown
 // last, so starting over pays. CROWN_GOLD is set so that a first reign is offered 15 Crowns about when its Palace
 // stands (about 37 hours at five check-ins a day) and 20 about half a day later.
 const CROWN_RATE = 13;
-const CROWN_GOLD = 1.1e6;
+const CROWN_GOLD = 1.4e6;
 const CROWN_STEEPEN = 0;
 const CROWN_DEAR_FROM = 30;      // past this many Crowns held the threshold also multiplies by (multiplier / multiplier at 30)^CROWN_DEAR,
 const CROWN_DEAR = 4;            // so later reigns must grow further, not just repeat the first reign faster
@@ -76,6 +76,8 @@ const CLICK_GOLD = 1;            // gold per hand collection: a flourish for the
 const OFFLINE_HOURS = 8;         // offline progress cap without research
 const REST_AFTER_HOURS = 1;      // a rested town: every hour of one absence past this many (within the cap)...
 const REST_BONUS = 1.5;            // ...is worth this much extra, so long absences lose less to the wait for the player
+const REST_LONG_AFTER_HOURS = 8;  // past this many hours of one absence (a night)...
+const REST_LONG_BONUS = 2;         // ...every further hour is worth this much more again, for players who look in twice a day
 const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a summary
 
 // Buildings. out: per second at level 1. work: villagers needed per level.
@@ -84,27 +86,27 @@ const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a su
 // late: { from, growth }: past `from` copies each further copy multiplies the price by `growth` instead of g.
 // upgradeGrowth: worth growth per kind level (default UPGRADE_GROWTH). lift: one-off extra worth step at level 2 (default 1). outGrowth: output per level (default OUT_GROWTH).
 const BUILDINGS = {
-  cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { gold: 5, wood: 10 }, house: 5, linear: true, growth: 3, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 4, growth: 8 }, out: { gold: 0.4 },
+  cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { gold: 5, wood: 10 }, house: 5, linear: true, growth: 2, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 6, growth: 5 }, out: { gold: 0.4 },
     adj: { building: { tavern: 0.5 } }, desc: 'Houses villagers, who pay a modest tax.' },
-  lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 6, upgradeGrowth: 18, lift: 10, late: { from: 2, growth: 40 }, out: { wood: 0.8 },
+  lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { wood: 0.8 },
     adj: { terrain: { forest: 0.5 } }, desc: 'Fells timber. Wants forest nearby.' },
-  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 5, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 3, growth: 15 }, out: { food: 1.5 },
+  farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 2.5, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 5, growth: 6 }, out: { food: 1.5 },
     adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the village. Thrives beside water and mills.' },
-  quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 6, upgradeGrowth: 18, lift: 10, late: { from: 2, growth: 40 }, out: { stone: 0.5 },
+  quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
-  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 60000, wood: 20000, stone: 8000 }, work: 3, upgradeGrowth: 4, out: { gold: 2 },
+  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 8e4, wood: 3e4 }, work: 3, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
     adj: { building: { cottage: 0.2, guild: 0.5 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
-  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 60000, wood: 90000, stone: 30000 }, work: 2, linear: true, upgradeGrowth: LINEAR_UPGRADE_GROWTH, out: { food: 3 },
+  mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 6e4, wood: 9e4 }, work: 2, linear: true, growth: 2, upgradeGrowth: 4, out: { food: 3 },
     desc: 'Grinds grain and boosts every farm beside it.' },
-  tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 360000, wood: 180000 }, work: 2, upgradeGrowth: 4, out: { gold: 2 },
+  tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 360000, wood: 180000 }, work: 2, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
     desc: 'Merry villagers pay more tax. Boosts cottages beside it.' },
-  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, upgradeGrowth: 4, out: { iron: 0.4 },
+  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { iron: 0.4 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron ore. Wants hills nearby.' },
-  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, upgradeGrowth: 4, out: { gold: 12 },
+  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 12 },
     adj: { building: { mine: 0.3, guild: 0.5 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
-  church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, upgradeGrowth: 4, work: 2, glob: 0.05,
+  church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
     desc: 'Inspires the whole realm: +5% to all production per level while fully staffed.' },
-  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, upgradeGrowth: 4, out: { gold: 12 },
+  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4, out: { gold: 12 },
     desc: 'Organises the trades. Boosts markets and blacksmiths beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
