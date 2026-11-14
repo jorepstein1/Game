@@ -91,11 +91,11 @@ const SPRITES = {
     <path d="M9.500 14l6.500-6.300" stroke="#dd7a55" stroke-width="1.600" fill="none"/>
     <rect x="13.500" y="20" width="5" height="7.500" fill="#6b4423"/><rect x="8.500" y="19.500" width="3.200" height="3.200" fill="#8fc7e8" stroke-width="1.100"/>
     <rect x="20.300" y="19.500" width="3.200" height="3.200" fill="#8fc7e8" stroke-width="1.100"/>`,
-  lumber: `<path d="M7.500 19.500v6.500q0 2.500 8.500 2.500t8.500-2.500v-6.500z" fill="#8a5a2b"/><ellipse cx="16" cy="19.500" rx="8.500" ry="3.500" fill="#e2b877"/>
-    <ellipse cx="16" cy="19.500" rx="4" ry="1.500" fill="none" stroke="#a8742f" stroke-width="1.100"/>
-    <path d="M11 24v2.500M20 24.500v2" stroke="#5e3b1a" stroke-width="1.300" fill="none"/>
-    <g transform="translate(13.500 19.500) rotate(38) scale(.9)"><path d="M0 0v-15.500" stroke-width="4.400" fill="none"/><path d="M0 0v-15.500" stroke="#b07a3e" stroke-width="2" fill="none"/>
-    <path d="M-1.500-16.500h3.500v6h-3.500q-3.500 0-6 2-1.500-5 0-10 2.500 2 6 2z" fill="#a9b7c4"/><path d="M-6.300-16.300q-.9 3.300 0 6.600" stroke="#e6edf2" stroke-width="1.200" fill="none"/></g>`,
+  lumber: `<path d="M4 19.500v6q0 3.500 12 3.500t12-3.500v-6z" fill="#8a5a2b"/><ellipse cx="16" cy="19.500" rx="12" ry="4.500" fill="#e2b877"/>
+    <ellipse cx="16" cy="19.500" rx="7" ry="2.500" fill="none" stroke="#a8742f" stroke-width="1.100"/>
+    <path d="M9 25v2.300M22.500 25.300v2M15.500 26v2" stroke="#5e3b1a" stroke-width="1.300" fill="none"/>
+    <g transform="translate(11.600 13.300) rotate(-35)"><path d="M0 0h14" stroke-width="4.400" fill="none"/><path d="M0 0h14" stroke="#b07a3e" stroke-width="2" fill="none"/>
+    <path d="M-1.700-1.800h3.600v3.500q0 3 2 5.300-3.800 1.300-7.600 0 2-2.300 2-5.300z" fill="#a9b7c4"/><path d="M-2.300 6.300q2.400.600 4.800 0" stroke="#e6edf2" stroke-width="1.200" fill="none"/></g>`,
   farm: `<g fill="#e8bf3a"><ellipse cx="16" cy="9.500" rx="3" ry="6.500" transform="rotate(-32 16 20)"/>
     <ellipse cx="16" cy="9.500" rx="3" ry="6.500" transform="rotate(32 16 20)"/><ellipse cx="16" cy="8.500" rx="3" ry="6.500"/></g>
     <path d="M16 4.500v8M13.800 7l2.200 2 2.200-2M13.800 10l2.200 2 2.200-2" stroke="#b08a1c" stroke-width="1.100" fill="none"/>
@@ -132,9 +132,9 @@ const SPRITES = {
     <path d="M14 27.500l1-5M18 27.500l-1-5" stroke="#8f9dab" stroke-width="1.200" fill="none"/>`,
   smith: `<path d="M3.500 15h18q3.500 0 7-2v3.500q-3.500 3.500-8.500 4v2.500l3.500 3v2.500h-15v-2.500l3.500-3v-2.500q-6-.500-8.500-5.500z" fill="#55647a"/>
     <path d="M5 16.500h16q3 0 5.500-1.200" stroke="#a9b7c4" stroke-width="1.300" fill="none"/>
-    <g transform="translate(15.500 14.500) rotate(40)"><path d="M0 0v-10" stroke-width="4.400" fill="none"/><path d="M0 0v-10" stroke="#b07a3e" stroke-width="2" fill="none"/>
-    <rect x="-4.800" y="-14.200" width="9.600" height="5.200" rx="1" fill="#8f9dab"/><path d="M-3.300-12.700h6.600" stroke="#d5dde4" stroke-width="1.200" fill="none"/></g>
-    <path d="M7 9.500l-2.500-1M8.500 6.500l-1.500-2.500M5.500 12.500h-2.500" stroke="#f2a53a" stroke-width="1.500" fill="none"/>`,
+    <g transform="translate(9.500 9.200) rotate(-30)"><path d="M0 0h13" stroke-width="4.400" fill="none"/><path d="M0 0h13" stroke="#b07a3e" stroke-width="2" fill="none"/>
+    <rect x="-2.800" y="-3.800" width="5.600" height="8.800" rx="1" fill="#8f9dab"/><path d="M-1.300 3.500h2.600" stroke="#d5dde4" stroke-width="1.200" fill="none"/></g>
+    <path d="M16 12.500l3-1.500M5.500 13l-2.800-1.200M4 8.500l-1.800-2" stroke="#f2a53a" stroke-width="1.500" fill="none"/>`,
   church: `<rect x="4.500" y="18.500" width="23" height="9" fill="#f1e3c0"/><path d="M3 19l3-5.500h20l3 5.500z" fill="#55708f"/>
     <rect x="12" y="10" width="8" height="17.500" fill="#fbf5e2"/><path d="M10.800 10.500l5.200-6.500 5.200 6.500z" fill="#55708f"/>
     <path d="M16 4.500v-4M14.200 1.800h3.600" stroke-width="1.500" fill="none"/>
