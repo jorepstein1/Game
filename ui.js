@@ -185,19 +185,6 @@ function upgradeGain(k, t) {
   if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' ' + sprite('cottage', 'housing');
   return Object.keys(d.out).map(r => '+' + (d.out[r] * info.mult / info.levelMult).toFixed(1) + ' ' + RESOURCES[r].icon + '/s').join(' ');
 }
-// The Expand card's preview, kept to one line on a 360px phone (about 50 characters of muted text). Kinds that gain
-// nothing are left out. Most detailed first: per terrain; then where the triple sites are, with the doubles as a total;
-// then the totals alone. The full text is the line's tooltip.
-const PREVIEW_CHARS = 50;
-function previewText(p) {
-  const T = Object.keys(p.sites).filter(t => p.sites[t].triple || p.sites[t].double), name = t => TERRAIN[t].name, head = 'New: ' + p.plots + ' plots';
-  const tri = T.reduce((a, t) => a + p.sites[t].triple, 0), dbl = T.reduce((a, t) => a + p.sites[t].double, 0);
-  const grades = (s, sep) => [s.triple ? s.triple + ' triple' : '', s.double ? s.double + ' double' : ''].filter(Boolean).join(sep);
-  const full = head + T.map(t => ' · ' + name(t) + ' ' + grades(p.sites[t], ', ')).join('');
-  const where = head + ' · triple: ' + T.filter(t => p.sites[t].triple).map(t => name(t) + ' ' + p.sites[t].triple).join(', ') + (dbl ? ' · ' + dbl + ' double' : '');
-  const text = full.length <= PREVIEW_CHARS || !T.length ? full : tri && where.length <= PREVIEW_CHARS ? where : head + ' · ' + grades({ triple: tri, double: dbl }, ', ') + ' sites';
-  return { full, text };
-}
 // Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
 function housingWarning(extra) {
   const rate = foodRateAt(calc.cap + extra);
@@ -286,7 +273,7 @@ function renderPanel() {
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
-      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${(p => `<div class="muted" title="${p.full}">${p.text}</div>`)(previewText(expansionPreview()))}${costHTML(c)}</div></button>`; }
+      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
     else h += '<hr><p class="muted">Your borders are as wide as they go. Tap forest, hills or water to clear it for more room.</p>';
   } else if (ui.tab === 'research') {
     const avail = RESEARCH.filter(r => !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));

@@ -403,21 +403,6 @@ function expand() {
   state.run.exp++;
   return { ok: true, icon: 'map', msg: 'Your borders grow!' };
 }
-// What the next expansion would reveal on today's terrain grid, or null at the widest border. plots: new open plots.
-// Per terrain, triple: plots that become triple sites; double: plots that become double sites (from less than double).
-// Buildings are ignored (a site is a plain tile, built on or not), so the counts depend on the terrain alone.
-function expansionPreview() {
-  const run = state.run; if (run.exp >= EXPAND_COST.length) return null;
-  const g = run.terrain, r0 = MAP_RADIUS[run.exp], r1 = MAP_RADIUS[run.exp + 1], o = { plots: 0, sites: {} };
-  for (const t in TERRAIN) if (t !== 'plain') o.sites[t] = { double: 0, triple: 0 };
-  for (let x = MAP_MID - r1; x <= MAP_MID + r1; x++) for (let y = MAP_MID - r1; y <= MAP_MID + r1; y++) {
-    if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
-    const fresh = ringOf(x, y) > r0; if (fresh) o.plots++;
-    for (const t in o.sites) { const was = fresh ? 0 : sameAround(g, x, y, r0, t), now = sameAround(g, x, y, r1, t);
-      if (now >= 3 && was < 3) o.sites[t].triple++; else if (now === 2 && was < 2) o.sites[t].double++; }
-  }
-  return o;
-}
 // Turning forest, hills or water into an open plot: the way forward once the map is full.
 const clearCost = () => scaleCost(CLEAR_COST, Math.pow(CLEAR_GROWTH, state.run.cleared) * researchFx('clearCost'));
 function clearLand(key) {

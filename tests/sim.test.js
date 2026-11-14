@@ -418,24 +418,5 @@ test('terrain is deterministic per seed; version-1 saves keep the old generator'
   assert.deepStrictEqual(plain(sim.sanitizeSave(plain(s), 1000).state.run.terrain), plain(s.run.terrain), 'a saved grid is kept as it is, whichever generator made it');
 });
 
-test('expansionPreview matches a direct recount after expand()', sim => {
-  for (const seed of [11, 22, 33, 44, 12345, 5]) {
-    const s = sim.newState(0); s.run = sim.newRun(seed); sim.setState(s);
-    const run = sim.state.run;
-    if (seed === 5) { const k = Object.keys(recount(run.terrain, 2).k)[0].split(','); run.tiles[k[0] + ',' + k[1]] = { kind: 'building', id: 'cottage', level: 1 }; } // buildings change nothing
-    for (let e = 0; e < sim.EXPAND_COST.length; e++) {
-      const p = plain(sim.expansionPreview()), before = recount(run.terrain, sim.MAP_RADIUS[e]);
-      run.res = { gold: 1e12, food: 1e6, wood: 1e12, stone: 1e12, iron: 1e12 }; assert.ok(sim.expand().ok);
-      const after = recount(run.terrain, sim.mapRadius()), want = { plots: after.open - before.open, sites: {} };
-      for (const t of ['forest', 'hill', 'water']) want.sites[t] = { double: 0, triple: 0 };
-      for (const key in after.k) { const t = key.split(',')[2], was = before.k[key] || 0, now = after.k[key];
-        if (now >= 3 && was < 3) want.sites[t].triple++; else if (now === 2 && was < 2) want.sites[t].double++; }
-      assert.deepStrictEqual(p, want, `seed ${seed}, expansion ${e + 1}`);
-      assert.ok(Object.values(p.sites).reduce((a, x) => a + x.triple, 0) >= 1, 'every expansion shows a triple site');
-    }
-    assert.strictEqual(sim.expansionPreview(), null, 'nothing at the widest border');
-  }
-});
-
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
