@@ -226,7 +226,7 @@ function pay(cost) { if (!canAfford(cost)) return false; for (const r in cost) s
 function grant(cost) { for (const r in cost) state.run.res[r] += cost[r]; }
 function earnGold(g) { state.run.gold += g; state.meta.stats.totalGold += g; }
 
-// Per-kind tile behaviour. A tile is { kind, id, level }; anything that differs between the hall
+// Per-kind tile behaviour. A tile is { kind, id } (the hall also has a level; buildings work at their kind's level); anything that differs between the hall
 // and ordinary buildings lives here, so new kinds can be added without touching the rules below.
 const TILE_KINDS = {
   hall: {
@@ -266,7 +266,6 @@ const copyStep = (id, n) => { const g = buildGrowth(id), late = BUILDINGS[id].la
   return !late || n < late.from ? Math.pow(g, n) : Math.pow(g, late.from - 1) * Math.pow(late.growth, n - late.from + 1); };
 const copiesWorth = (id, n) => { let w = 0; for (let i = 0; i < n; i++) w += copyStep(id, i); return w; };
 const levelWorth = (id, level) => level <= 1 ? 1 : (BUILDINGS[id].lift || 1) * Math.pow(upgradeGrowth(id), level - 1);
-const kindWorth = (id, n, level) => scaleCost(BUILDINGS[id].cost, copiesWorth(id, n) * levelWorth(id, level));
 const buildCost = id => scaleCost(BUILDINGS[id].cost, copyStep(id, count(id)) * levelWorth(id, kindLevel(id)));
 const kindUpgradeCost = id => scaleCost(BUILDINGS[id].cost, Math.max(1, copiesWorth(id, count(id))) * (levelWorth(id, kindLevel(id) + 1) - levelWorth(id, kindLevel(id))));
 
@@ -432,13 +431,9 @@ function upgradeKind(id) {
   state.run.levels[id] = kindLevel(id) + 1;
   return { ok: true, icon: 'up', msg: `Every ${BUILDINGS[id].name} is now level ${state.run.levels[id]}` };
 }
-// A building's share of what its kind has cost: the last copy's rise in worth at today's level. Demolition returns
-// REFUND_SHARE of it. Since every price is a rise in worth, building and demolishing again always loses money.
-function spentOn(t) {
-  const n = count(t.id), L = kindLevel(t.id), hi = kindWorth(t.id, n, L), lo = kindWorth(t.id, Math.max(0, n - 1), L);
-  for (const r in hi) hi[r] -= lo[r] || 0;
-  return hi;
-}
+// A building's share of what its kind has cost: the last copy's rise in worth at today's level, which is exactly
+// what building it again would cost. Demolition returns REFUND_SHARE of it, so building and demolishing always loses money.
+const spentOn = t => scaleCost(BUILDINGS[t.id].cost, copyStep(t.id, Math.max(0, count(t.id) - 1)) * levelWorth(t.id, kindLevel(t.id)));
 function demolishRefund(t) { const o = spentOn(t); for (const r in o) o[r] = Math.min(BIG, Math.floor(o[r] * REFUND_SHARE)); return o; }
 function demolish(key) {
   const t = state.run.tiles[key];
@@ -596,9 +591,9 @@ function sanitizeSave(raw, now) {
   run.away = num(r.away, 0, 0, 1e9);
   run.starving = r.starving === true;
 
-  let dropped = 0;
+  let dropped = 0, mixed = false; const seen = {}; // levels met per kind, for a version-3 save
   const radius = MAP_RADIUS[run.exp], tiles = isObj(r.tiles) ? r.tiles : {}, levels = isObj(r.levels) ? r.levels : {};
-  for (const id of BUILD_ORDER) if (v >= 4) run.levels[id] = int(levels[id], 1, 1, MAX_LEVEL);
+  for (const id of BUILD_ORDER) if (v >= 4) run.levels[id] = int(hasOwn(levels, id) ? levels[id] : 1, 1, 1, MAX_LEVEL);
   for (const k in tiles) {
     const t = tiles[k], mt = /^(\d{1,2}),(\d{1,2})$/.exec(k);
     if (!mt || !isObj(t)) { dropped++; continue; }
@@ -606,9 +601,10 @@ function sanitizeSave(raw, now) {
     if (k === HALL_KEY) { run.tiles[k].level = level; continue; } // the centre is always the hall
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
     run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
-    if (v < 4) run.levels[t.id] = Math.max(run.levels[t.id], level); // version 3 kept a level per building: the kind takes the highest
+    if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = level; run.levels[t.id] = Math.max(run.levels[t.id], level); } // version 3 kept a level per building: the kind takes the highest
     run.terrain[x][y] = 'plain';
   }
+  if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind: each kind of building is now at the level of its best one.');
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;
