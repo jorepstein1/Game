@@ -120,7 +120,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     state.meta.decreesDone.learned = 1; ui.tab = 'build'; ui.sel = {}; render(); const later = document.querySelector('#panel .card').classList.contains('hallhint');
     const T = sel => { const e = document.querySelector(sel); return e ? e.textContent.replace(/\s+/g, ' ').trim() : null; };
     state.run.res = { gold: 3000, food: 500, wood: 1500, stone: 300, iron: 0 }; calc = compute(); render();
-    const near = { wait: hallWait(), lumber: T('#panel .card[data-id="lumber"] .delay'), lumberCloser: [...document.querySelectorAll('#panel .card[data-id="lumber"] .adds')].map(e => e.textContent).join('|'), quarry: [...document.querySelectorAll('#panel .card[data-id="quarry"] .adds, #panel .card[data-id="quarry"] .delay')].map(e => e.textContent).join('|'), rest0: T('#panel .card.hallhint') };
+    const near = { wait: hallWait(), cottage: [...document.querySelectorAll('#panel .card[data-id="cottage"] .delay, #panel .card[data-id="cottage"] .adds')].map(e => e.textContent).filter(x => /Manor/.test(x)).join('|'), lumber: T('#panel .card[data-id="lumber"] .delay'), lumberCloser: [...document.querySelectorAll('#panel .card[data-id="lumber"] .adds')].map(e => e.textContent).join('|'), quarry: [...document.querySelectorAll('#panel .card[data-id="quarry"] .adds, #panel .card[data-id="quarry"] .delay')].map(e => e.textContent).join('|'), rest0: T('#panel .card.hallhint') };
     state.run.away = 7 * 3600; render(); near.rest1 = T('#panel .card.hallhint');
     state.run.tiles[HALL_KEY].level = 4; state.run.gold = goldForCrowns(CROWN_GOAL, 0) * 1.01; render(); near.abd = T('#panel .card.hallhint'); ui.tab = 'realm'; render(); near.realm = T('#panel .stat.ready');
     state.run.tiles[HALL_KEY].level = 1; state.run.gold = 0; ui.tab = 'build'; render();
@@ -128,8 +128,8 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     adoptSave(JSON.parse(keep), Date.now()); ui.tab = 'build'; ui.sel = {}; ui.routine = null; render(); return out; });
   ok(guide.isHint && guide.firstCard === 'cottage' && guide.noRoutine && guide.later && /bring it closer/.test(guide.none) && /Next: Manor/.test(guide.none) && /4\.00K/.test(guide.none) && /Not all of this is being produced/.test(guide.none) && /At this rate: Manor in about \d/.test(guide.hint2) && guide.sel === '5,5',
     'a new game opens Build on the Cottage, with no Routine card and the next hall (price, and how long at this rate) below the buildings; once the first decrees are done the hall leads the tab; tapping it selects the hall ' + JSON.stringify([guide.none, guide.hint2]));
-  ok(guide.near.wait > 60 && guide.near.wait < 12 * 3600 && /delays the Manor by about|brings the Manor about/.test(guide.near.lumber + guide.near.lumberCloser + guide.near.quarry) && /delays the Manor|brings the Manor/.test(guide.near.quarry),
-    'with the Manor within reach, build cards say whether buying delays it or brings it closer ' + JSON.stringify([guide.near.lumber, guide.near.lumberCloser, guide.near.quarry]));
+  ok(guide.near.wait > 60 && guide.near.wait < 12 * 3600 && /delays the Manor by about|brings the Manor about/.test(guide.near.cottage || '') && guide.near.lumber === null && !/Manor/.test(guide.near.lumberCloser + guide.near.quarry),
+    'with the Manor within reach a Cottage card says what buying it does to the wait; workplaces the town could not staff make no such claim ' + JSON.stringify([guide.near.cottage, guide.near.lumber, guide.near.quarry]));
   ok(/Rest begins after 6h 0m more away/.test(guide.near.rest0) && /Rested: time away counts double until you next buy/.test(guide.near.rest1), 'the next-hall card says where the rested bonus stands');
   ok(/You can abdicate: 20 Crowns on offer/.test(guide.near.abd) && /You can abdicate: 20 Crowns on offer/.test(guide.near.realm || ''), 'when abdication is open the next-hall card and the Realm tab say so, with the Crowns on offer ' + JSON.stringify(guide.near.realm));
   ok(/adds \+\d.*🍞/.test(guide.farm || '') && /adds \+\d.*💰/.test(guide.cot || '') && /adds \+\d.*🪵/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
@@ -351,6 +351,19 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await p3.waitForTimeout(400); await p3.touchscreen.tap(dbl.x, dbl.y); await settle(p3);
   ok(await p3.evaluate(() => ui.sel.build) === dbl.id, 'the same button works once the bar has settled');
   await p3.evaluate(() => { ui.sel = {}; render(); });
+  // M1: with the next hall within reach, the phone's Upgrade button says what the purchase does to the wait
+  await fresh(p3);
+  const barHint = await p3.evaluate(() => { const run = state.run; run.tiles[HALL_KEY].level = 2;
+    for (const [k, id, lv] of [['4,5', 'cottage', 4], ['6,5', 'cottage', 4], ['5,4', 'lumber', 2], ['5,6', 'farm', 4], ['4,4', 'quarry', 2], ['6,6', 'market', 1]]) { run.terrain[+k[0]][+k[2]] = 'plain'; run.tiles[k] = { kind: 'building', id, level: lv }; }
+    run.pop = 30; run.res.food = 1e5; calc = compute(); const c = upgradeCost(run.tiles[HALL_KEY]);
+    for (const r in c) run.res[r] = c[r] - calc.base[r] * 3600; run.res.gold = c.gold - calc.base.gold * 1800; calc = compute();
+    ui.sel = { tile: '6,6' }; ui.sheet = false; render();
+    const b = document.querySelector('#buildbar .bb.act.wide'), h = b && b.querySelector('.delay, .adds'), r = h && h.getBoundingClientRect(), br = b && b.getBoundingClientRect(), bar = document.getElementById('buildbar').getBoundingClientRect();
+    return { staff: calc.staff, wait: hallWait(), text: h && h.textContent, shown: !!h && r.height > 8 && r.width > 40 && r.top >= br.top - 1 && r.bottom <= bar.bottom + 1 && r.right <= innerWidth && getComputedStyle(h).display !== 'none', inRow: getComputedStyle(document.querySelector('#inspector .row') || document.body).display, docH: document.documentElement.scrollHeight, vh: innerHeight }; });
+  ok(barHint.staff >= 1 && barHint.wait > 60 && barHint.wait < 12 * 3600 && /(delays the Keep by about|brings the Keep about)/.test(barHint.text || '') && barHint.shown && barHint.docH <= barHint.vh + 1,
+    '390x664, Keep within reach: the bar\'s Upgrade button carries the hint and it is on screen ' + JSON.stringify(barHint));
+  await p3.evaluate(() => { state.run.pop = 5; calc = compute(); render(); });
+  ok(await p3.evaluate(() => calc.staff < 1 && !document.querySelector('#buildbar .bb.act.wide .delay, #buildbar .bb.act.wide .adds')), 'no such estimate while the town is short of hands');
   // R2, adapted to the shell: a drag never scrolls the page; the map pans only when it is bigger than its frame
   for (const [exp, n] of [[0, 5], [1, 7]]) {
     await fresh(p3); await p3.evaluate(exp => { state.run.exp = exp; ui.mapN = 0; render(); }, exp); await settle(p3);

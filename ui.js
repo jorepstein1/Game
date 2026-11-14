@@ -68,9 +68,11 @@ const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(
 const tileAt = key => state.run.tiles[key];
 // What a purchase would add each second at today's multipliers, for its card: "+4.0 💰/s".
 const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0); return ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''; };
-function buildAdds(id) { const d = BUILDINGS[id], a = {};
+// The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
+const staffAfter = work => Math.min(1, state.run.pop / Math.max(1, calc.need + (work || 0)));
+function buildAdds(id) { const d = BUILDINGS[id], a = {}, st = d.work ? staffAfter(d.work) : 1;
   if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob; }
-  else for (const r in d.out || {}) a[r] = d.out[r] * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1);
+  else for (const r in d.out || {}) a[r] = d.out[r] * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
   return a; }
 function researchAdds(r) { const a = {}; if (!r.mult) return a;
   for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
@@ -82,7 +84,9 @@ function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
 const abdicateLine = () => canPrestige() ? `👑 <b>You can abdicate: ${fmt(pendingCrowns())} Crowns on offer</b>${pendingCrowns() >= CROWN_GOAL ? ', a good offer' : `; ${CROWN_GOAL} or more pays best`}. See the Realm tab.` : '';
 // While the next hall is within HALL_NEAR_HOURS of income: what buying this would do to the wait for it.
 const HALL_NEAR_HOURS = 12;
-function hallDelay(cost, adds) {
+function hallDelay(cost, adds, work) {
+  // no estimate while the town is short of hands, or would be after this purchase: the sum below assumes full staffing
+  if (calc.staff < 1 || staffAfter(work) < 1) return '';
   const hall = tileAt(HALL_KEY), w = hallWait(); if (hall.level >= MAX_LEVEL || !isFinite(w) || w > HALL_NEAR_HOURS * 3600 || !canAfford(cost)) return '';
   const hc = upgradeCost(hall); let after = 0;
   for (const r in hc) { const need = hc[r] - state.run.res[r] + (cost[r] || 0), rate = calc.base[r] + ((adds && adds[r]) || 0); if (need > 0) after = Math.max(after, rate > 0 ? need / rate : Infinity); }
@@ -264,7 +268,7 @@ function renderPanel() {
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
       const c = buildCost(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id))}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work)}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
@@ -323,7 +327,7 @@ function renderBuildBar() {
   ui.barMode = t ? 'tile' : tr && tr !== 'plain' ? 'terrain' : 'build';
   if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
     const kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
-    h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}</button>`;
+    h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}${t.kind === 'hall' ? '' : hallDelay(c, upgradeAdds(k, t))}</button>`;
     if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">🧨</span><small>Demolish</small></button>`;
     patch($('bbrow'), h + close);
     patch($('bbinfo'), `<b>${kind.icon(t)} ${kind.name(t)}</b> level ${t.level}`);

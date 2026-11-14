@@ -249,6 +249,7 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act.wide.cant { background: #9c8a7a; border-color: #6b5e52; opacity: 1; }
   .bb.act.wide .cost { font-size: 12px; white-space: nowrap; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
+  .bb.act.wide .delay, .bb.act.wide .adds { color: #ffe9c4; font-size: 12px; line-height: 1.1; }
   .bb.act .ic { font-size: 20px; }
 }
 /* Taller phones have room for more lines of detail under the map (an 11x11 map still fits its 490px at 390x844). */
