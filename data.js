@@ -178,6 +178,7 @@ const DECREES = [
   { id: 'golden', title: 'Golden Age', desc: 'Earn 1M gold per second.', progress: () => [calc.base.gold, 1e6], reward: { gold: 1e9 } },
   { id: 'legend', title: 'Legend', desc: 'Hold 100 Crowns.', progress: () => [state.meta.crowns, 100], reward: { gold: 1e9 } },
 ];
+const DECREES_NEW_IN_V3 = ['coffers', 'veins', 'spires', 'marches', 'scholars', 'roads', 'riches']; // added with save version 3
 // Version-1 saves stored the decree as an index into this (the original) order.
 const LEGACY_DECREE_ORDER = ['roof', 'timber', 'bread', 'hamlet', 'land', 'bedrock', 'learned', 'manor', 'market', 'grist', 'builders',
   'horizons', 'town', 'keep', 'deep', 'anvil', 'bells', 'treasury', 'castle', 'dynasty', 'guild', 'palace', 'golden', 'legend'];

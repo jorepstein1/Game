@@ -90,17 +90,16 @@ test('a save at the level cap keeps every cost, refund and stock finite', sim =>
   assert.strictEqual(again.run.res.gold, sim.state.run.res.gold, 'the refund survives a save and load');
 });
 
-test('creditAway: caps at 8h, 24h with Stewardship; reports the cap; hours past the sixth of an absence count double', sim => {
+test('creditAway: caps at 8h, 24h with Stewardship; reports the cap and the rested bonus', sim => {
   town(sim);
   let r = sim.creditAway(20 * 3600);
   assert.strictEqual(r.credited, 8 * 3600); assert.strictEqual(r.capped, true); assert.strictEqual(r.capHours, 8); assert.strictEqual(r.away, 20 * 3600);
   const rest = h => sim.REST_BONUS * Math.max(0, h - sim.REST_AFTER_HOURS) * 3600;
   assert.strictEqual(r.rested, rest(8)); near(sim.state.run.clock, 8 * 3600 + rest(8), 1e-6, 'clock: the capped time plus the rested bonus on it');
-  r = sim.creditAway(30);
+  sim.state.run.away = 0; r = sim.creditAway(30);
   assert.strictEqual(r.credited, 30); assert.strictEqual(r.capped, false); assert.strictEqual(r.rested, 0, 'a short absence earns no bonus');
-  assert.strictEqual(sim.creditAway(sim.REST_AFTER_HOURS * 3600).rested, 0); assert.strictEqual(sim.creditAway(7 * 3600).rested, rest(7), 'only the hours past the threshold');
   { const c0 = sim.state.run.clock; sim.advance(7 * 3600); near(sim.state.run.clock - c0, 7 * 3600, 1e-6, 'an open game earns none'); }
-  sim.state.run.research.steward = 1;
+  sim.state.run.research.steward = 1; sim.state.run.away = 0;
   r = sim.creditAway(30 * 3600);
   assert.strictEqual(r.credited, 24 * 3600); assert.strictEqual(r.capHours, 24); assert.strictEqual(r.rested, rest(24), 'the bonus is worked out on the capped time');
   for (const bad of [-5, NaN, Infinity, undefined]) assert.strictEqual(sim.creditAway(bad).credited, 0, 'bad gap ' + bad);
@@ -143,7 +142,7 @@ test('sanitizeSave coerces and clamps every field', sim => {
   const { state: s, notes } = sim.sanitizeSave(evil, 1000);
   assert.deepStrictEqual(Object.keys(s).sort(), ['last', 'meta', 'run', 'v']);
   assert.strictEqual(s.last, 1000);
-  assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, null);
+  assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, 'coffers', 'an unknown decree: the old chain counts as finished, the newer decrees are open');
   assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, started: 1000 });
   assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
   assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
@@ -178,8 +177,8 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
     stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: 100 } };
   const { state: s, notes } = sim.sanitizeSave(v1, 1000);
   assert.strictEqual(s.v, 3); assert.strictEqual(s.last, 900);
-  assert.strictEqual(s.meta.decree, 'dynasty', 'index 19 of the old order');
-  { const at = sim.DECREES.findIndex(d => d.id === 'dynasty'); assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, at).map(d => d.id)), 'every decree before it counts as claimed'); }
+  assert.strictEqual(s.meta.decree, 'coffers', 'the decrees added since come first'); assert.ok(!s.meta.decreesDone.dynasty && s.meta.decreesDone.castle, 'index 19 of the old order (A New Dynasty) is where the old chain had got to');
+  { const at = sim.DECREES.findIndex(d => d.id === 'dynasty'); assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, at).map(d => d.id).filter(id => !sim.DECREES_NEW_IN_V3.includes(id))), 'every older decree before it counts as claimed'); }
   assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 0);
   assert.deepStrictEqual(plain(s.run.tiles), { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'cottage', level: 8 },
     '4,5': { kind: 'building', id: 'farm', level: 6 }, '6,5': { kind: 'building', id: 'smith', level: 3 } });
@@ -190,7 +189,7 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   assert.strictEqual(s.run.gold, 3e6); assert.deepStrictEqual(plain(s.run.research), { axes: 1, tithes: 1 });
   assert.ok(notes.some(n => /predates the rebalance/.test(n)) && notes.some(n => /1 building in this save was not recognised/.test(n)), notes.join('|'));
   sim.setState(s); assert.strictEqual(sim.pendingCrowns(), sim.crownsFor(3e6, 19));
-  assert.strictEqual(sim.sanitizeSave({ seed: 1, res: {}, tiles: {}, quest: 24 }, 1000).state.meta.decree, null, 'a finished v1 chain stays finished');
+  { const fin = sim.sanitizeSave({ seed: 1, res: {}, tiles: {}, quest: 24 }, 1000).state.meta; assert.strictEqual(fin.decree, 'coffers', 'a finished v1 chain is offered the decrees added since'); assert.strictEqual(Object.keys(fin.decreesDone).length, sim.DECREES.length - sim.DECREES_NEW_IN_V3.length); }
 });
 
 test('starvation is recoverable: villagers leave until the farms can feed the rest', sim => {
@@ -297,6 +296,23 @@ test('Stewardship is kept when a new kingdom is founded; other research is not',
   assert.deepStrictEqual(plain(sim.state.run.research), { steward: 1 }); assert.strictEqual(sim.researchFx('offlineHours'), 24);
 });
 
+test('rest counts time away since the last purchase, so looking in without buying costs nothing', sim => {
+  const H = 3600, away = (...hours) => { town(sim, 2); const run = sim.state.run; run.research.steward = 1; run.pop = 30; run.res = { gold: 100, food: 1e6, wood: 100, stone: 100, iron: 0 }; sim.setState(sim.state);
+    let rested = 0; for (const h of hours) rested += sim.creditAway(h * H).rested; return { rested, clock: run.clock, gold: run.res.gold, away: run.away }; };
+  const one = away(12), two = away(6, 6), six = away(2, 2, 2, 2, 2, 2);
+  assert.strictEqual(one.rested, 6 * H * sim.REST_BONUS); assert.strictEqual(two.rested, one.rested, '6h + 6h'); assert.strictEqual(six.rested, one.rested, 'six looks');
+  near(two.clock, one.clock, 1e-6, 'the same simulated time'); near(two.gold, one.gold, one.gold * 0.01, 'and the same gold, to within the step size');
+  near(away(8, 8, 8).rested, away(24).rested, 1e-6, 'three nights against one day'); assert.strictEqual(one.away, 12 * H);
+  // a purchase ends the rest; a preview of routine upgrades and a refused purchase do not
+  away(5); const run = sim.state.run; run.res.gold = 1e9; run.res.wood = 1e9; run.res.stone = 1e9;
+  sim.routineUpgrades(true); assert.strictEqual(run.away, 5 * H, 'a preview spends nothing');
+  assert.strictEqual(sim.pay({ gold: 1e12 }), false); assert.strictEqual(run.away, 5 * H);
+  const k = Object.keys(run.tiles).find(k => run.tiles[k].kind === 'building'); assert.ok(sim.upgrade(k).ok); assert.strictEqual(run.away, 0);
+  assert.strictEqual(sim.creditAway(5 * H).rested, 0, 'after buying, the count starts again');
+  const s2 = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).state; assert.strictEqual(s2.run.away, 5 * H, 'saved');
+  run.tiles[sim.HALL_KEY].level = 4; run.gold = sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.01; assert.ok(sim.prestige().ok); assert.strictEqual(sim.state.run.away, 0, 'a new kingdom starts unrested');
+});
+
 test('decrees: three are open at a time, any of them can be claimed, one is pursued, none expires', sim => {
   const ids = () => plain(sim.openDecrees().map(d => d.id));
   assert.strictEqual(sim.DECREE_CHOICES, 3); assert.deepStrictEqual(ids(), ['roof', 'timber', 'bread']);
@@ -321,13 +337,13 @@ test('version-2 saves (one decree at a time) migrate: everything before the curr
   const raw = JSON.parse(sim.serialize()); raw.v = 2; delete raw.meta.decreesDone; raw.meta.decree = 'keep';
   let s = sim.sanitizeSave(raw, 1000).state;
   assert.strictEqual(s.v, 3); assert.strictEqual(s.meta.decree, 'keep');
-  assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, sim.DECREES.findIndex(d => d.id === 'keep')).map(d => d.id)));
-  assert.ok(s.meta.decreesDone.coffers, 'a decree added since, earlier in the list, is not handed back');
-  sim.setState(s); assert.strictEqual(sim.openDecrees()[0].id, 'keep');
+  assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, sim.DECREES.findIndex(d => d.id === 'keep')).map(d => d.id).filter(id => id !== 'coffers')));
+  sim.setState(s); assert.deepStrictEqual(plain(sim.openDecrees().map(d => d.id)).slice(0, 2), ['coffers', 'keep'], 'a decree added since is still to be had');
   raw.meta.decree = null; s = sim.sanitizeSave(raw, 1000).state;
-  assert.strictEqual(s.meta.decree, null); assert.strictEqual(Object.keys(s.meta.decreesDone).length, sim.DECREES.length, 'a finished chain stays finished');
+  assert.deepStrictEqual(plain(sim.DECREES.filter(d => !s.meta.decreesDone[d.id]).map(d => d.id)), plain(sim.DECREES_NEW_IN_V3), 'a finished chain keeps what it claimed and is offered the decrees added since');
+  assert.strictEqual(s.meta.decree, 'coffers');
   raw.meta.decree = 'gone'; const out = sim.sanitizeSave(raw, 1000);
-  assert.strictEqual(out.state.meta.decree, null); assert.ok(out.notes.some(n => /no longer exists/.test(n)));
+  assert.strictEqual(out.state.meta.decree, 'coffers'); assert.ok(out.notes.some(n => /no longer exists/.test(n)));
   raw.v = 3; raw.meta.decree = 'timber'; raw.meta.decreesDone = { roof: 1, nonsense: 1, bread: 0, '<b>': 1 };
   s = sim.sanitizeSave(raw, 1000).state; assert.deepStrictEqual(plain(s.meta.decreesDone), { roof: 1 }); assert.strictEqual(s.meta.decree, 'timber');
   raw.meta.decree = 'palace'; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.meta.decree, 'timber', 'a pursuit that is not open falls back to the first open decree');

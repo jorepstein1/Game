@@ -80,7 +80,7 @@ function hallHint() {
   const hall = tileAt(HALL_KEY); if (hall.level >= MAX_LEVEL) return '';
   const c = upgradeCost(hall), w = hallWait(), name = hallName(hall.level + 1);
   const when = w === 0 ? '<b class="ready">Ready to raise: tap here.</b>' : isFinite(w) ? `At this rate: ${name} in about <b>${fmtDuration(w)}</b>.` : 'Not all of this is being produced yet.';
-  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Everything you buy first puts it off.</div></div></button>`;
+  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div></div></button>`;
 }
 
 // The routine-upgrades preview walks every building, so it is worked out at most once per action or every two seconds.
@@ -237,8 +237,10 @@ function renderPanel() {
   let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
     const routine = routinePreview(), span = ROUTINE_SECONDS >= 3600 ? ROUTINE_SECONDS / 3600 + ' hours' : Math.round(ROUTINE_SECONDS / 60) + ' minutes';
-    h += hallHint();
-    h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
+    // A new player is sent to the Cottage first: the next hall leads the tab only once the first decrees are done.
+    const hallFirst = hall > 1 || meta.crowns > 0 || !!meta.decreesDone.learned;
+    if (hallFirst) h += hallHint();
+    if (routine.count || routine.saving)     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
       <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.${routine.saving ? ' <b>Holding back the price of the ' + hallName(hall + 1) + ', which is under an hour away.</b>' : ''}</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
@@ -247,6 +249,7 @@ function renderPanel() {
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
         <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
+    if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
       h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">🗺️</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
     else h += '<hr><p class="muted">Your borders are as wide as they go. Tap forest, hills or water to clear it for more room.</p>';
@@ -405,7 +408,7 @@ function catchUp(sec) {
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${RESOURCES[k].icon} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
-    ${r.rested >= 60 ? `<p class="stat">😴 A rested town works harder: after ${REST_AFTER_HOURS} hours away every hour counts ${REST_BONUS === 1 ? 'double' : 'for ' + (1 + REST_BONUS)}, worth <b>${fmtDuration(r.rested)}</b> more.</p>` : ''}
+    ${r.rested >= 60 ? `<p class="stat">😴 A rested town works harder: after ${REST_AFTER_HOURS} hours away without a purchase every hour counts ${REST_BONUS === 1 ? 'double' : 'for ' + (1 + REST_BONUS)}, worth <b>${fmtDuration(r.rested)}</b> more.</p>` : ''}
     ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
     ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `🏰 You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `🏰 ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);

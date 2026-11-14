@@ -23,6 +23,7 @@ function newRun(seed, crowns) {
   const run = { seed, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
     research: {}, repeatables: {}, cleared: 0, starving: false,
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
+    away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
     gold: 0 };      // gold earned this run
   run.tiles[HALL_KEY] = { kind: 'hall', id: 'hall', level: 1 };
   if (crowns > 0) for (const r in HEAD_START) run.res[r] += HEAD_START[r];
@@ -83,7 +84,7 @@ const levelMult = t => BUILDINGS[t.id].linear ? t.level : Math.pow(2, t.level - 
 function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.min(BIG, Math.ceil(cost[r] * k)); return o; } // never Infinity
 function addCost(total, cost) { for (const r in cost) total[r] = (total[r] || 0) + cost[r]; return total; }
 const canAfford = cost => Object.keys(cost).every(r => state.run.res[r] >= cost[r]);
-function pay(cost) { if (!canAfford(cost)) return false; for (const r in cost) state.run.res[r] -= cost[r]; return true; }
+function pay(cost) { if (!canAfford(cost)) return false; for (const r in cost) state.run.res[r] -= cost[r]; state.run.away = 0; /* a purchase ends the rest */ return true; }
 function grant(cost) { for (const r in cost) state.run.res[r] += cost[r]; }
 function earnGold(g) { state.run.gold += g; state.meta.stats.totalGold += g; }
 
@@ -237,8 +238,14 @@ function advance(sec) {
 function creditAway(sec) {
   sec = sec > 0 && isFinite(sec) ? sec : 0;
   const capHours = researchFx('offlineHours'), credited = Math.min(sec, capHours * 3600);
-  // A rested town works harder: hours past REST_AFTER_HOURS count for more. Only time away earns it, never an open game.
-  const rested = REST_BONUS * Math.max(0, credited - REST_AFTER_HOURS * 3600);
+  // A rested town works harder: time away past REST_AFTER_HOURS counts for more. Only time away earns it, never an
+  // open game. Rest is counted since the last purchase, not since the last load, so looking in without buying
+  // costs nothing: 6h + 6h is worth the same as 12h in one stretch.
+  // The bonus is credited as extra simulated time, which keeps it honest about housing, food and staffing. So
+  // run.clock runs ahead of the real time played, and a town that is starving starves for the extra hours too.
+  const rest = s => REST_BONUS * Math.max(0, s - REST_AFTER_HOURS * 3600), run0 = state.run;
+  const rested = rest(run0.away + credited) - rest(run0.away);
+  run0.away += credited;
   const before = Object.assign({}, state.run.res);
   advance(credited + rested);
   const gains = {};
@@ -316,7 +323,7 @@ function hallWait() {
 // While the next hall is within ROUTINE_RESERVE_SECONDS of income, routine upgrades leave its price in the stores.
 function routineReserve() { return hallWait() <= ROUTINE_RESERVE_SECONDS ? upgradeCost(state.run.tiles[HALL_KEY]) : {}; }
 function routineUpgrades(preview) {
-  const run = state.run, keep = preview ? JSON.stringify({ tiles: run.tiles, res: run.res }) : null, spent = {};
+  const run = state.run, keep = preview ? JSON.stringify({ tiles: run.tiles, res: run.res, away: run.away }) : null, spent = {};
   calc = compute(); const reserve = routineReserve();
   let n = 0;
   for (; n < ROUTINE_MAX; n++) {
@@ -333,7 +340,7 @@ function routineUpgrades(preview) {
     if (!best) break;
     pay(bestCost); run.tiles[best].level++; addCost(spent, bestCost);
   }
-  if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; }
+  if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; run.away = o.away; }
   calc = compute();
   return n ? { ok: true, count: n, spent, msg: `⬆️ ${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
 }
@@ -420,7 +427,7 @@ function sanitizeSave(raw, now) {
   if (v > SAVE_VERSION) throw new Error('save is from a newer version');
   // Version 2 had one decree at a time, claimed in order: everything before the current one counts as claimed.
   if (v < 3) { const at = o.meta.decree === null ? DECREES.length : DECREES.findIndex(d => d.id === o.meta.decree), done = {};
-    if (o.meta.decree !== undefined) for (const d of DECREES.slice(0, at < 0 ? DECREES.length : at)) done[d.id] = 1;
+    if (o.meta.decree !== undefined) for (const d of DECREES.slice(0, at < 0 ? DECREES.length : at)) if (!DECREES_NEW_IN_V3.includes(d.id)) done[d.id] = 1; // newer ones are still to be had
     if (at < 0 && o.meta.decree !== undefined) notes.push('A decree in this save no longer exists; the decree chain was marked complete.');
     o = Object.assign({}, o, { meta: Object.assign({}, o.meta, { decreesDone: done }) }); }
 
@@ -449,6 +456,7 @@ function sanitizeSave(raw, now) {
   for (const k in RESOURCES) run.res[k] = num(res[k], run.res[k], 0, BIG);
   run.gold = num(r.gold, 0, 0, BIG);
   run.clock = num(r.clock, 0, 0, BIG);
+  run.away = num(r.away, 0, 0, BIG);
   run.starving = r.starving === true;
 
   let dropped = 0;
