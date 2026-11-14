@@ -45,10 +45,7 @@ header h1 { margin: 0; font-size: 26px; letter-spacing: 2px; color: var(--gold);
 .chip small { color: var(--good); font-variant-numeric: tabular-nums; }
 .chip small.neg, .chip.bad b { color: var(--bad); }
 .chip.bad { background: #f3c9b9; animation: pulse 1s infinite; }
-.chip.buff { background: #ffe58a; border-color: var(--gold); font-weight: bold; }
 .chip.crown { background: #f7e7a3; }
-.chip.merchant { background: #ffe58a; border-color: var(--gold); animation: pulse 1s infinite; }
-.chip.merchant small { color: var(--ink2); }
 
 main { display: flex; gap: 16px; padding: 16px; max-width: 1200px; margin: 0 auto; align-items: flex-start; }
 #left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
@@ -87,11 +84,8 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 .tile .pv { left: 50%; top: 50%; transform: translate(-50%, -50%); background: #fffd; color: var(--good); }
 .tile .bn { position: absolute; left: 2px; top: 1px; font-size: 10px; font-family: system-ui, sans-serif; font-weight: 700; color: #1d4d1d; text-shadow: 0 0 2px #fff; white-space: nowrap; letter-spacing: -.3px; }
 
-#merchant {
-  position: absolute; font-size: 40px; background: #ffe58a; border: 3px solid var(--gold); border-radius: 50%;
-  width: 68px; height: 68px; z-index: 10; animation: bob 1s infinite alternate ease-in-out; box-shadow: 0 0 18px #ffd84a;
-}
 #strip { display: flex; }
+#clicker[hidden] { display: none; }
 .sheethead, #inspector .goal { display: none; }
 #clicker {
   flex: 1; padding: 14px; font-size: 20px; font-weight: bold; color: #3a2a05;
@@ -162,7 +156,6 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
 #modalbox .cost span { margin-right: 4px; }
 
 @keyframes pulse { 50% { filter: brightness(1.25); } }
-@keyframes bob { to { transform: translateY(-8px) rotate(6deg); } }
 @keyframes pop { 0% { transform: scale(.4); } 70% { transform: scale(1.2); } }
 @keyframes rise { to { transform: translateY(-60px); opacity: 0; } }
 @keyframes sheet { from { transform: translateY(30%); opacity: .4; } }
@@ -256,6 +249,7 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act.wide.cant { background: #9c8a7a; border-color: #6b5e52; opacity: 1; }
   .bb.act.wide .cost { font-size: 12px; white-space: nowrap; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
+  .bb.act.wide .delay, .bb.act.wide .adds { color: #ffe9c4; font-size: 12px; line-height: 1.1; }
   .bb.act .ic { font-size: 20px; }
 }
 /* Taller phones have room for more lines of detail under the map (an 11x11 map still fits its 490px at 390x844). */
@@ -273,3 +267,14 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   #panel { max-height: calc(100vh - 100px); }
 }
 @media (prefers-reduced-motion: reduce) { aside.open #panel { animation: none; } }
+
+/* what a purchase adds, the next-hall card and the open decrees */
+.adds { display: block; font-size: 13px; color: #2f6b1f; }
+.card.hallhint { border-style: dashed; }
+.card.hallhint .when { margin-top: 2px; }
+.card.hallhint .ready { color: #2f6b1f; }
+.decree { border: 1px solid #d9c9a3; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.decree.on { border-color: #b8860b; background: #fff8e3; }
+.decree h3 { margin: 0 0 4px; }
+.delay { display: block; font-size: 13px; color: #a04a00; }
+.stat.ready { color: #2f6b1f; }
