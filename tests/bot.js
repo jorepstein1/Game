@@ -24,7 +24,8 @@
 //      already holds far more of than anything it wants costs (noGlut: true turns that off: a careless buyer).
 // A second, much simpler buyer (buyer: 'simple') cross-checks that the milestones belong to the game and not to
 // rule 4: it keeps rules 1 to 3, buys the hall when it can, and otherwise buys the cheapest thing on offer that
-// costs at most a tenth (share) of what the next hall costs. It estimates nothing.
+// costs at most a tenth (share) of what the next hall costs. It estimates nothing. buyer: 'greedy' is the same with
+// no limit: it always takes the cheapest thing it can pay for, so it never saves for a hall on purpose.
 // Policy: none = never abdicate; castle = as soon as the game allows; crowns:N = whenever N Crowns are on offer;
 // once:N = the first time only; cycle:N:M = at N Crowns until minute M, then build up; pct:P = when the Crown
 // multiplier would rise by P percent. Taps (option taps): hand collections per second while the game is open.
@@ -44,14 +45,14 @@ function play(seed, opts) {
   const GLUT = !(opts && opts.noGlut);
   // Check-in play: an opening session played second by second, then the bot is away between check-ins. Time away is
   // credited through creditAway, as the game does on load, and each check-in buys what the policy allows at once.
-  const SIMPLE = opts.buyer === 'simple' ? opts.share || 0.1 : 0; // see act()
+  const SIMPLE = opts.buyer === 'greedy' ? Infinity : opts.buyer === 'simple' ? opts.share || 0.1 : 0; // see act()
   const CHECKINS = (opts && opts.checkins) || 0, SESSION = (opts && opts.session) || 25, VISIT = (opts && opts.visit) || 3;
   const GAPS = !CHECKINS ? [] : CHECKINS === 1 ? [24] : CHECKINS === 2 ? [12, 12] : Array(CHECKINS - 1).fill(16 / (CHECKINS - 1)).concat(8); // hours; the last is the night
   const sim = loadSim(patch);
   const s = sim.newState(0); s.run = sim.newRun(seed);
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], buys: 0, routine: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], buys: 0, fresh: 0, routine: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -137,6 +138,7 @@ function play(seed, opts) {
       }
       out.spent[pick.k] += pick.cost.gold || 0;
       if (pick.k === 'up' && Object.keys(pick.cost).every(r => pick.cost[r] <= Math.max(0, C.base[r] + (r === 'food' ? C.eaten : 0)) * sim.ROUTINE_SECONDS)) out.routine++; // what the game's one-tap "routine upgrades" would have covered
+      if (pick.k === 'research' || pick.k === 'expand' || pick.k === 'hall' || (pick.k === 'build' && sim.count(pick.id) === 0)) out.fresh++;
       out.buys++; const what = pick.k === 'build' ? pick.id : pick.k === 'research' ? 'research' : pick.k === 'hall' ? 'hall' + (sim.hallLevel() + 1) : null;
       if (what && !seen[what]) { seen[what] = 1; out.firsts.push({ what, t: now < 3600 ? Math.round(now) + 's' : (now / 3600).toFixed(1) + 'h' }); }
       // Payback: the time the town needs to earn the price, divided by the share of gold income the purchase adds.
@@ -165,7 +167,7 @@ function play(seed, opts) {
       const cur = 1 + sim.CROWN_BONUS * sim.state.meta.crowns, next = 1 + sim.CROWN_BONUS * (sim.state.meta.crowns + sim.pendingCrowns());
       if (POLICY === 'castle' || (POLICY.startsWith('pct:') && next / cur >= 1 + POLICY.slice(4) / 100) || sim.pendingCrowns() >= NEED || (CYCLE && t < CYCLE[1] * 60 && sim.pendingCrowns() >= CYCLE[0]) || (POLICY.startsWith('once:') && !out.prestiges.length && sim.pendingCrowns() >= +POLICY.slice(5))) {
         const n = sim.pendingCrowns(); out.prestiges.push({ min: +(t / 60).toFixed(1), runMin: +((t - runStart) / 60).toFixed(1), hall, crowns: n, total: sim.state.meta.crowns + n, boost: '+' + Math.round((next / cur - 1) * 100) + '%' });
-        sim.prestige(); const kept = sim.state.run.research; sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.state.run.research = kept; sim.setState(sim.state); hall = 1; runStart = t; reignStart = t; // same map every reign: strategies differ only in timing
+        sim.prestige(); const kept = sim.state.run.research; sim.state.run = sim.newRun(seed, sim.state.meta.crowns); sim.state.run.research = kept; sim.setState(sim.state); hall = sim.hallLevel(); runStart = t; reignStart = t; // same map every reign: strategies differ only in timing
         return true;
       }
     }
@@ -192,9 +194,9 @@ function play(seed, opts) {
       { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // how many such absences the next hall costs, and the material that sets it
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
-      const b0 = out.buys, r0 = out.routine, n0 = out.prestiges.length; liveUntil(t + VISIT * 60);
+      const b0 = out.buys, r0 = out.routine, n0 = out.prestiges.length, f0 = out.fresh; liveUntil(t + VISIT * 60);
       if (out.prestiges.length > n0) liveUntil(runStart + SESSION * 60); // having abdicated, the player stays to found the new town, as at the very start
-      visit.bought = out.buys - b0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
+      visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.decisions = visit.bought - (out.routine - r0); // a check-in is a few minutes with the game open
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
       out.visits.push(visit); out.peakGold = Math.max(out.peakGold, visit.goldRate);
     }
@@ -220,7 +222,7 @@ function summary(seed, opts) {
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
     reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
-    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, decisions: v.decisions, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
+    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, fresh: v.fresh, decisions: v.decisions, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, runGold: v.runGold, pending: v.pending, starving: v.starving })) };
 }
 // Runs a list of { seed, opts } in parallel child processes; resolves to their summaries in the same order.
 function runAll(todo, jobs) {

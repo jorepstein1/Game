@@ -266,3 +266,12 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   #panel { max-height: calc(100vh - 100px); }
 }
 @media (prefers-reduced-motion: reduce) { aside.open #panel { animation: none; } }
+
+/* what a purchase adds, the next-hall card and the open decrees */
+.adds { display: block; font-size: 13px; color: #2f6b1f; }
+.card.hallhint { border-style: dashed; }
+.card.hallhint .when { margin-top: 2px; }
+.card.hallhint .ready { color: #2f6b1f; }
+.decree { border: 1px solid #d9c9a3; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.decree.on { border-color: #b8860b; background: #fff8e3; }
+.decree h3 { margin: 0 0 4px; }

@@ -92,7 +92,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const rtn = await page.evaluate(() => { const run = state.run; let k = null;
     for (let x = 0; x < 11 && !k; x++) for (let y = 4; y < 11; y++) if (!run.tiles[x + ',' + y] && run.terrain[x][y] === 'plain') { k = x + ',' + y; break; }
     run.tiles[k] = { kind: 'building', id: 'cottage', level: 1 }; ui.tab = 'build'; ui.sel = {}; ui.routine = null; render();
-    const card = document.querySelector('#panel .card[data-act="routine"]'), first = document.querySelector('#panel .card'), n = routineUpgrades(true).count, lv = run.tiles[k].level, text = card.textContent.replace(/\s+/g, ' ').trim();
+    const card = document.querySelector('#panel .card[data-act="routine"]'), first = document.querySelector('#panel .card:not(.hallhint)'), n = routineUpgrades(true).count, lv = run.tiles[k].level, text = card.textContent.replace(/\s+/g, ' ').trim();
     const sum = () => Object.values(run.tiles).reduce((a, t) => a + t.level, 0), before = sum(), hall = hallLevel();
     document.getElementById('toasts').innerHTML = ''; card.click();
     return { top: card === first, text, n, lvBefore: lv, lvAfter: run.tiles[k].level, gained: sum() - before, hallSame: hallLevel() === hall, toast: document.getElementById('toasts').textContent,
@@ -104,6 +104,26 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(previews === 1, 'six renders of the Build tab work out the routine upgrades once, not six times (' + previews + ')');
   const hallText = await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; render(); const t = document.getElementById('inspector').textContent; ui.sel = {}; render(); return t; });
   ok(!/tax collection richer/.test(hallText) && /to all production/.test(hallText), 'the hall no longer claims to make tax collection richer');
+  // --- the next hall's price and wait lead the Build tab; cards say what a purchase adds; decrees come three at a time
+  const guide = await page.evaluate(() => { const keep = JSON.stringify(state);
+    startNewGame(Date.now()); state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; ui.tab = 'build'; ui.sel = {}; ui.routine = null; render();
+    const hint = document.querySelector('#panel .card'), isHint = hint.classList.contains('hallhint'), none = hint.textContent.replace(/\s+/g, ' ');
+    for (const [k, id] of [['4,5', 'cottage'], ['6,5', 'quarry'], ['5,4', 'lumber']]) { state.run.terrain[+k[0]][+k[2]] = 'plain'; state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; build(k, id); }
+    state.run.pop = 5; calc = compute(); render();
+    const hint2 = document.querySelector('#panel .card').textContent.replace(/\s+/g, ' '), farm = document.querySelector('#panel .card[data-id="farm"] .adds').textContent, cot = document.querySelector('#panel .card[data-id="cottage"] .adds').textContent;
+    document.querySelector('#panel .card.hallhint').click(); const sel = ui.sel.tile;
+    ui.tab = 'research'; render(); const res = document.querySelector('#panel .card[data-id="axes"] .adds').textContent;
+    ui.tab = 'decrees'; ui.sel = {}; render(); const ds = [...document.querySelectorAll('#panel .decree')], titles = ds.map(d => d.querySelector('h3').textContent.trim());
+    const claimable = ds.map(d => d.querySelector('[data-act="claim"]').classList.contains('glow')); const wood = state.run.res.wood;
+    document.querySelector('#panel [data-act="pursue"][data-id="bread"]').click(); const pinned = state.meta.decree, goal = document.querySelector('#inspector .goal').textContent;
+    document.querySelector('#panel .decree [data-act="claim"][data-id="timber"]').click(); const after = { done: Object.keys(state.meta.decreesDone), open: openDecrees().map(d => d.id), pinned: state.meta.decree };
+    const out = { isHint, none, hint2, farm, cot, res, sel, titles, claimable, pinned, goal, after };
+    adoptSave(JSON.parse(keep), Date.now()); ui.tab = 'build'; ui.sel = {}; ui.routine = null; render(); return out; });
+  ok(guide.isHint && /Next: Manor/.test(guide.none) && /4\.00K/.test(guide.none) && /Not all of this is being produced/.test(guide.none) && /At this rate: Manor in about \d/.test(guide.hint2) && guide.sel === '5,5',
+    'the Build tab opens with the next hall, its price and how long it will take at this rate; tapping it selects the hall ' + JSON.stringify([guide.none, guide.hint2]));
+  ok(/adds \+\d.*🍞/.test(guide.farm || '') && /adds \+\d.*💰/.test(guide.cot || '') && /adds \+\d.*🪵/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
+  ok(guide.titles.length === 3 && /A Roof Overhead/.test(guide.titles[0]) && guide.claimable.join() === 'true,true,false' && guide.pinned === 'bread' && /Daily Bread/.test(guide.goal) && guide.after.done.join() === 'timber' && guide.after.open.join() === 'roof,bread,hamlet' && guide.after.pinned === 'bread',
+    'three decrees are open at once; any can be claimed, one can be pursued, and claiming one brings the next ' + JSON.stringify(guide.after));
   // Collect Taxes is a start-of-game button: it is hidden from the Manor on, so the key-repeat check runs at a Village Hall
   const taxBtn = await page.evaluate(() => { const c = document.getElementById('clicker'), was = getComputedStyle(c).display, lv = state.run.tiles[HALL_KEY].level;
     state.run.tiles[HALL_KEY].level = 1; render(); return { was, now: getComputedStyle(c).display, lv }; });
@@ -188,7 +208,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- H1: a long loop gap goes through the capped offline path
   await fresh(page);
   const gap = await page.evaluate(() => { const c0 = state.run.clock; lastTick = Date.now() - 20 * 3600 * 1000; simTick(); return { clock: state.run.clock - c0, modal: document.getElementById('modalbox').textContent }; });
-  ok(Math.abs(gap.clock - 8 * 3600) < 1 && /capped at 8 hours/.test(gap.modal) && /20h 0m/.test(gap.modal), 'resuming after 20h credits exactly 8h and says so (' + (gap.clock / 3600).toFixed(3) + 'h)');
+  ok(Math.abs(gap.clock - 10 * 3600) < 1 && /capped at 8 hours/.test(gap.modal) && /20h 0m/.test(gap.modal) && /kept working for 8h 0m/.test(gap.modal) && /rested town works harder.*2h 0m/.test(gap.modal), 'resuming after 20h credits exactly 8h, plus 2h for the two rested hours past the sixth, and says so (' + (gap.clock / 3600).toFixed(3) + 'h)');
 
   // --- R3: a hidden tab does not step; its timers waking every ~61s must not dodge the cap or stack dialogs
   await fresh(page);
@@ -204,7 +224,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     delete document.hidden; window.openModal = realOpen; return out; });
   ok(hid.whileHidden.stepped === 0 && hid.whileHidden.dialogs === 0, 'hidden tab: 600 timer wake-ups step nothing and open no dialog');
   ok(Math.abs(hid.savedLagH - 10.1667) < 0.01, 'a save made while hidden records the time the simulation reached (' + hid.savedLagH.toFixed(2) + 'h ago), not now');
-  ok(Math.abs(hid.credited - 8) < 0.001 && hid.dialogs === 1 && /capped at 8 hours/.test(hid.modal) && /10h 10m/.test(hid.modal), 'on return the whole 10.17h arrives as one capped gap: ' + hid.credited.toFixed(3) + 'h credited, ' + hid.dialogs + ' dialog');
+  ok(Math.abs(hid.credited - 10) < 0.001 && hid.dialogs === 1 && /capped at 8 hours/.test(hid.modal) && /10h 10m/.test(hid.modal), 'on return the whole 10.17h arrives as one capped gap (8h and 2h rested): ' + hid.credited.toFixed(3) + 'h credited, ' + hid.dialogs + ' dialog');
   await page.evaluate(() => closeModal());
 
   // --- old (v1) save tolerated and migrated; short gap credited (L1)
@@ -215,10 +235,10 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
   const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrain(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
-  ok(mig.v === 2 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
+  ok(mig.v === 3 && mig.decree === 'dynasty' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
   const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
-  ok(stored.v === 2 && stored.grid && stored.decree === 'dynasty' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  ok(stored.v === 3 && stored.grid && stored.decree === 'dynasty' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
   // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy

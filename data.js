@@ -36,6 +36,8 @@ const CLEAR_GROWTH = 2;           // each clearing costs this many times the las
 // ── Balance ──
 const START_RES = { gold: 20, food: 30, wood: 10, stone: 0, iron: 0 };
 const HEAD_START = { gold: 250, wood: 200, food: 60, stone: 40 }; // extra starting stock for a kingdom founded by abdicating: skips the first tutorial steps, no more
+const DECREE_CHOICES = 3;        // decrees open at a time
+const ROUTINE_RESERVE_SECONDS = 3600; // routine upgrades keep the next hall's price back once it is this close
 const START_POP = 3;
 const FOOD_PER_POP = 0.08;       // base food upkeep per villager per second
 const FOOD_CROWD = 200;          // upkeep per villager is multiplied by 1 + (population / FOOD_CROWD)^2
@@ -68,6 +70,8 @@ const CLICK_GOLD = 1;            // gold per hand collection: a flourish for the
 const ROUTINE_SECONDS = 600;     // a "routine" upgrade costs at most this many seconds of income in each material
 const ROUTINE_MAX = 200;         // most upgrades one routine action makes
 const OFFLINE_HOURS = 8;         // offline progress cap without research
+const REST_AFTER_HOURS = 6;      // a rested town: every hour of one absence past this many (within the cap)...
+const REST_BONUS = 1;            // ...is worth this much extra, so long absences lose less to the wait for the player
 const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a summary
 
 // Buildings. out: per second at level 1. work: villagers needed per level.
@@ -117,7 +121,10 @@ const RESEARCH = [
   { id: 'masonry', name: 'Masonry', desc: 'Quarries ×2', hall: 3, cost: { gold: 1e6, wood: 5e5 }, mult: { quarry: 2 } },
   { id: 'shafts', name: 'Deep Shafts', desc: 'Mines ×2', hall: 3, cost: { gold: 1.5e6, stone: 5e5 }, mult: { mine: 2 } },
   { id: 'bellows', name: 'Great Bellows', desc: 'Blacksmiths ×2', hall: 3, cost: { gold: 2.5e6, iron: 5e4 }, mult: { smith: 2 } },
+  { id: 'almanac', name: "Farmers' Almanac", desc: 'Mills ×2', hall: 4, cost: { gold: 6e6, stone: 1e6 }, mult: { mill: 2 } },
+  { id: 'carts', name: 'Ore Carts', desc: 'Mines ×2', hall: 4, cost: { gold: 1.2e7, stone: 2e6 }, mult: { mine: 2 } },
   { id: 'fields', name: 'Three-field System', desc: 'Farms ×3', hall: 4, cost: { gold: 2.5e7, stone: 5e6 }, mult: { farm: 3 } },
+  { id: 'aqueduct', name: 'Aqueducts', desc: 'Cottage taxes ×2', hall: 4, cost: { gold: 3.5e7, stone: 8e6 }, mult: { cottage: 2 } },
   { id: 'banking', name: 'Banking', desc: 'Markets and Guildhalls ×2', hall: 4, cost: { gold: 5e7, iron: 3e5 }, mult: { market: 2, guild: 2 } },
   { id: 'marks', name: "Maker's Marks", desc: 'Blacksmiths ×2', hall: 4, cost: { gold: 1e8, iron: 1e6 }, mult: { smith: 2 } },
   { id: 'steel', name: 'Crucible Steel', desc: 'Mines and Blacksmiths ×2', hall: 5, cost: { gold: 2e8, iron: 1e6 }, mult: { mine: 2, smith: 2 } },
@@ -133,7 +140,8 @@ const REPEATABLES = [
 ];
 const MAX_REPEATABLE = 500;
 
-// Decrees: the goal chain. Progress is saved by id, so entries can be added or reordered safely.
+// Decrees: goals with rewards. DECREE_CHOICES are open at a time, in this order, and the player works on whichever
+// they like. Claimed ones are saved by id, so entries can be added or reordered safely.
 // done(): boolean, or progress(): [current, target]. Both read the live game through sim.js helpers.
 const DECREES = [
   { id: 'roof', title: 'A Roof Overhead', desc: 'Build a Cottage: pick it in the Build list, then tap an empty green plot.', done: () => count('cottage') >= 1, reward: { wood: 20 } },
@@ -143,6 +151,7 @@ const DECREES = [
   { id: 'land', title: 'Lay of the Land', desc: 'Give any building an adjacency bonus of 50% or more.', done: () => Object.values(calc.tiles).some(t => t.adj >= 0.5), reward: { wood: 60 } },
   { id: 'bedrock', title: 'Bedrock', desc: 'Build a Quarry.', done: () => count('quarry') >= 1, reward: { gold: 100 } },
   { id: 'learned', title: 'Learned Folk', desc: 'Buy something in the Research tab.', done: () => Object.keys(state.run.research).length >= 1, reward: { gold: 150 } },
+  { id: 'coffers', title: 'A Full Treasury', desc: 'Hold 2,000 gold at once. A Manor costs 4,000 gold, 2,000 wood and 500 stone: leave the small upgrades be for a while and let the stores fill.', progress: () => [state.run.res.gold, 2000], reward: { wood: 300, stone: 100 } },
   { id: 'manor', title: 'Lord of the Manor', desc: 'Tap your Village Hall and upgrade it into a Manor.', done: () => hallLevel() >= 2, reward: { gold: 300, wood: 200 } },
   { id: 'market', title: 'Market Day', desc: 'Build a Market.', done: () => count('market') >= 1, reward: { gold: 400 } },
   { id: 'grist', title: 'Grist for the Mill', desc: 'Build a Mill right next to a Farm.', done: () => hasPair('mill', 'farm'), reward: { food: 500 } },
@@ -155,8 +164,14 @@ const DECREES = [
   { id: 'bells', title: 'Bells at Dawn', desc: 'Build a Church.', done: () => count('church') >= 1, reward: { gold: 1e5 } },
   { id: 'treasury', title: 'Royal Treasury', desc: 'Earn 500 gold per second.', progress: () => [calc.base.gold, 500], reward: { gold: 5e5 } },
   { id: 'castle', title: 'Seat of Power', desc: 'Raise a Castle.', done: () => hallLevel() >= 4, reward: { iron: 20000 } },
+  { id: 'veins', title: 'Veins of Iron', desc: 'Upgrade a Mine to level 4.', done: () => Object.values(state.run.tiles).some(t => t.id === 'mine' && t.level >= 4), reward: { gold: 1e6 } },
+  { id: 'spires', title: 'Three Spires', desc: 'Have three Churches standing. Each lifts all production while it is fully staffed.', progress: () => [count('church'), 3], reward: { gold: 3e6 } },
+  { id: 'marches', title: 'The Marches', desc: 'Expand your borders a second time.', done: () => state.run.exp >= 2, reward: { stone: 5e5 } },
   { id: 'city', title: 'A Thriving City', desc: 'Reach a population of 750. Villagers need housing, and bigger towns eat more per head.', progress: () => [state.run.pop, 750], reward: { gold: 2e6 } },
   { id: 'guild', title: 'Brotherhood of Trades', desc: 'Build a Guildhall.', done: () => count('guild') >= 1, reward: { gold: 2e6 } },
+  { id: 'scholars', title: 'A Seat of Learning', desc: 'Hold twelve pieces of research at once.', progress: () => [Object.keys(state.run.research).length, 12], reward: { iron: 1e5 } },
+  { id: 'roads', title: 'All Roads Lead Here', desc: 'Build Royal Roads twice (Research tab, repeatable upgrades).', progress: () => [repLevel('prod'), 2], reward: { gold: 2e7 } },
+  { id: 'riches', title: 'Overflowing Coffers', desc: 'Earn 20,000 gold per second.', progress: () => [calc.base.gold, 20000], reward: { gold: 3e7 } },
   { id: 'palace', title: 'Crown Jewel', desc: 'Raise a Palace.', done: () => hallLevel() >= 5, reward: { gold: 1e7 } },
   { id: 'dynasty', title: 'A New Dynasty', desc: 'Found a new kingdom from the Realm tab. It opens at ' + CROWN_MIN + ' Crowns on offer, about when a Palace stands; ' + CROWN_GOAL + ' or more pays best.', done: () => state.meta.stats.prestiges >= 1, reward: { gold: 1000, wood: 500 } },
   { id: 'metropolis', title: 'Metropolis', desc: 'Reach a population of 2,000.', progress: () => [state.run.pop, 2000], reward: { gold: 1e8 } },

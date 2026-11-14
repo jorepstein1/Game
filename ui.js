@@ -66,6 +66,22 @@ function syncChildren(dst, src) {
 const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(r =>
   `<span class="${!plain && state.run.res[r] < cost[r] ? 'lack' : ''}">${RESOURCES[r].icon} ${fmt(cost[r])}</span>`).join('') + '</span>';
 const tileAt = key => state.run.tiles[key];
+// What a purchase would add each second at today's multipliers, for its card: "+4.0 💰/s".
+const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0); return ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''; };
+function buildAdds(id) { const d = BUILDINGS[id], a = {};
+  if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob; }
+  else for (const r in d.out || {}) a[r] = d.out[r] * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1);
+  return a; }
+function researchAdds(r) { const a = {}; if (!r.mult) return a;
+  for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
+  return a; }
+// The next hall: its price and how long the town needs to afford it at today's income. Shown at the top of Build.
+function hallHint() {
+  const hall = tileAt(HALL_KEY); if (hall.level >= MAX_LEVEL) return '';
+  const c = upgradeCost(hall), w = hallWait(), name = hallName(hall.level + 1);
+  const when = w === 0 ? '<b class="ready">Ready to raise: tap here.</b>' : isFinite(w) ? `At this rate: ${name} in about <b>${fmtDuration(w)}</b>.` : 'Not all of this is being produced yet.';
+  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Everything you buy first puts it off.</div></div></button>`;
+}
 
 // The routine-upgrades preview walks every building, so it is worked out at most once per action or every two seconds.
 function routinePreview() {
@@ -194,7 +210,7 @@ function renderInspector() {
   } else {
     // Phones show the current decree here instead of the welcome line (CSS), since the Decrees tab is a tap away.
     const d = currentDecree(), prog = d && d.progress ? d.progress() : null;
-    h = (d ? `<p class="goal">🎯 <b>${d.title}</b>${decreeDone() ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone() ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
+    h = (d ? `<p class="goal">🎯 <b>${d.title}</b>${decreeDone(d.id) ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone(d.id) ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
       + '<p class="lead welcome"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
   }
   patch($('inspector'), h);
@@ -221,14 +237,15 @@ function renderPanel() {
   let h = `<div class="sheethead"><span>${TABS[ui.tab]}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
     const routine = routinePreview(), span = ROUTINE_SECONDS >= 3600 ? ROUTINE_SECONDS / 3600 + ' hours' : Math.round(ROUTINE_SECONDS / 60) + ' minutes';
+    h += hallHint();
     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">⬆️</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
-      <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
+      <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.${routine.saving ? ' <b>Holding back the price of the ' + hallName(hall + 1) + ', which is under an hour away.</b>' : ''}</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">🔒</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
       const c = buildCost(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
     }
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
       h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">🗺️</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
@@ -236,7 +253,7 @@ function renderPanel() {
   } else if (ui.tab === 'research') {
     const avail = RESEARCH.filter(r => !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));
     for (const r of avail) h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="research" data-id="${r.id}">
-      <div class="ic">📜</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}</div></button>`;
+      <div class="ic">📜</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`;
     if (!avail.length) h += '<p class="muted">Your scholars have nothing new to offer for now.</p>';
     if (RESEARCH.some(r => r.hall > hall)) h += `<p class="muted">More to discover once you raise a ${hallName(hall + 1)}.</p>`;
     const reps = REPEATABLES.filter(r => r.hall <= hall);
@@ -246,14 +263,16 @@ function renderPanel() {
       <div class="ic">🔁</div><div class="bd"><div class="nm">${r.name} <span>level ${repLevel(r.id)}</span></div><div class="muted">${r.desc}</div>${costHTML(c)}${r.id === 'housing' ? housingWarning(Math.floor(calc.rawCap * (repBonus('housing') + r.per)) - calc.cap) : ''}</div></button>`; }
     if (owned.length) h += '<hr><p class="muted">Known: ' + owned.map(r => r.name).join(', ') + '</p>';
   } else if (ui.tab === 'decrees') {
-    const d = currentDecree();
-    if (d) {
-      const done = decreeDone();
-      h += `<h3>${d.title}</h3><p>${d.desc}</p>`;
+    const open = openDecrees(), cur = currentDecree();
+    if (open.length) h += `<p class="muted">${open.length > 1 ? 'Work on whichever you like: none of them expires, and claiming one brings the next.' : 'The last of them.'}</p>`;
+    for (const d of open) {
+      const done = decreeDone(d.id), on = cur && d.id === cur.id;
+      h += `<div class="decree${on ? ' on' : ''}"><h3>${d.title}${on && open.length > 1 ? ' <span class="muted">· pursuing</span>' : ''}</h3><p>${d.desc}</p>`;
       if (d.progress) { const [a, b] = d.progress(); h += `<div class="bar"><i style="width:${Math.max(0, Math.min(100, a / b * 100)) || 0}%"></i></div><p class="muted">${fmt(a)} / ${fmt(b)}</p>`; }
       h += `<p>Reward: ${costHTML(d.reward, true)}</p>
-        <div class="row"><button class="btn ${done ? 'glow' : 'cant'}" data-act="claim">${done ? 'Claim reward' : 'In progress…'}</button></div>`;
-    } else h += '<h3>All decrees fulfilled</h3><p>The bards will sing of your reign. Now see how far the numbers go.</p>';
+        <div class="row"><button class="btn ${done ? 'glow' : 'cant'}" data-act="claim" data-id="${d.id}">${done ? 'Claim reward' : 'In progress…'}</button>${on || done || open.length < 2 ? '' : `<button class="btn alt" data-act="pursue" data-id="${d.id}">Pursue this</button>`}</div></div>`;
+    }
+    if (!open.length) h += '<h3>All decrees fulfilled</h3><p>The bards will sing of your reign. Now see how far the numbers go.</p>';
     h += `<hr><p class="muted">Decrees fulfilled: ${decreesFulfilled()} / ${DECREES.length}</p>`;
   } else {
     const n = pendingCrowns(), ok = canPrestige();
@@ -386,7 +405,9 @@ function catchUp(sec) {
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${RESOURCES[k].icon} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
+    ${r.rested >= 60 ? `<p class="stat">😴 A rested town works harder: after ${REST_AFTER_HOURS} hours away every hour counts ${REST_BONUS === 1 ? 'double' : 'for ' + (1 + REST_BONUS)}, worth <b>${fmtDuration(r.rested)}</b> more.</p>` : ''}
     ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
+    ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `🏰 You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `🏰 ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);
 }
 function loadGame() {
@@ -453,7 +474,9 @@ const CITY_ACTIONS = {
   expand() { say(expand()); },
   routine() { say(routineUpgrades()); },
   clear(k) { say(clearLand(k)); },
-  claim() { say(claimDecree()); },
+  claim(id) { say(claimDecree(id || undefined)); },
+  pursue(id) { pursueDecree(id); },
+  hall() { ui.sel = { tile: HALL_KEY }; ui.sheet = false; },
   prestige() {
     if (!canPrestige()) return;
     const n = pendingCrowns();

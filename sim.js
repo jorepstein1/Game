@@ -3,7 +3,7 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg } and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
 // state = { v, last, meta, run }
@@ -14,7 +14,7 @@ let state, calc;
 
 // ───────────────────────── State ─────────────────────────
 function newMeta(now) {
-  return { crowns: 0, bonusCrowns: 0 /* how many of the Crowns came from Monuments */, decree: DECREES[0].id,
+  return { crowns: 0, bonusCrowns: 0 /* how many of the Crowns came from Monuments */, decree: DECREES[0].id /* the decree being pursued */, decreesDone: {} /* ids already claimed */,
     stats: { clicks: 0, totalGold: 0, prestiges: 0, built: 0, started: now || 0 } };
 }
 // A kingdom founded with Crowns held gets a small head start in resources (none for a first kingdom).
@@ -237,11 +237,13 @@ function advance(sec) {
 function creditAway(sec) {
   sec = sec > 0 && isFinite(sec) ? sec : 0;
   const capHours = researchFx('offlineHours'), credited = Math.min(sec, capHours * 3600);
+  // A rested town works harder: hours past REST_AFTER_HOURS count for more. Only time away earns it, never an open game.
+  const rested = REST_BONUS * Math.max(0, credited - REST_AFTER_HOURS * 3600);
   const before = Object.assign({}, state.run.res);
-  advance(credited);
+  advance(credited + rested);
   const gains = {};
   for (const r in RESOURCES) if (state.run.res[r] - before[r] >= 1) gains[r] = state.run.res[r] - before[r];
-  return { away: sec, credited, capped: sec > credited, capHours, gains };
+  return { away: sec, credited, rested, capped: sec > credited, capHours, gains };
 }
 
 // ───────────────────────── Actions ─────────────────────────
@@ -304,8 +306,18 @@ function clearLand(key) {
 // crowd out the real choices. An upgrade is routine when every material it costs is at most ROUTINE_SECONDS of the
 // town's income of that material, so the whole batch can never set the next hall back by much. Cheapest first;
 // workplaces wait while there would be no one to staff them. With `preview` nothing is bought: it only counts.
+// Seconds until the next hall is affordable at today's income (0 if it is; Infinity if a material is not being made).
+function hallWait() {
+  const hall = state.run.tiles[HALL_KEY]; if (hall.level >= MAX_LEVEL) return Infinity;
+  const cost = upgradeCost(hall); let w = 0;
+  for (const r in cost) { const need = cost[r] - state.run.res[r]; if (need > 0) w = Math.max(w, calc.base[r] > 0 ? need / calc.base[r] : Infinity); }
+  return w;
+}
+// While the next hall is within ROUTINE_RESERVE_SECONDS of income, routine upgrades leave its price in the stores.
+function routineReserve() { return hallWait() <= ROUTINE_RESERVE_SECONDS ? upgradeCost(state.run.tiles[HALL_KEY]) : {}; }
 function routineUpgrades(preview) {
   const run = state.run, keep = preview ? JSON.stringify({ tiles: run.tiles, res: run.res }) : null, spent = {};
+  calc = compute(); const reserve = routineReserve();
   let n = 0;
   for (; n < ROUTINE_MAX; n++) {
     calc = compute();
@@ -315,7 +327,7 @@ function routineUpgrades(preview) {
       const t = run.tiles[k], def = BUILDINGS[t.id];
       if (t.kind !== 'building' || t.level >= MAX_LEVEL || (def.work && calc.need + def.work > calc.cap)) continue;
       const c = upgradeCost(t); let sum = 0, ok = true;
-      for (const r in c) { sum += c[r]; if (c[r] > made(r) * ROUTINE_SECONDS || run.res[r] < c[r]) { ok = false; break; } }
+      for (const r in c) { sum += c[r]; if (c[r] > made(r) * ROUTINE_SECONDS || run.res[r] - (reserve[r] || 0) < c[r]) { ok = false; break; } }
       if (ok && sum < bestSum) { best = k; bestCost = c; bestSum = sum; }
     }
     if (!best) break;
@@ -323,20 +335,27 @@ function routineUpgrades(preview) {
   }
   if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; }
   calc = compute();
-  return n ? { ok: true, count: n, spent, msg: `⬆️ ${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail('No routine upgrades to make just now.'), { count: 0, spent });
+  return n ? { ok: true, count: n, spent, msg: `⬆️ ${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
 }
 
-const currentDecree = () => DECREES.find(d => d.id === state.meta.decree) || null;
-const decreesFulfilled = () => { const d = currentDecree(); return d ? DECREES.indexOf(d) : DECREES.length; };
-function decreeDone() {
-  const d = currentDecree(); if (!d) return false;
-  if (d.done) return !!d.done();
-  const [a, b] = d.progress(); return a >= b;
+// Decrees: DECREE_CHOICES of them are open at a time (the earliest ones not yet claimed). Any open decree can be
+// claimed once its condition holds, none expires, and the player picks which one to pursue (state.meta.decree).
+const decreeById = id => DECREES.find(d => d.id === id) || null;
+const openDecrees = () => DECREES.filter(d => !state.meta.decreesDone[d.id]).slice(0, DECREE_CHOICES);
+function currentDecree() { const open = openDecrees(); return open.find(d => d.id === state.meta.decree) || open[0] || null; }
+const decreesFulfilled = () => DECREES.filter(d => state.meta.decreesDone[d.id]).length;
+const decreeMet = d => { if (d.done) return !!d.done(); const [a, b] = d.progress(); return a >= b; };
+// With an id: is that open decree fulfilled? Without: is any open decree waiting to be claimed?
+function decreeDone(id) { return openDecrees().some(d => (id === undefined || d.id === id) && decreeMet(d)); }
+function pursueDecree(id) {
+  if (!openDecrees().some(d => d.id === id)) return fail();
+  state.meta.decree = id; return { ok: true };
 }
-function claimDecree() {
-  if (!decreeDone()) return fail();
-  const d = currentDecree(), next = DECREES[DECREES.indexOf(d) + 1];
-  grant(d.reward); state.meta.decree = next ? next.id : null;
+function claimDecree(id) {
+  const d = openDecrees().find(d => (id === undefined || d.id === id) && decreeMet(d));
+  if (!d) return fail();
+  grant(d.reward); state.meta.decreesDone[d.id] = 1;
+  const next = currentDecree(); state.meta.decree = next ? next.id : null;
   return { ok: true, msg: '✅ ' + d.title + ' — reward claimed' };
 }
 
@@ -385,7 +404,7 @@ function upgradeLegacySave(o) {
   const tiles = {};
   for (const k in o.tiles) { const t = o.tiles[k]; if (isObj(t)) tiles[k] = { kind: t.b === 'hall' ? 'hall' : 'building', id: t.b, level: t.l }; }
   const stats = isObj(o.stats) ? o.stats : {}, crowns = int(o.crowns, 0, 0, 1e9), quest = int(o.quest, 0, 0, 1e6);
-  return { v: 2, last: o.last,
+  return { v: 2, last: o.last, // then on through the version-2 migration below
     meta: { crowns, bonusCrowns: 0, // Crowns already held stay
       decree: quest < LEGACY_DECREE_ORDER.length ? LEGACY_DECREE_ORDER[quest] : null, stats },
     run: { seed: o.seed, res: o.res, pop: o.pop, exp: o.exp, tiles, research: o.research, starving: o.starving, gold: o.runGold } };
@@ -399,7 +418,11 @@ function sanitizeSave(raw, now) {
   const v = int(o.v, 0, 0, 1e9);
   if (!v || !isObj(o.meta) || !isObj(o.run)) throw new Error('not a save');
   if (v > SAVE_VERSION) throw new Error('save is from a newer version');
-  // Migrations between later versions go here: if (v < 3) { ... }
+  // Version 2 had one decree at a time, claimed in order: everything before the current one counts as claimed.
+  if (v < 3) { const at = o.meta.decree === null ? DECREES.length : DECREES.findIndex(d => d.id === o.meta.decree), done = {};
+    if (o.meta.decree !== undefined) for (const d of DECREES.slice(0, at < 0 ? DECREES.length : at)) done[d.id] = 1;
+    if (at < 0 && o.meta.decree !== undefined) notes.push('A decree in this save no longer exists; the decree chain was marked complete.');
+    o = Object.assign({}, o, { meta: Object.assign({}, o.meta, { decreesDone: done }) }); }
 
   if (legacy) notes.push('This kingdom predates the rebalance: cottages, farms and mills now gain a flat amount per level and big towns eat more, so it needs more housing and food than before.');
   const s = newState(now), meta = s.meta, run = s.run, m = o.meta, r = o.run;
@@ -407,11 +430,9 @@ function sanitizeSave(raw, now) {
 
   meta.crowns = int(m.crowns, 0, 0, 1e9);
   meta.bonusCrowns = int(m.bonusCrowns, 0, 0, meta.crowns);
-  if (m.decree === null) meta.decree = null;
-  else if (m.decree !== undefined) {
-    meta.decree = DECREES.some(d => d.id === m.decree) ? m.decree : null;
-    if (meta.decree === null) notes.push('A decree in this save no longer exists; the decree chain was marked complete.');
-  }
+  if (isObj(m.decreesDone)) for (const d of DECREES) if (hasOwn(m.decreesDone, d.id) && m.decreesDone[d.id]) meta.decreesDone[d.id] = 1;
+  { const open = DECREES.filter(d => !meta.decreesDone[d.id]).slice(0, DECREE_CHOICES); // pursue the saved one if it is still open
+    meta.decree = open.some(d => d.id === m.decree) ? m.decree : open.length ? open[0].id : null; }
   const st = isObj(m.stats) ? m.stats : {};
   for (const k of ['clicks', 'prestiges', 'built']) meta.stats[k] = int(st[k], 0, 0, 1e15);
   meta.stats.totalGold = num(st.totalGold, 0, 0, BIG);
