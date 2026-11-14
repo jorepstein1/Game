@@ -142,7 +142,7 @@ function buildingStats(id) {
 function upgradeGain(k, t) {
   const d = BUILDINGS[t.id], info = calc.tiles[k];
   if (!d.linear) return '×2';
-  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' ' + sprite('pop', 'housing');
+  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' ' + sprite('cottage', 'housing');
   return Object.keys(d.out).map(r => '+' + (d.out[r] * info.mult / info.levelMult).toFixed(1) + ' ' + RESOURCES[r].icon + '/s').join(' ');
 }
 // Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
@@ -385,7 +385,7 @@ const fmtDuration = sec => { const h = Math.floor(sec / 3600), m = Math.floor(se
 function catchUp(sec) {
   const r = creditAway(sec);
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
-  const gains = Object.keys(r.gains).map(k => `<p class="stat">${RESOURCES[k].icon} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
+  const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
     ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);

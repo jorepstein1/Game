@@ -24,6 +24,8 @@ body {
 /* Sprites size with the text around them, like the emoji they replace. */
 /* Negative margins keep a sprite from stretching the line of text it sits in. */
 .sp { width: 1.25em; height: 1.25em; vertical-align: -.27em; margin: -.3em 0; flex: none; pointer-events: none; }
+/* On the dark bars the ink outline would vanish, so sprites there get a parchment halo. */
+#tabs .sp, .toast .sp, #bbinfo .sp, header .sp { filter: drop-shadow(0 0 .7px var(--parch)) drop-shadow(0 0 .7px var(--parch)); }
 .ic > .sp, #merchant > .sp { width: 1.25em; height: 1.25em; vertical-align: middle; margin: 0; }
 button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 
