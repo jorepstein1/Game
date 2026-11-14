@@ -156,17 +156,9 @@ const SPRITES = {
   decrees: `<path d="M8 6h17v17q0 4-4 4h-13z" fill="#f6ecd0"/><path d="M8 6q-4 0-4 3.500h4z" fill="#d9c595"/>
     <path d="M12 11h9M12 14.500h9M12 18h5" stroke="#9a8560" stroke-width="1.300" fill="none"/>
     <path d="M8 27q4 0 4-4h13q0 4-4 4z" fill="#d9c595"/><circle cx="21.500" cy="20" r="3.800" fill="#b5352c"/><circle cx="21.500" cy="20" r="1.300" fill="#e0685c" ${N}/>`,
-  merchant: `<path d="M4.500 19.500v-5q0-9 11.500-9t11.500 9v5z" fill="#f6ecd0"/>
-    <path d="M10.500 6.500q-2 5-2 13M16 5.500v14M21.500 6.500q2 5 2 13" stroke="#b9a273" stroke-width="1.200" fill="none"/><path d="M4.500 19.500v-5q0-9 11.500-9t11.500 9v5z" fill="none"/>
-    <rect x="3.500" y="19" width="25" height="4.500" rx="1" fill="#8a5a2b"/>
-    <circle cx="9.500" cy="25" r="4.200" fill="#b07a3e"/><circle cx="9.500" cy="25" r="1.300" fill="#5e3b1a" ${N}/>
-    <circle cx="22.500" cy="25" r="4.200" fill="#b07a3e"/><circle cx="22.500" cy="25" r="1.300" fill="#5e3b1a" ${N}/>`,
-  festival: `<path d="M16 8v-6" fill="none"/><path d="M16 2l5.500 1.600-5.500 1.700z" fill="#e8bf3a"/>
-    <rect x="5" y="18" width="22" height="9.500" fill="#f6ecd0"/><path d="M5 18h4v9.500h-4zM23 18h4v9.500h-4z" fill="#c9413a" ${N}/>
-    <rect x="5" y="18" width="22" height="9.500" fill="none"/>
-    <path d="M12.500 27.500q3.500-4 3.500-9 0 5 3.500 9z" fill="#3a2a1c"/>
-    <path d="M3 18.500l13-11 13 11z" fill="#c9413a"/><path d="M16 7.500l-3 11h6z" fill="#f6ecd0" ${N}/><path d="M16 7.500l-9.500 11h-3.500zM16 7.500l9.500 11h3.500z" fill="#f6ecd0" ${N}/>
-    <path d="M3 18.500l13-11 13 11z" fill="none"/>`,
+  up: `<path d="M16 3.500l10.500 11.500h-6v13h-9v-13h-6z" fill="#5fae55"/><path d="M16 6.500l-5.500 6.300h2.800v12.200" stroke="#9bd68f" stroke-width="1.400" fill="none"/>`,
+  rest: `<path d="M20 4.500a12 12 0 1 0 8 19.500 10.500 10.500 0 0 1-8-19.500z" fill="#f2cb45"/>
+    <path d="M24.500 6l1 2.500 2.500 1-2.500 1-1 2.500-1-2.500-2.500-1 2.500-1z" fill="#fbe58a" stroke-width="1.100"/>`,
   lock: `<path d="M10.500 15v-4.500a5.500 5.500 0 0 1 11 0v4.500" stroke-width="5" fill="none"/>
     <path d="M10.500 15v-4.500a5.500 5.500 0 0 1 11 0v4.500" stroke="#a9b7c4" stroke-width="2.200" fill="none"/>
     <rect x="6.500" y="14.500" width="19" height="13.500" rx="2.500" fill="#c2951f"/>
