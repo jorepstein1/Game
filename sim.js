@@ -92,6 +92,7 @@ function genTerrain(seed) {
   return g;
 }
 // The guarantees (see data.js): the start area has some of every terrain, a double forest site and enough plots;
+// by the first expansion every terrain has a double site;
 // every expansion adds a triple site and BIOME_DOUBLES double sites; the full map has a triple site of each terrain.
 // Each failure is fixed by turning the fewest open tiles around one plot into that terrain, then everything is
 // checked again, since a fix can spoil an earlier ring. Returns false if the map cannot be fixed this way.
@@ -126,6 +127,8 @@ function repairTerrain(g, rnd, fixed) {
         if (!free.length) return false; const [x, y] = free[(rnd() * free.length) | 0]; g[x][y] = t; break; } }
     if (!ok) continue;
     if (s[0].double.forest < 1) { if (!pocket(R[0], 2, 'forest', -1)) return false; continue; }
+    { const sa = siteCounts(g, BIOME_ALL_DOUBLE), short = T.find(t => !sa.double[t]);
+      if (short) { if (!pocket(BIOME_ALL_DOUBLE, 2, short, -1)) return false; continue; } }
     let i = 1;
     for (; i < R.length; i++) {
       if (sumOf(s[i].triple) - sumOf(s[i - 1].triple) < BIOME_TRIPLES) { if (!pocket(R[i], 3, null, R[i - 1])) return false; break; }

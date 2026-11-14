@@ -390,6 +390,7 @@ test('terrain comes in features with guaranteed sites: start area, every expansi
     for (const t in sim.BIOME_START) { let n = 0; for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === t) n++; if (n < sim.BIOME_START[t]) why.push(`start area has ${n} ${t}`); }
     if (!Object.keys(c[0].k).some(k => k.endsWith('forest') && c[0].k[k] >= 2)) why.push('no double forest site at the start');
     if (c[0].open < 12) why.push('start area has ' + c[0].open + ' plots');
+    { const a = recount(g, sim.BIOME_ALL_DOUBLE); for (const t of ['forest', 'hill', 'water']) if (!Object.keys(a.k).some(k => k.endsWith(t) && a.k[k] >= 2)) why.push(`no double ${t} site within radius ${sim.BIOME_ALL_DOUBLE}`); }
     for (let e = 1; e < R.length; e++) {
       if (c[e].tri - c[e - 1].tri < 1) why.push(`expansion ${e} adds ${c[e].tri - c[e - 1].tri} triple sites`);
       if (c[e].dbl - c[e - 1].dbl < 3) why.push(`expansion ${e} adds ${c[e].dbl - c[e - 1].dbl} double sites`);
@@ -402,6 +403,7 @@ test('terrain comes in features with guaranteed sites: start area, every expansi
   assert.deepStrictEqual(bad, [], 'every seed meets every guarantee');
   [15, 32, 55, 83].forEach((was, i) => near(open[i] / N, was, was * 0.1, `open plots at radius ${R[i]} stay near the old average;`));
   const share = (tiles.forest + tiles.hill + tiles.water) / N / 121;
+  assert.strictEqual(sim.BIOME_ALL_DOUBLE, 3, 'every terrain has a double site once the first expansion is open');
   assert.ok(share >= 0.25 && share <= 0.32, 'terrain share ' + share.toFixed(3)); assert.ok(tiles.forest > tiles.hill && tiles.hill > tiles.water, JSON.stringify(tiles));
 });
 

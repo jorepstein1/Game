@@ -36,6 +36,7 @@ const EXPAND_COST = [{ gold: 3e4, wood: 1e4 }, { gold: 3e7, stone: 3e6 }, { gold
 const BIOME_TILES = { forest: 13, hill: 8, water: 5 };
 const BIOME_START = { forest: 3, hill: 2, water: 2 }; // the starting 5×5 always has something of everything to play with
 const BIOME_START_OPEN = 12;      // ...and at least this many open plots
+const BIOME_ALL_DOUBLE = 3;      // within this radius (the first expansion) every terrain has a double site: no map starves stone or food
 const BIOME_DOUBLES = 3, BIOME_TRIPLES = 1; // each expansion adds at least this many plots with 2+ / 3+ neighbours of one terrain
 const CLEAR_COST = { gold: 500 }; // clearing forest/hills/water into an open plot
 const CLEAR_GROWTH = 2;           // each clearing costs this many times the last
