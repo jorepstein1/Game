@@ -145,25 +145,28 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     'a new game opens Build on the Cottage, with no Routine card and the next hall (price, and how long at this rate) below the buildings; once the first decrees are done the hall leads the tab; tapping it selects the hall ' + JSON.stringify([guide.none, guide.hint2]));
   ok(guide.near.wait > 60 && guide.near.wait < 12 * 3600 && /delays the Manor by about|brings the Manor about/.test(guide.near.cottage || '') && guide.near.lumber === null && !/Manor/.test(guide.near.lumberCloser + guide.near.quarry),
     'with the Manor within reach a Cottage card says what buying it does to the wait; workplaces the town could not staff make no such claim ' + JSON.stringify([guide.near.cottage, guide.near.lumber, guide.near.quarry]));
-  ok(/Rest: after 1h 0m more away without a purchase, each hour away counts as 2\.5 hours \(4\.5 past 8 hours\)/.test(guide.near.rest0) && /Rested: each hour away counts as 2\.5 hours \(4\.5 past 8 hours\) until you next buy/.test(guide.near.rest1), 'the next-hall card says where the rested bonus stands ' + JSON.stringify([guide.near.rest0, guide.near.rest1]));
+  ok(/Rest: time away counts extra once the town has worked undisturbed for 1h 0m more since your last purchase\./.test(guide.near.rest0) && /Rested: time away counts extra, because the town has worked undisturbed since your last purchase\./.test(guide.near.rest1), 'the next-hall card says where the rested bonus stands ' + JSON.stringify([guide.near.rest0, guide.near.rest1]));
   ok(/You can abdicate: 20 Crowns on offer/.test(guide.near.abd) && /You can abdicate: 20 Crowns on offer/.test(guide.near.realm || ''), 'when abdication is open the next-hall card and the Realm tab say so, with the Crowns on offer ' + JSON.stringify(guide.near.realm));
   ok(/adds \+\d.*\[Food\]/.test(guide.farm || '') && /adds \+\d.*\[Gold\]/.test(guide.cot || '') && /adds \+\d.*\[Wood\]/.test(guide.res || ''), 'build and research cards say what the purchase adds per second ' + JSON.stringify([guide.farm, guide.cot, guide.res]));
   ok(guide.titles.length === 3 && /A Roof Overhead/.test(guide.titles[0]) && guide.claimable.join() === 'true,true,false' && guide.pinned === 'bread' && /Daily Bread/.test(guide.goal) && guide.after.done.join() === 'timber' && guide.after.open.join() === 'roof,bread,hamlet' && guide.after.pinned === 'bread',
     'three decrees are open at once; any can be claimed, one can be pursued, and claiming one brings the next ' + JSON.stringify(guide.after));
   // Collect Taxes is a start-of-game button: it is hidden from the Manor on, so the key-repeat check runs at a Village Hall
   const taxBtn = await page.evaluate(() => { const c = document.getElementById('clicker'), was = getComputedStyle(c).display, lv = state.run.tiles[HALL_KEY].level;
-    state.run.tiles[HALL_KEY].level = 1; render(); return { was, now: getComputedStyle(c).display, lv }; });
+    state.run.tiles[HALL_KEY].level = 1; state.run.collected = 0; render(); return { was, now: getComputedStyle(c).display, lv }; });
   ok(taxBtn.was === 'none' && taxBtn.now !== 'none', 'Collect Taxes is hidden at a Palace and shown at a Village Hall ' + JSON.stringify(taxBtn));
   const c0 = await page.evaluate(() => state.meta.stats.clicks);
   await page.focus('#clicker'); await page.keyboard.down('Enter'); for (let i = 0; i < 10; i++) await page.keyboard.down('Enter'); await page.keyboard.up('Enter');
   ok(await page.evaluate(() => state.meta.stats.clicks) === c0 + 1, 'holding Enter collects once, not per key repeat');
+  const capped = await page.evaluate(() => { state.run.collected = CLICK_LIMIT - 1; render(); const c = document.getElementById('clicker'), before = getComputedStyle(c).display; c.click(); render();
+    return { before, after: getComputedStyle(c).display, collected: state.run.collected }; });
+  ok(capped.before !== 'none' && capped.after === 'none' && capped.collected === 100, 'Collect Taxes goes once ' + 100 + ' gold has come in by hand this reign ' + JSON.stringify(capped));
   await page.evaluate(lv => { state.run.tiles[HALL_KEY].level = lv; render(); }, taxBtn.lv);
 
   // --- demolish: confirmation above level 1, refund is three quarters of another copy at the kind level
   const dk = await page.evaluate(() => Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'smith'));
   const dinfo = await page.evaluate(k => { ui.sel = { tile: k }; render(); const t = state.run.tiles[k]; return { refund: demolishRefund(t), spent: spentOn(t), gold: state.run.res.gold }; }, dk);
   await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
-  ok(await page.evaluate(k => !document.getElementById('modal').hidden && !!state.run.tiles[k] && document.activeElement.dataset.act === 'close' && /other Blacksmiths stay at level 12/.test(document.getElementById('modal').textContent), dk), 'demolishing a level 12 building asks first (focus on Cancel) and says the others keep their level');
+  ok(await page.evaluate(k => !document.getElementById('modal').hidden && !!state.run.tiles[k] && document.activeElement.dataset.act === 'close' && /other Blacksmiths stay at level 12/.test(document.getElementById('modal').textContent) && /which is 75% of what it would cost to build this one again/.test(document.getElementById('modal').textContent), dk), 'demolishing a level 12 building asks first (focus on Cancel), says the refund is 75% of building this one again, and that the others keep their level');
   await page.keyboard.press('Escape');
   ok(await page.evaluate(k => document.getElementById('modal').hidden && !!state.run.tiles[k], dk), 'Esc cancels the dialog');
   await page.evaluate(() => document.querySelector('#inspector [data-act="demolish"]').click());
@@ -351,13 +354,13 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await settle(p3); await p3.tap('.tile[data-id="6,5"]'); await settle(p3);
   up = await reach('#buildbar [data-act="upkind"]'); const dem = await reach('#buildbar [data-act="demolish"]');
   const info = await p3.evaluate(() => document.getElementById('bbinfo').textContent.replace(/\s+/g, ' ').trim());
-  ok(up && up.inView && up.hit && /Upgrade all Blacksmiths to level 5/.test(up.text) && /output ×3/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
+  ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /output ×3/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
   await p3.tap('#buildbar [data-act="upkind"]'); await settle(p3);
   ok(await p3.evaluate(() => kindLevel('smith')) === 5, 'tapping it in the bar upgrades the Blacksmiths');
   await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage' }; state.run.levels.cottage = 2; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
   up = await reach('#buildbar [data-act="upkind"]');
   const fits = await p3.evaluate(() => { const b = document.querySelector('#bbrow [data-act="upkind"]'), r = b.getBoundingClientRect(); return { right: r.right <= innerWidth, kids: [...b.children].every(c => c.getBoundingClientRect().right <= r.right + 1 && c.getBoundingClientRect().bottom <= r.bottom + 1) }; });
-  ok(up && up.inView && /Upgrade all Cottages to level 3/.test(up.text) && /\+5 housing/.test(up.text) && fits.right && fits.kids, 'a Cottage upgrade says what the level adds, inside its button: "' + (up && up.text) + '" ' + JSON.stringify(fits));
+  ok(up && up.inView && /^Upgrade all to level 3/.test(up.text) && /\+5 housing/.test(up.text) && fits.right && fits.kids, 'a Cottage upgrade says what the level adds, inside its button: "' + (up && up.text) + '" ' + JSON.stringify(fits));
   await shot(p3, 'shot-390x664-tile.png');
   // a double tap on Close must not fall through to the build button that takes its place
   const dbl = await p3.evaluate(() => { ui.sel = { tile: '6,6' }; render();
@@ -433,12 +436,40 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   }
   { // 360px wide, mid-game: the longest upgrade button (three materials, effect, hall hint) stays inside the screen
     const w360 = await p3.evaluate(() => { const run = state.run; run.exp = 2; run.tiles[HALL_KEY].level = 4; run.res = { gold: 9e12, food: 1e6, wood: 9e12, stone: 9e12, iron: 9e12 }; run.pop = 200;
-      run.terrain[4][5] = 'plain'; run.tiles['4,5'] = { kind: 'building', id: 'lumber' }; run.levels.lumber = 7; run.terrain[6][5] = 'plain'; run.tiles['6,5'] = { kind: 'building', id: 'mine' }; run.levels.mine = 9;
+      run.terrain[4][5] = 'plain'; run.tiles['4,5'] = { kind: 'building', id: 'lumber' }; run.levels.lumber = 12; run.terrain[6][5] = 'plain'; run.tiles['6,5'] = { kind: 'building', id: 'mine' }; run.levels.mine = 9;
       ui.mapN = 0; ui.sheet = false; const out = [];
       for (const k of ['4,5', '6,5']) { ui.sel = { tile: k }; render(); const b = document.querySelector('#bbrow [data-act="upkind"]'), r = b.getBoundingClientRect(), info = document.getElementById('bbinfo').getBoundingClientRect();
-        out.push({ k, docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight, right: Math.round(r.right), kids: [...b.children].every(c => c.getBoundingClientRect().right <= r.right + 1), info: Math.round(info.right), text: b.textContent.replace(/\s+/g, ' ').slice(0, 60) }); }
+        const lbl = b.querySelector('b'), bi = document.getElementById('bbinfo');
+        out.push({ k, docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight, right: Math.round(r.right), kids: [...b.children].every(c => c.getBoundingClientRect().right <= r.right + 1), info: Math.round(info.right), text: b.textContent.replace(/\s+/g, ' ').slice(0, 60),
+          label: lbl.textContent, labelWhole: lbl.scrollWidth <= lbl.clientWidth, title: bi.querySelector('b').textContent.trim(), infoWhole: bi.scrollWidth <= bi.clientWidth }); }
       ui.sel = {}; render(); return { vw: innerWidth, vh: innerHeight, out }; });
     ok(w360.out.every(o => o.docW <= w360.vw && o.docH <= w360.vh + 1 && o.right <= w360.vw && o.kids && o.info <= w360.vw), '360x560 mid-game: a selected building\'s upgrade button and info line fit the screen ' + JSON.stringify(w360));
+    const lumber = w360.out[0];
+    ok(lumber.label === 'Upgrade all to level 13' && lumber.labelWhole && /Lumber Camp/.test(lumber.title) && lumber.infoWhole, '360px, Lumber Camp at level 12: the bar label shows the whole target level and the kind is named once, above it, uncut ' + JSON.stringify(lumber));
+  }
+  { // a selected building on a phone: the bar names it once; the strip holds only its numbers and does not cut a line under the bar
+    const insp = [];
+    for (const [w, h] of [[390, 844], [360, 640]]) {
+      await p3.setViewportSize({ width: w, height: h }); await settle(p3);
+      insp.push(await p3.evaluate(([w, h]) => { const run = state.run, out = [];
+        run.terrain[5][6] = 'plain'; run.tiles['5,6'] = { kind: 'building', id: 'quarry' }; run.levels.quarry = 2; run.terrain[4][4] = 'plain'; run.tiles['4,4'] = { kind: 'building', id: 'cottage' };
+        for (const k of ['4,5', '6,5', '5,6', '4,4']) { ui.sel = { tile: k }; ui.sheet = false; render(); const ins = document.getElementById('inspector'), h3 = ins.querySelector('h3'), note = ins.querySelector('.kindnote');
+          out.push({ k, id: run.tiles[k].id, name: BUILDINGS[run.tiles[k].id].name, h3: h3 ? getComputedStyle(h3).display : null, note: note ? getComputedStyle(note).display : null, fits: ins.scrollHeight <= ins.clientHeight + 1, sh: ins.scrollHeight, ch: ins.clientHeight,
+            title: document.querySelector('#bbinfo b').textContent.trim(), text: ins.innerText.replace(/\s+/g, ' ') }); }
+        ui.sel = {}; render(); return { size: w + 'x' + h, out }; }, [w, h]));
+      await shot(p3, `shot-${w}x${h}-inspector.png`);
+    }
+    ok(insp.every(s => s.out.every(o => o.h3 === 'none' && o.note === 'none' && o.title.includes(o.name))), 'phone: a selected building is named once (in the bar), not again in the strip ' + JSON.stringify(insp.map(s => s.out.map(o => [o.id, o.h3, o.title]))));
+    ok(insp.every(s => s.out.every(o => o.fits)), 'phone, 390x844 and 360x640: the strip shows a selected building\'s numbers whole, nothing hidden under the bar ' + JSON.stringify(insp.map(s => [s.size, s.out.map(o => [o.id, o.sh, o.ch, o.text])])));
+    // build list: the kind level on the bar buttons and the cards, and a tip on where upgrades are until the first one
+    const bl = await p3.evaluate(() => { state.meta.stats.upgrades = 0; ui.sel = {}; ui.sheet = false; render();
+      const badge = id => { const e = document.querySelector(`#bbrow .bb[data-id="${id}"] .lv`); return e ? e.textContent : null; };
+      const out = { quarryBadge: badge('quarry'), farmBadge: badge('farm') };
+      ui.tab = 'build'; ui.sheet = true; render(); const card = document.querySelector('#panel .card[data-id="quarry"]'), note = card.querySelector('.lvnote'), tip = document.querySelector('#panel .uptip');
+      Object.assign(out, { name: card.querySelector('.nm').textContent.replace(/\s+/g, ' ').trim(), note: note && note.getBoundingClientRect().height > 0 ? note.textContent : null, tip: tip ? tip.textContent : null });
+      const run = state.run; for (const r in run.res) run.res[r] = 1e13; upgradeKind('quarry'); render(); out.tipAfter = !!document.querySelector('#panel .uptip'); ui.sheet = false; render(); return out; });
+    ok(bl.quarryBadge === '2' && bl.farmBadge === null && /Quarry ×\d+ · level 2/.test(bl.name) && bl.note === 'New ones are built at level 2.', 'phone build list: the bar button and the card show a kind\'s level above 1, and the card says new ones come at that level ' + JSON.stringify(bl));
+    ok(/tap one of your buildings on the map/.test(bl.tip || '') && !bl.tipAfter, 'until the first kind upgrade the Build list says upgrades are made by tapping a building; afterwards the tip is gone ' + JSON.stringify(bl));
   }
   await p3.setViewportSize({ width: 664, height: 340 }); await fresh(p3); await settle(p3);
   let land = await mapFit();
