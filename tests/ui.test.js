@@ -438,6 +438,23 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     '390x664, Keep within reach: the bar\'s Upgrade button carries the hint and it is on screen ' + JSON.stringify(barHint));
   await p3.evaluate(() => { state.run.pop = 5; calc = compute(); render(); });
   ok(await p3.evaluate(() => calc.staff < 1 && !document.querySelector('#buildbar .bb.act.wide .delay, #buildbar .bb.act.wide .adds')), 'no such estimate while the town is short of hands');
+  // The longest Upgrade button: three materials in the cost, a line on what the level does and one on the Palace's wait
+  // (a Blacksmith or a Guildhall at a Castle). Every line shows whole, at full height, inside the button and above the tabs.
+  for (const id of ['smith', 'guild']) {
+    await fresh(p3);
+    const longest = await p3.evaluate(id => { const run = state.run; run.exp = 1; run.tiles[HALL_KEY].level = 4;
+      const put = [['4,4', 'cottage'], ['4,5', 'cottage'], ['4,6', 'cottage'], ['6,4', 'cottage'], ['5,4', 'farm'], ['6,6', 'mine'], ['6,5', id], ['5,6', 'market']];
+      for (const [k, b] of put) { const [x, y] = k.split(',').map(Number); run.terrain[x][y] = 'plain'; run.tiles[k] = { kind: 'building', id: b }; }
+      Object.assign(run.levels, { cottage: 12, farm: 8, mine: 1, smith: 1, guild: 1, market: 1 }); calc = compute(); run.pop = calc.cap; run.res.food = 1e7; calc = compute();
+      const c = upgradeCost(run.tiles[HALL_KEY]), kc = kindUpgradeCost(id);
+      for (const r in c) run.res[r] = Math.max(0, c[r] - calc.base[r] * 3 * 3600); for (const r in kc) run.res[r] = Math.max(run.res[r], kc[r] * 1.01);
+      ui.sel = { tile: '6,5' }; ui.sheet = false; render();
+      const b = document.querySelector('#buildbar [data-act="upkind"]'), br = b.getBoundingClientRect(), tabs = document.getElementById('tabs').getBoundingClientRect();
+      const lines = [...b.children].map(e => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim(), whole: r.top >= br.top - 0.5 && r.bottom <= br.bottom + 0.5 && (getComputedStyle(e).overflow === 'visible' || e.scrollHeight <= e.clientHeight + 1) && r.height >= parseFloat(getComputedStyle(e).fontSize) }; });
+      return { mats: Object.keys(kc).length, hint: !!b.querySelector('.delay, .adds'), lines, inView: br.top >= 0 && br.bottom <= tabs.top + 1, docH: document.documentElement.scrollHeight, vh: innerHeight }; }, id);
+    ok(longest.mats === 3 && longest.hint && longest.lines.length === 4 && longest.lines.every(l => l.whole) && longest.inView && longest.docH <= longest.vh + 1,
+      `390x664, ${id === 'smith' ? 'a Blacksmith' : 'a Guildhall'} at a Castle: the bar's Upgrade button shows its title, three-material cost, effect and Palace line whole ` + JSON.stringify(longest));
+  }
   // R2, adapted to the shell: a drag never scrolls the page; the map pans only when it is bigger than its frame
   for (const [exp, n] of [[0, 5], [1, 7]]) {
     await fresh(p3); await p3.evaluate(exp => { state.run.exp = exp; ui.mapN = 0; render(); }, exp); await settle(p3);

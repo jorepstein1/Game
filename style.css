@@ -253,7 +253,8 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.on { background: #ffe58a; border-color: var(--red); box-shadow: 0 0 8px #ffd84a; }
   .bb.cant { opacity: .6; }
   .bb.act { flex: 0 0 74px; }
-  .bb.act.wide { flex: 1 1 auto; min-width: 0; background: var(--red); border-color: #4d0e0e; color: #fff; font-size: 14px; }
+  .bb.act.wide { flex: 1 1 auto; min-width: 0; height: auto; min-height: 56px; background: var(--red); border-color: #4d0e0e; color: #fff; font-size: 14px; }   /* grows to show every line: title, cost, effect, the hall's wait */
+  .bb.act.wide > * { flex: none; }
   .bb.act.wide.cant { background: #9c8a7a; border-color: #6b5e52; opacity: 1; }
   .bb.act.wide.note { background: #3a2b1d; border-color: #6b5e52; color: var(--parch); }   /* the last hall of a reign: a note, not a button */
   .bb.note small { font-size: 11px; color: #e8d9b0; }
@@ -261,7 +262,7 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
   .bb.act.wide .delay, .bb.act.wide .adds { color: #ffe9c4; font-size: 12px; line-height: 1.1; }
   .bb.act.wide b { font-size: 13px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bb.act.wide .eff { color: #ffe9c4; font-size: 11px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bb.act.wide .eff { color: #ffe9c4; font-size: 11px; line-height: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bb.act .ic { font-size: 20px; }
   .bb .ic { position: relative; }
   .bb .ic .lv { position: absolute; right: -12px; bottom: -4px; font: 700 10px/1.2 system-ui, sans-serif; font-style: normal; padding: 0 4px; border-radius: 7px; background: var(--red); color: #fff; }
