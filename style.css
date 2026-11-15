@@ -255,7 +255,14 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act.wide .cost { font-size: 12px; white-space: nowrap; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
   .bb.act.wide .delay, .bb.act.wide .adds { color: #ffe9c4; font-size: 12px; line-height: 1.1; }
+  .bb.act.wide b { font-size: 13px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bb.act.wide .eff { color: #ffe9c4; font-size: 11px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bb.act .ic { font-size: 20px; }
+  .bb .ic { position: relative; }
+  .bb .ic .lv { position: absolute; right: -12px; bottom: -4px; font: 700 10px/1.2 system-ui, sans-serif; font-style: normal; padding: 0 4px; border-radius: 7px; background: var(--red); color: #fff; }
+  /* A selected building: the bar names it and holds the button, so the strip keeps only the numbers, run together. */
+  #inspector .kindhead, #inspector .kindnote, #inspector .wide { display: none; }
+  #inspector .bstats p.stat { display: inline; margin: 0 10px 0 0; }
 }
 /* Taller phones have room for more lines of detail under the map (an 11x11 map still fits its 490px at 390x844). */
 @media (max-width: 800px) and (min-height: 740px) { #strip { height: 78px; } #inspector .goal, #inspector .lead { -webkit-line-clamp: 3; } }
@@ -282,4 +289,9 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
 .decree.on { border-color: #b8860b; background: #fff8e3; }
 .decree h3 { margin: 0 0 4px; }
 .delay { display: block; font-size: 13px; color: #a04a00; }
+.btn.upkind { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; max-width: 100%; }
+.btn.upkind .eff { font-size: 12px; opacity: .95; }
+.btn.upkind .delay, .btn.upkind .adds { color: #ffe9c4; font-size: 12px; }
+.card .lvnote { font-size: 12px; font-style: italic; }
+.uptip { margin: 0 0 8px; font-size: 13px; font-style: italic; }
 .stat.ready { color: #2f6b1f; }

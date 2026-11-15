@@ -70,16 +70,43 @@ const tileAt = key => state.run.tiles[key];
 const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0); return ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''; };
 // The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
 const staffAfter = work => Math.min(1, state.run.pop / Math.max(1, calc.need + (work || 0)));
-function buildAdds(id) { const d = BUILDINGS[id], a = {}, st = d.work ? staffAfter(d.work) : 1;
-  if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob; }
-  else for (const r in d.out || {}) a[r] = d.out[r] * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
+function buildAdds(id) { const d = BUILDINGS[id], a = {}, L = kindLevel(id), st = d.work ? staffAfter(d.work * L) : 1;
+  if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob * L; }
+  else for (const r in d.out || {}) a[r] = d.out[r] * levelMultAt(id, L) * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
   return a; }
+// Names of a kind in the plural, for "Upgrade all Farms", "Quarries", "Churches".
+const plural = id => { const n = BUILDINGS[id].name; return /y$/.test(n) ? n.slice(0, -1) + 'ies' : /(ch|sh|s|x)$/.test(n) ? n + 'es' : n + 's'; };
+const tileLevel = t => t.kind === 'hall' ? t.level : kindLevel(t.id);
+// What one more level of a kind does to the whole town: the change in income, housing and jobs.
+function kindUpgradeEffect(id) {
+  const after = afterKindUpgrade(id), adds = {};
+  for (const r in calc.base) { const d = after.base[r] - calc.base[r]; if (d > 1e-9) adds[r] = d; }
+  return { adds, housing: after.cap - calc.cap, jobs: after.need - calc.need };
+}
+// Plain effect text for the upgrade button: "output ×3", the flat gain for Cottages, Farms and Mills, housing for Cottages.
+function kindUpgradeText(id, fx) {
+  const d = BUILDINGS[id], parts = [];
+  if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
+  else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
+  else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
+  if (fx.housing > 0) parts.push('+' + fmt(fx.housing) + ' housing');
+  if (fx.jobs > 0) parts.push('needs ' + fmt(fx.jobs) + ' more ' + sprite('pop', 'villagers'));
+  return parts.join(' · ');
+}
+// The one upgrade button of a building's kind, for the inspector and the phone bar.
+// The phone bar is narrow and already names the kind above the button, so it passes short and leaves the name out.
+function kindUpgradeButton(id, cls, short) {
+  const c = kindUpgradeCost(id), L = kindLevel(id), fx = kindUpgradeEffect(id), ok = canAfford(c) && L < MAX_LEVEL;
+  return `<button class="${cls}${ok ? '' : ' cant'}" data-act="upkind" data-id="${id}"><b>Upgrade all${short ? '' : ' ' + plural(id)} to level ${L + 1}</b>${costHTML(c)}<span class="eff">${kindUpgradeText(id, fx)}</span>${hallDelay(c, fx.adds, fx.jobs)}</button>`;
+}
+const kindLine = id => `level ${kindLevel(id)} · ${count(id)} standing`;
 function researchAdds(r) { const a = {}; if (!r.mult) return a;
   for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
   return a; }
 // One line on the rested bonus: what it is doing now, or how far off it is.
 function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
-  return left <= 0 ? sprite('rest') + ' Rested: time away counts double until you next buy.' : `${sprite('rest')} Rest begins after ${fmtDuration(left)} more away without a purchase; from then time away counts double.`; }
+  if (left > 0) return `${sprite('rest')} Rest: time away counts extra once the town has worked undisturbed for ${fmtDuration(left)} more since your last purchase.`;
+  return `${sprite('rest')} Rested: time away counts extra, because the town has worked undisturbed since your last purchase.`; }
 // Says so when abdication is open, wherever the player might be wondering what to do next.
 const abdicateLine = () => canPrestige() ? `${sprite('crown')} <b>You can abdicate: ${fmt(pendingCrowns())} Crowns on offer</b>${pendingCrowns() >= CROWN_GOAL ? ', a good offer' : `; ${CROWN_GOAL} or more pays best`}. See the Realm tab.` : '';
 // While the next hall is within HALL_NEAR_HOURS of income: what buying this would do to the wait for it.
@@ -101,12 +128,6 @@ function hallHint() {
   return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div>${abdicateLine() ? `<div class="when">${abdicateLine()}</div>` : ''}<div class="muted when">${restLine()}</div></div></button>`;
 }
 
-// The routine-upgrades preview walks every building, so it is worked out at most once per action or every two seconds.
-function routinePreview() {
-  const now = performance.now();
-  if (!ui.routine || now - ui.routine.at > 2000) { ui.routine = routineUpgrades(true); ui.routine.at = now; }
-  return ui.routine;
-}
 function renderResources() {
   const run = state.run, res = run.res;
   let h = '';
@@ -122,12 +143,12 @@ function renderResources() {
   patch($('res'), h);
   const bar = $('res'); bar.classList.toggle('more', bar.scrollWidth > bar.clientWidth + 1 && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
   patch($('clickval'), '+' + fmt(clickValue()));
-  $('clicker').hidden = hallLevel() >= 2; // a flourish for the first minutes: from the Manor on the strip belongs to the inspector
+  $('clicker').hidden = !canCollect(); // a flourish for the first minutes: from the Manor on the strip belongs to the inspector
   patch($('subtitle'), esc(hallName(hallLevel()) + ' of ' + Math.floor(run.pop) + ' souls'));
 }
 
 function tileLabel(key, t, tr) {
-  if (t) return tileKind(t).name(t) + ', level ' + t.level;
+  if (t) return tileKind(t).name(t) + ', level ' + tileLevel(t);
   return TERRAIN[tr].name + (tr === 'plain' && ui.sel.build ? ', build ' + BUILDINGS[ui.sel.build].name + ' here' : '');
 }
 function renderMap() {
@@ -139,7 +160,7 @@ function renderMap() {
     let cls = 'tile ' + tr, inner = TERRAIN[tr].icon;
     if (t) {
       cls += ' built' + (t.kind === 'hall' ? ' hall' : '');
-      inner = tileKind(t).icon(t) + (t.level > 1 ? `<span class="lv">${t.level}</span>` : '');
+      inner = tileKind(t).icon(t) + (tileLevel(t) > 1 ? `<span class="lv">${tileLevel(t)}</span>` : '');
       if (calc.tiles[k] && calc.tiles[k].adj > 0) inner += `<span class="bn">${pct(calc.tiles[k].adj)}</span>`;
     } else if (tr === 'plain' && ui.sel.build) {
       cls += ' can';
@@ -164,9 +185,6 @@ function renderMap() {
   $('maphint').hidden = !pans;
 }
 
-// What one more level of a building adds per second (the same sum the Upgrade button shows).
-function upgradeAdds(k, t) { const d = BUILDINGS[t.id], info = calc.tiles[k], a = {}; if (!d.out || !info) return a;
-  for (const r in d.out) a[r] = d.linear ? d.out[r] * info.mult / info.levelMult : d.out[r] * info.mult; return a; }
 function buildingStats(id) {
   const d = BUILDINGS[id]; let h = '';
   if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${d.house}</b> villagers per level</p>`;
@@ -178,17 +196,10 @@ function buildingStats(id) {
   for (const o of BUILD_ORDER) if (boosts(o, id)) h += `<p class="stat">Boosts adjacent ${BUILDINGS[o].name}s ${BUILDINGS[o].icon} by <b>${pct(BUILDINGS[o].adj.building[id])}</b> per level</p>`;
   return h;
 }
-// What one more level gives, for the Upgrade button: "×2", or the flat amount for linear buildings.
-function upgradeGain(k, t) {
-  const d = BUILDINGS[t.id], info = calc.tiles[k];
-  if (!d.linear) return '×2';
-  if (d.house) return '+' + fmt(d.house * repBonus('housing')) + ' ' + sprite('cottage', 'housing');
-  return Object.keys(d.out).map(r => '+' + (d.out[r] * info.mult / info.levelMult).toFixed(1) + ' ' + RESOURCES[r].icon + '/s').join(' ');
-}
 // Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
 function housingWarning(extra) {
   const rate = foodRateAt(calc.cap + extra);
-  return rate < 0 ? `<p class="warn small">${sprite('warn')} Not enough food to fill it: at full housing food would be ${fmtRate(rate)}. Villagers only move in while they can be fed.</p>` : '';
+  return rate < 0 ? `<p class="warn small">${sprite('warn')} Not enough food to fill it<span class="wide">: at full housing food would be ${fmtRate(rate)}. Villagers only move in while they can be fed</span>.</p>` : '';
 }
 function renderInspector() {
   const sel = ui.sel; let h;
@@ -197,8 +208,9 @@ function renderInspector() {
     // The lead line is all a phone shows while placing (the bottom bar already has the cost); the rest is desktop detail.
     h = `<p class="lead"><b>${d.icon} ${d.name}</b> — ${d.desc}</p><div class="more">${buildingStats(sel.build)}<p class="muted">Tap an open plot to build. Badges on the map show the bonus each plot would give. Tap the building again (or press Esc) to cancel.</p></div>`;
   } else if (sel.tile && tileAt(sel.tile)) {
-    const k = sel.tile, t = tileAt(k), kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
+    const k = sel.tile, t = tileAt(k), kind = tileKind(t);
     if (t.kind === 'hall') {
+      const c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
       const next = BUILD_ORDER.filter(b => BUILDINGS[b].hall === t.level + 1).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name);
       h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
         <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
@@ -208,21 +220,22 @@ function renderInspector() {
         <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Raise a ${hallName(t.level + 1)} ${costHTML(c)}</button></div>`;
     } else {
       const d = BUILDINGS[t.id], info = calc.tiles[k] || { adj: 0, mult: 0, levelMult: 1 };
-      h = `<h3>${d.icon} ${d.name} <span class="muted">level ${t.level}</span></h3>`;
+      h = `<h3 class="kindhead">${d.icon} ${d.name} <span class="muted">· ${kindLine(t.id)}</span></h3><div class="bstats">`; // phones: the bar above the button names the kind
       if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${fmt(kind.housing(t))}</b></p>`;
       if (d.out) h += '<p class="stat">Making ' + Object.keys(d.out).map(r => `<b>${fmtRate(d.out[r] * info.mult)} ${RESOURCES[r].icon}</b>`).join(' ') + '</p>';
-      if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * t.level * calc.staff)}</b></p>`;
-      if (d.adj) h += `<p class="stat">Adjacency bonus: <b>${pct(info.adj)}</b></p>`;
-      if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} ${sprite('pop', 'villagers')}${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed — build cottages)</span>` : ''}</p>`;
-      h += `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Upgrade ${upgradeGain(k, t)} ${costHTML(c)}</button>${hallDelay(c, upgradeAdds(k, t))}
+      if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * kindLevel(t.id) * calc.staff)}</b></p>`;
+      if (d.adj) h += `<p class="stat">Adjacency<span class="wide"> bonus</span>: <b>${pct(info.adj)}</b></p>`;
+      if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} ${sprite('pop', 'villagers')}${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed<span class="wide"> — build cottages</span>)</span>` : ''}</p>`;
+      h += `</div><p class="muted kindnote">One upgrade raises every ${d.name} you have, and new ones are built at the same level.</p>`;
+      h += `<div class="row">${kindUpgradeButton(t.id, 'btn upkind')}
         <button class="btn alt" data-act="demolish" data-id="${k}">Demolish <span class="cost">refunds</span> ${costHTML(demolishRefund(t), true)}</button></div>`;
-      if (d.house) h += housingWarning(d.house * repBonus('housing'));
+      if (d.house) h += housingWarning(kindUpgradeEffect(t.id).housing);
     }
   } else if (sel.tile) {
     const [x, y] = xy(sel.tile), tr = state.run.terrain[x][y];
     if (tr === 'plain') h = '<h3>Open plot</h3><p>Good, level ground. Pick something from the Build list to raise here.</p>';
     else {
-      const fans = BUILD_ORDER.filter(b => BUILDINGS[b].adj && BUILDINGS[b].adj.terrain && BUILDINGS[b].adj.terrain[tr]).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name + 's');
+      const fans = BUILD_ORDER.filter(b => BUILDINGS[b].adj && BUILDINGS[b].adj.terrain && BUILDINGS[b].adj.terrain[tr]).map(b => BUILDINGS[b].icon + ' ' + plural(b));
       const c = clearCost();
       h = `<h3>${TERRAIN[tr].icon} ${TERRAIN[tr].name}</h3><p>Nothing can be built here, but ${fans.join(' and ')} beside it work 50% harder.</p>
         <p class="muted">Short of room? Clearing it makes an open plot, but the neighbours lose its bonus. Each clearing costs more than the last.</p>
@@ -232,7 +245,7 @@ function renderInspector() {
     // Phones show the current decree here instead of the welcome line (CSS), since the Decrees tab is a tap away.
     const d = currentDecree(), prog = d && d.progress ? d.progress() : null;
     h = (d ? `<p class="goal">${sprite('decrees')} <b>${d.title}</b>${decreeDone(d.id) ? ' — <b>done!</b> Claim it in Decrees.' : ' — ' + d.desc}${prog && !decreeDone(d.id) ? ` <span class="muted">(${fmt(prog[0])} / ${fmt(prog[1])})</span>` : ''}</p>` : '')
-      + '<p class="lead welcome"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap any building to upgrade it. The Decrees tab says what to do next.</p>';
+      + '<p class="lead welcome"><b>Welcome, my liege.</b> Pick a building, then tap a plot: neighbours and terrain give bonuses.</p><p class="muted more">Tap a building to upgrade it: one upgrade raises every building of that kind. The Decrees tab says what to do next.</p>';
   }
   patch($('inspector'), h);
 }
@@ -258,18 +271,17 @@ function renderPanel() {
   const run = state.run, meta = state.meta, hall = hallLevel();
   let h = `<div class="sheethead"><span>${tabLabel(ui.tab)}</span><button data-act="closeSheet" aria-label="Close">✕</button></div>`; // phones only
   if (ui.tab === 'build') {
-    const routine = routinePreview(), span = ROUTINE_SECONDS >= 3600 ? ROUTINE_SECONDS / 3600 + ' hours' : Math.round(ROUTINE_SECONDS / 60) + ' minutes';
     // A new player is sent to the Cottage first: the next hall leads the tab only once the first decrees are done.
     const hallFirst = hall > 1 || meta.crowns > 0 || !!meta.decreesDone.learned;
     if (hallFirst) h += hallHint();
-    if (routine.count || routine.saving)     h += `<button class="card routine${routine.count ? '' : ' cant'}" data-act="routine"><div class="ic">${sprite('up')}</div><div class="bd"><div class="nm">Routine upgrades <span>×${routine.count}</span></div>
-      <div class="muted">Makes every upgrade costing under ${span} of income, cheapest first.${routine.saving ? ' <b>Holding back the price of the ' + hallName(hall + 1) + ', which is under an hour away.</b>' : ''}</div>${routine.count ? costHTML(routine.spent) : ''}</div></button><hr>`;
+    // Until the first kind upgrade: where upgrades are (they are not in this list).
+    if (!meta.stats.upgrades && BUILD_ORDER.some(id => count(id) > 0)) h += '<p class="muted uptip">To upgrade, tap one of your buildings on the map. One upgrade raises every building of that kind.</p>';
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">${sprite('lock')}</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
-      const c = buildCost(id);
+      const c = buildCost(id), L = kindLevel(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}</span></div><div class="muted">${d.desc}</div>${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work)}${d.house ? housingWarning(d.house * repBonus('housing')) : ''}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}${L > 1 ? ' · level ' + L : ''}</span></div><div class="muted">${d.desc}</div>${L > 1 ? `<div class="muted lvnote">New ones are built at level ${L}.</div>` : ''}${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work * L)}${d.house ? housingWarning(Math.floor(d.house * levelMultAt(id, L) * repBonus('housing'))) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
@@ -327,11 +339,13 @@ function renderBuildBar() {
   // drop the second tap of a double tap (Close must not fall through to the Farm button that replaces it).
   ui.barMode = t ? 'tile' : tr && tr !== 'plain' ? 'terrain' : 'build';
   if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
-    const kind = tileKind(t), c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
-    h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>${t.kind === 'hall' ? 'Raise a ' + hallName(t.level + 1) : 'Upgrade ' + upgradeGain(k, t)}</b>${costHTML(c)}${t.kind === 'hall' ? '' : hallDelay(c, upgradeAdds(k, t))}</button>`;
+    const kind = tileKind(t);
+    if (t.kind === 'hall') { const c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
+      h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>Raise a ${hallName(t.level + 1)}</b>${costHTML(c)}</button>`; }
+    else h = kindUpgradeButton(t.id, 'bb act wide', true);
     if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">${sprite('demolish')}</span><small>Demolish</small></button>`;
     patch($('bbrow'), h + close);
-    patch($('bbinfo'), `<b>${kind.icon(t)} ${kind.name(t)}</b> level ${t.level}`);
+    patch($('bbinfo'), t.kind === 'hall' ? `<b>${kind.icon(t)} ${kind.name(t)}</b> level ${t.level}` : `<b>${kind.icon(t)} ${kind.name(t)}</b> ${kindLine(t.id)}`);
     return;
   }
   if (tr && tr !== 'plain') {
@@ -342,10 +356,10 @@ function renderBuildBar() {
   }
   for (const id of BUILD_ORDER) {
     const d = BUILDINGS[id]; if (d.hall > hallLevel()) continue;
-    h += `<button class="bb${ui.sel.build === id ? ' on' : ''}${canAfford(buildCost(id)) ? '' : ' cant'}" data-act="pick" data-id="${id}" title="${d.name}"><span class="ic">${d.icon}</span><small>${d.name}</small></button>`;
+    h += `<button class="bb${ui.sel.build === id ? ' on' : ''}${canAfford(buildCost(id)) ? '' : ' cant'}" data-act="pick" data-id="${id}" title="${d.name}"><span class="ic">${d.icon}${kindLevel(id) > 1 ? `<i class="lv">${kindLevel(id)}</i>` : ''}</span><small>${d.name}</small></button>`;
   }
   patch($('bbrow'), h);
-  patch($('bbinfo'), ui.sel.build ? `<b>${BUILDINGS[ui.sel.build].icon} ${BUILDINGS[ui.sel.build].name}</b> ${costHTML(buildCost(ui.sel.build))}<span class="hint">tap a plot</span>`
+  patch($('bbinfo'), ui.sel.build ? `<b>${BUILDINGS[ui.sel.build].icon} ${BUILDINGS[ui.sel.build].name}</b>${kindLevel(ui.sel.build) > 1 ? ' level ' + kindLevel(ui.sel.build) : ''} ${costHTML(buildCost(ui.sel.build))}<span class="hint">tap a plot</span>`
     : '<span class="hint">Tap a building, then an open plot on the map</span>');
 }
 function renderCity() {
@@ -425,17 +439,17 @@ function requestPersistence() {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* unsupported */ }
 }
 const fmtDuration = sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60); return (h ? h + 'h ' : '') + m + 'm'; };
+// Hours to one decimal for the welcome-back line ("8 h", "18.5 h"); under an hour in minutes.
+const fmtHours = sec => sec < 3600 ? Math.round(sec / 60) + ' min' : (Math.round(sec / 360) / 10) + ' h';
 // Every stretch of missed time goes through here: page load, or the loop noticing the tab was asleep.
 function catchUp(sec) {
   const r = creditAway(sec);
   if (r.away <= OFFLINE_REPORT_SECONDS) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
-  openModal(`<h2 id="modaltitle">Welcome back, my liege</h2><p>Your villagers kept working for ${fmtDuration(r.credited)} while you were away.</p>
-    ${r.rested >= 60 ? `<p class="stat">${sprite('rest')} Rested: the town did <b>${fmtDuration(r.rested)}</b> of extra work. Time away counts double until you next buy.</p>` : `<p class="muted">${restLine()}</p>`}
+  openModal(`<h2 id="modaltitle">Welcome back</h2><p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>
     ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
-    ${r.capped ? `<p class="muted">You were gone for ${fmtDuration(r.away)}, but offline progress is capped at ${r.capHours} hours${r.capHours < 24 ? ' (24 with Stewardship research)' : ''}.</p>` : ''}
     ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
-    ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Splendid</button></div>`);
+    ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
 }
 function loadGame() {
   const now = Date.now(); let raw = null, notes = [];
@@ -490,16 +504,17 @@ const CITY_ACTIONS = {
   closeSheet() { ui.sheet = false; },
   deselect() { ui.sel = {}; },
   up(k) { if (say(upgrade(k)).ok) ui.popKey = k; },
+  upkind(id) { say(upgradeKind(id)); },
   demolish(k) {
     const t = tileAt(k); if (!t || !tileKind(t).removable) return;
     const go = () => { if (demolish(k).ok) { ui.sel = {}; render(); } };
-    if (t.level > 1) confirmBox('Demolish this building?', `The level ${t.level} ${BUILDINGS[t.id].name} and its upgrades will be gone. You get back ${costHTML(demolishRefund(t), true)} (${Math.round(REFUND_SHARE * 100)}% of what it cost).`, go, 'Demolish');
+    const L = kindLevel(t.id), d = BUILDINGS[t.id];
+    if (L > 1) confirmBox('Demolish this building?', `This ${d.name} will be gone. You get back ${costHTML(demolishRefund(t), true)}, which is ${Math.round(REFUND_SHARE * 100)}% of what it would cost to build this one again. Your other ${plural(t.id)} stay at level ${L}, and so will new ones.`, go, 'Demolish');
     else go();
   },
   research(id) { say(buyResearch(id)); },
   rep(id) { buyRepeatable(id); },
   expand() { say(expand()); },
-  routine() { say(routineUpgrades()); },
   clear(k) { say(clearLand(k)); },
   claim(id) { say(claimDecree(id || undefined)); },
   pursue(id) { pursueDecree(id); },
@@ -555,7 +570,6 @@ function bindInput() {
     requestPersistence();
     const el = e.target.closest('[data-act]');
     if (!el || ui.paused || el.classList.contains('locked')) return;
-    ui.routine = null; // anything tapped may change what counts as routine
     if (el.closest('#buildbar')) {
       const now = performance.now();
       const near = Math.hypot(e.clientX - ui.barTapX, e.clientY - ui.barTapY) < 40;

@@ -3,7 +3,8 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
+const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
 // state = { v, last, meta, run }
@@ -15,20 +16,23 @@ let state, calc;
 // ───────────────────────── State ─────────────────────────
 function newMeta(now) {
   return { crowns: 0, bonusCrowns: 0 /* how many of the Crowns came from Monuments */, decree: DECREES[0].id /* the decree being pursued */, decreesDone: {} /* ids already claimed */,
-    stats: { clicks: 0, totalGold: 0, prestiges: 0, built: 0, started: now || 0 } };
+    stats: { clicks: 0, totalGold: 0, prestiges: 0, built: 0, upgrades: 0, started: now || 0 } };
 }
 // A kingdom founded with Crowns held gets a small head start in resources (none for a first kingdom).
 function newRun(seed, crowns) {
   if (seed === undefined) seed = (Math.random() * 2 ** 31) | 0;
-  const run = { seed, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
+  const run = { seed, gen: TERRAIN_GEN, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
+    levels: newLevels(), // every building of a kind works at its kind's level
     research: {}, repeatables: {}, cleared: 0, starving: false,
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
     away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
-    gold: 0 };      // gold earned this run
+    gold: 0,        // gold earned this run
+    collected: 0 }; // gold from hand collection this run, up to CLICK_LIMIT
   run.tiles[HALL_KEY] = { kind: 'hall', id: 'hall', level: 1 };
   if (crowns > 0) for (const r in HEAD_START) run.res[r] += HEAD_START[r];
   return run;
 }
+function newLevels() { const o = {}; for (const id of BUILD_ORDER) o[id] = 1; return o; }
 function newState(now) { return { v: SAVE_VERSION, last: now || 0, meta: newMeta(now), run: newRun() }; }
 function startNewGame(now) { state = newState(now); calc = compute(); }
 
@@ -36,7 +40,139 @@ function mulberry(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
+// ── Terrain ──
+// Sites: an open plot with k neighbours of one terrain, counting only tiles inside radius r of the centre (what the
+// player has unlocked). k >= 2 is a double site, k >= 3 a triple: where a camp, quarry or farm earns +100% or more.
+const STEPS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const ringOf = (x, y) => Math.max(Math.abs(x - MAP_MID), Math.abs(y - MAP_MID));
+const onMap = (x, y) => x >= 0 && y >= 0 && x < MAP_SIZE && y < MAP_SIZE;
+function sameAround(g, x, y, r, t) { let k = 0; for (const [dx, dy] of STEPS4) { const a = x + dx, b = y + dy; if (onMap(a, b) && ringOf(a, b) <= r && g[a][b] === t) k++; } return k; }
+// Per terrain, how many open plots within radius r are double (2+) and triple (3+) sites. The hall's tile is not a plot.
+function siteCounts(g, r) {
+  const o = { open: 0, double: { forest: 0, hill: 0, water: 0 }, triple: { forest: 0, hill: 0, water: 0 } };
+  for (let x = MAP_MID - r; x <= MAP_MID + r; x++) for (let y = MAP_MID - r; y <= MAP_MID + r; y++) {
+    if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+    o.open++;
+    for (const t in o.double) { const k = sameAround(g, x, y, r, t); if (k >= 2) o.double[t]++; if (k >= 3) o.triple[t]++; }
+  }
+  return o;
+}
+const sumOf = o => Object.values(o).reduce((a, b) => a + b, 0);
+
+// Features, not single tiles: groves, hill ranges and a lake or river, placed by the seeded RNG. The value of a
+// feature is in the open plots on its edges, so none is left solid: a grove's inner tiles become clearings, ranges
+// jog and fork, rivers bend. The hall's tile and its four neighbours stay open.
+let terrainAttempts = 0; // maps drawn by the last genTerrain call (1 = the first draw passed); read by the tests
 function genTerrain(seed) {
+  const rnd = mulberry(seed), pick = a => a[(rnd() * a.length) | 0];
+  const fixed = (x, y) => Math.abs(x - MAP_MID) + Math.abs(y - MAP_MID) <= 1;
+  let g;
+  for (let attempt = 0; attempt < 30; attempt++) { // a map the repair pass cannot fix is drawn again from the same RNG
+    terrainAttempts = attempt + 1;
+    g = []; for (let x = 0; x < MAP_SIZE; x++) g.push(Array(MAP_SIZE).fill('plain'));
+    const have = { forest: 0, hill: 0, water: 0 }; // tiles of each so far; the last feature of a kind may be cut short
+    const put = (x, y, t) => { if (onMap(x, y) && !fixed(x, y) && g[x][y] === 'plain' && have[t] < BIOME_TILES[t]) { g[x][y] = t; have[t]++; return true; } return false; };
+    const blob = (t, size) => { // grown from a seed tile by orthogonal steps; a grove's inner tiles are then cleared
+      const cells = [[(rnd() * MAP_SIZE) | 0, (rnd() * MAP_SIZE) | 0]];
+      for (let guard = 0; cells.length < size && guard < 40; guard++) { const [x, y] = pick(cells), [dx, dy] = pick(STEPS4), a = x + dx, b = y + dy;
+        if (onMap(a, b) && !fixed(a, b) && !cells.some(([p, q]) => p === a && q === b)) cells.push([a, b]); }
+      const inSet = (a, b) => cells.some(([p, q]) => p === a && q === b);
+      for (const [x, y] of cells) if (t === 'water' || !STEPS4.every(([dx, dy]) => inSet(x + dx, y + dy))) put(x, y, t); // a lake stays whole: a cleared middle could cut it into pieces
+    };
+    const line = (t, len, wiggle, thick) => { // a range or river: walks one way, now and then stepping aside (a bend is an L, never a diagonal)
+      let x = (rnd() * MAP_SIZE) | 0, y = (rnd() * MAP_SIZE) | 0; const [dx, dy] = pick(STEPS4), side = rnd() < 0.5 ? 1 : -1;
+      for (let i = 0; i < len; i++) {
+        put(x, y, t); if (rnd() < thick) put(x + dy * side, y + dx * side, t);
+        if (rnd() < wiggle) { x += dy * side; y += dx * side; put(x, y, t); }
+        x += dx; y += dy;
+      }
+    };
+    // Water first, so no grove or range lies across a river and breaks it into pieces.
+    for (let guard = 0; guard < 60 && have.water < BIOME_TILES.water; guard++) if (rnd() < 0.5) blob('water', 4 + ((rnd() * 3) | 0)); else line('water', 4 + ((rnd() * 4) | 0), 0.4, 0);
+    for (let guard = 0; guard < 60 && have.forest < BIOME_TILES.forest; guard++) blob('forest', 4 + ((rnd() * 5) | 0));
+    for (let guard = 0; guard < 60 && have.hill < BIOME_TILES.hill; guard++) line('hill', 3 + ((rnd() * 3) | 0), 0.3, 0.35);
+    // Groves and ranges that overlap can still close up into a solid mass: open its inner tiles too (clearings).
+    const inner = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] !== 'plain' && g[x][y] !== 'water' && STEPS4.every(([dx, dy]) => onMap(x + dx, y + dy) && g[x + dx][y + dy] === g[x][y])) inner.push([x, y]);
+    for (const [x, y] of inner) g[x][y] = 'plain';
+    if (repairTerrain(g, rnd, fixed)) break;
+  }
+  // If all 30 draws fail (none does for seeds tested, and the tests hold the count to a handful), the last map is kept
+  // as it is: a valid grid with its features, short of some guarantee, rather than no map at all.
+  return g;
+}
+// The guarantees (see data.js): the start area has some of every terrain, a double forest site and enough plots;
+// by the first expansion every terrain has a double site;
+// every expansion adds a triple site and BIOME_DOUBLES double sites; the full map has a triple site of each terrain.
+// Water is never a lone tile: each has an orthogonal water neighbour (inside the start area, one inside it too), so
+// lakes and rivers read as such and a farm between two of their tiles has a double site.
+// Each failure is fixed by turning the fewest open tiles around one plot into that terrain, then everything is
+// checked again, since a fix can spoil an earlier ring. Returns false if the map cannot be fixed this way.
+function repairTerrain(g, rnd, fixed) {
+  const R = MAP_RADIUS, T = ['forest', 'hill', 'water'];
+  // Make a new k-site (better than it was at radius `prev`) within radius r, of terrain `want` or any.
+  const pocket = (r, k, want, prev) => {
+    let best = null, bestCost = Infinity;
+    for (let x = MAP_MID - r; x <= MAP_MID + r; x++) for (let y = MAP_MID - r; y <= MAP_MID + r; y++) {
+      if (g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+      for (const t of want ? [want] : T) {
+        if (sameAround(g, x, y, r, t) >= k || (prev >= 0 && ringOf(x, y) <= prev && sameAround(g, x, y, prev, t) >= k)) continue;
+        const nb = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => onMap(a, b) && ringOf(a, b) <= r);
+        const open = nb.filter(([a, b]) => g[a][b] === 'plain' && !fixed(a, b)), need = k - sameAround(g, x, y, r, t);
+        if (open.length < need) continue;
+        open.sort((p, q) => (ringOf(q[0], q[1]) > prev) - (ringOf(p[0], p[1]) > prev)); // turn new land first, so inner rings keep their sites
+        const use = open.slice(0, need);
+        if (prev >= 0 && ringOf(x, y) <= prev && sameAround(g, x, y, prev, t) + use.filter(([a, b]) => ringOf(a, b) <= prev).length >= k) continue; // would be as good before: no gain
+        const wet = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && (g[a + dx][b + dy] === 'water' || use.some(([p, q]) => p === a + dx && q === b + dy)));
+        const lone = t === 'water' ? use.filter(u => !wet(u)).length : 0; // each lone water tile will need a partner: extending a lake is cheaper
+        const cost = need + lone + 0.5 * use.filter(([a, b]) => ringOf(a, b) <= prev).length + rnd() * 0.4;
+        if (cost < bestCost) { bestCost = cost; best = { t, use }; }
+      }
+    }
+    if (!best) return false;
+    for (const [a, b] of best.use) g[a][b] = best.t;
+    return true;
+  };
+  for (let fix = 0; fix < 60; fix++) {
+    const s = R.map(r => siteCounts(g, r)); let ok = true;
+    for (const t of T) { let n = 0; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === t) n++;
+      if (n < BIOME_START[t]) { ok = false; // an odd tile is enough here: the start area is small
+        const free = []; for (let x = MAP_MID - R[0]; x <= MAP_MID + R[0]; x++) for (let y = MAP_MID - R[0]; y <= MAP_MID + R[0]; y++) if (g[x][y] === 'plain' && !fixed(x, y)) free.push([x, y]);
+        if (!free.length) return false;
+        const near = t === 'water' ? free.filter(([x, y]) => STEPS4.some(([dx, dy]) => g[x + dx][y + dy] === 'water' && ringOf(x + dx, y + dy) <= R[0])) : []; // water joins water
+        const from = near.length ? near : free, [x, y] = from[(rnd() * from.length) | 0]; g[x][y] = t; break; } }
+    if (!ok) continue;
+    if (lonelyWater(g).length) { // join it to the water beside it diagonally if there is some, else give it a partner tile
+      const [x, y] = lonelyWater(g)[0], inner = ringOf(x, y) <= R[0];
+      const opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => onMap(a, b) && g[a][b] === 'plain' && !fixed(a, b) && (!inner || ringOf(a, b) <= R[0]));
+      if (!opts.length) { g[x][y] = 'plain'; continue; }
+      const joins = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && !(a + dx === x && b + dy === y) && g[a + dx][b + dy] === 'water');
+      const best = opts.filter(joins); const [a, b] = (best.length ? best : opts)[(rnd() * (best.length || opts.length)) | 0];
+      g[a][b] = 'water'; continue;
+    }
+    if (s[0].double.forest < 1) { if (!pocket(R[0], 2, 'forest', -1)) return false; continue; }
+    { const sa = siteCounts(g, BIOME_ALL_DOUBLE), short = T.find(t => !sa.double[t]);
+      if (short) { if (!pocket(BIOME_ALL_DOUBLE, 2, short, -1)) return false; continue; } }
+    let i = 1;
+    for (; i < R.length; i++) {
+      if (sumOf(s[i].triple) - sumOf(s[i - 1].triple) < BIOME_TRIPLES) { if (!pocket(R[i], 3, null, R[i - 1])) return false; break; }
+      if (sumOf(s[i].double) - sumOf(s[i - 1].double) < BIOME_DOUBLES) { if (!pocket(R[i], 2, null, R[i - 1])) return false; break; }
+    }
+    if (i < R.length) continue;
+    const lone = T.find(t => !s[R.length - 1].triple[t]);
+    if (lone) { if (!pocket(R[R.length - 1], 3, lone, -1)) return false; continue; }
+    return s[0].open >= BIOME_START_OPEN;
+  }
+  return false;
+}
+// Water tiles with no orthogonal water neighbour; a tile in the start area needs that neighbour inside the start area.
+function lonelyWater(g) {
+  const o = [], r0 = MAP_RADIUS[0];
+  for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (g[x][y] === 'water' &&
+    !STEPS4.some(([dx, dy]) => { const a = x + dx, b = y + dy; return onMap(a, b) && g[a][b] === 'water' && (ringOf(x, y) > r0 || ringOf(a, b) <= r0); })) o.push([x, y]);
+  return o;
+}
+// The original generator, one roll per tile. Only version-1 saves use it: they stored no grid, just the seed.
+function genTerrainLegacy(seed) {
   const rnd = mulberry(seed), g = [];
   for (let x = 0; x < MAP_SIZE; x++) { g.push([]); for (let y = 0; y < MAP_SIZE; y++) {
     const r = rnd(); g[x].push(r < 0.14 ? 'forest' : r < 0.23 ? 'hill' : r < 0.29 ? 'water' : 'plain'); } }
@@ -80,7 +216,10 @@ const mapRadius = () => MAP_RADIUS[state.run.exp];
 const unlocked = (x, y) => Math.abs(x - MAP_MID) <= mapRadius() && Math.abs(y - MAP_MID) <= mapRadius();
 function neighbors(x, y) { return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].filter(([a, b]) => unlocked(a, b)); }
 
-const levelMult = t => BUILDINGS[t.id].linear ? t.level : Math.pow(2, t.level - 1);
+const kindLevel = id => (state.run.levels && state.run.levels[id]) || 1;
+// Output of one building at its kind's level: linear kinds gain their level-1 amount per level, the rest multiply by OUT_GROWTH.
+const levelMultAt = (id, level) => BUILDINGS[id].linear ? level : Math.pow(OUT_GROWTH, level - 1);
+const levelMult = t => levelMultAt(t.id, kindLevel(t.id));
 function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.min(BIG, Math.ceil(cost[r] * k)); return o; } // never Infinity
 function addCost(total, cost) { for (const r in cost) total[r] = (total[r] || 0) + cost[r]; return total; }
 const canAfford = cost => Object.keys(cost).every(r => state.run.res[r] >= cost[r]);
@@ -88,7 +227,7 @@ function pay(cost) { if (!canAfford(cost)) return false; for (const r in cost) s
 function grant(cost) { for (const r in cost) state.run.res[r] += cost[r]; }
 function earnGold(g) { state.run.gold += g; state.meta.stats.totalGold += g; }
 
-// Per-kind tile behaviour. A tile is { kind, id, level }; anything that differs between the hall
+// Per-kind tile behaviour. A tile is { kind, id } (the hall also has a level; buildings work at their kind's level); anything that differs between the hall
 // and ordinary buildings lives here, so new kinds can be added without touching the rules below.
 const TILE_KINDS = {
   hall: {
@@ -105,16 +244,31 @@ const TILE_KINDS = {
     name: t => BUILDINGS[t.id].name,
     icon: t => BUILDINGS[t.id].icon,
     housing: t => (BUILDINGS[t.id].house || 0) * levelMult(t),
-    jobs: t => (BUILDINGS[t.id].work || 0) * t.level,
-    upgradeCost: t => { const def = BUILDINGS[t.id], k = UPGRADE_BASE * Math.pow(def.upgradeGrowth || UPGRADE_GROWTH, t.level) * upgradeCreep(t), also = def.upgradeAlso;
-      return scaleCost(also && t.level >= also.from ? addCost(Object.assign({}, def.cost), also.cost) : def.cost, k); },
+    jobs: t => (BUILDINGS[t.id].work || 0) * kindLevel(t.id),
+    upgradeCost: t => kindUpgradeCost(t.id),
   },
 };
-const upgradeCreep = t => BUILDINGS[t.id].linear ? 1 : Math.pow(UPGRADE_CREEP, Math.max(0, t.level - UPGRADE_CREEP_FROM) ** 2);
 const tileKind = t => TILE_KINDS[t.kind];
 const upgradeCost = t => tileKind(t).upgradeCost(t);
-const buildGrowth = id => BUILDINGS[id].growth || BUILD_GROWTH;
-const buildCost = id => scaleCost(BUILDINGS[id].cost, Math.pow(buildGrowth(id), count(id)));
+// Prices. What a kind has cost in all, with n standing at level L, is one number, its "worth":
+//   worth(n, L) = cost × W(n) × U(L),  W(n) = step(0) + … + step(n-1), step(i) = g^i (past `late.from` copies each
+//   further step multiplies by late.growth instead of g),  U(1) = 1, U(L) = lift × u^(L-1) from level 2
+//   (g: build growth, u: upgrade growth, lift: a one-off extra step at level 2, so that a cheap first-hall kind
+//   keeps pace with the town once it is upgraded; 1 for most kinds)
+// and every purchase costs the rise in worth it causes:
+//   build   (n → n+1)  = cost × step(n) × U(L)
+//   upgrade (L → L+1)  = cost × W(n) × (U(L+1) - U(L))
+// So the price of reaching n buildings at level L is the same whatever the order (no exploit in building first
+// or upgrading first), and demolishing refunds REFUND_SHARE of the last building's share of the worth.
+const buildGrowth = id => BUILDINGS[id].growth;
+const upgradeGrowth = id => BUILDINGS[id].upgradeGrowth;
+// The price factor of the copy that makes n+1: g^n, or past `late.from` copies the steeper late.growth per copy.
+const copyStep = (id, n) => { const g = buildGrowth(id), late = BUILDINGS[id].late;
+  return !late || n < late.from ? Math.pow(g, n) : Math.pow(g, late.from - 1) * Math.pow(late.growth, n - late.from + 1); };
+const copiesWorth = (id, n) => { let w = 0; for (let i = 0; i < n; i++) w += copyStep(id, i); return w; };
+const levelWorth = (id, level) => level <= 1 ? 1 : (BUILDINGS[id].lift || 1) * Math.pow(upgradeGrowth(id), level - 1);
+const buildCost = id => scaleCost(BUILDINGS[id].cost, copyStep(id, count(id)) * levelWorth(id, kindLevel(id)));
+const kindUpgradeCost = id => scaleCost(BUILDINGS[id].cost, Math.max(1, copiesWorth(id, count(id))) * (levelWorth(id, kindLevel(id) + 1) - levelWorth(id, kindLevel(id))));
 
 // Adjacency: terrain and buildings are separate namespaces (def.adj.terrain / def.adj.building).
 function adjBonus(id, x, y) {
@@ -122,7 +276,7 @@ function adjBonus(id, x, y) {
   let s = 0;
   for (const [nx, ny] of neighbors(x, y)) {
     const t = state.run.tiles[nx + ',' + ny];
-    if (t) { if (t.kind === 'building' && a.building && a.building[t.id]) s += a.building[t.id] * Math.sqrt(t.level); }
+    if (t) { if (t.kind === 'building' && a.building && a.building[t.id]) s += a.building[t.id] * Math.sqrt(kindLevel(t.id)); }
     else if (a.terrain && a.terrain[state.run.terrain[nx][ny]]) s += a.terrain[state.run.terrain[nx][ny]];
   }
   return s;
@@ -157,6 +311,8 @@ const repCost = r => scaleCost(r.cost, Math.pow(r.growth, repLevel(r.id)));
 
 const foodPerPop = pop => FOOD_PER_POP * (1 + (pop / FOOD_CROWD) ** 2);
 const upkeep = pop => pop * foodPerPop(pop);
+// The snapshot the town would have with one more level of a kind (used to preview what an upgrade does).
+function afterKindUpgrade(id) { const lv = state.run.levels, keep = lv[id]; lv[id] = kindLevel(id) + 1; const c = compute(); lv[id] = keep; return c; }
 // Base food income if the town held `pop` villagers (used to preview what more housing would do).
 function foodRateAt(pop) { const keep = state.run.pop; state.run.pop = pop; const r = compute().base.food; state.run.pop = keep; return r; }
 // Largest population between lo and hi whose upkeep still fits in `budget` food per second.
@@ -186,7 +342,7 @@ function compute() {
     cap += kind.housing(t); need += kind.jobs(t);
     if (t.kind !== 'building') continue;
     const [x, y] = xy(k);
-    if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * t.level;
+    if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * kindLevel(t.id);
     tiles[k] = { adj: adjBonus(t.id, x, y), levelMult: levelMult(t), mult: 0 };
   }
   const rawCap = cap;
@@ -243,7 +399,7 @@ function creditAway(sec) {
   // costs nothing: 6h + 6h is worth the same as 12h in one stretch.
   // The bonus is credited as extra simulated time, which keeps it honest about housing, food and staffing. So
   // run.clock runs ahead of the real time played, and a town that is starving starves for the extra hours too.
-  const rest = s => REST_BONUS * Math.max(0, s - REST_AFTER_HOURS * 3600), run0 = state.run;
+  const rest = s => REST_BONUS * Math.max(0, s - REST_AFTER_HOURS * 3600) + REST_LONG_BONUS * Math.max(0, s - REST_LONG_AFTER_HOURS * 3600), run0 = state.run;
   const rested = rest(run0.away + credited) - rest(run0.away);
   run0.away += credited;
   const before = Object.assign({}, state.run.res);
@@ -260,21 +416,27 @@ function build(key, id) {
   const [x, y] = xy(key), def = hasOwn(BUILDINGS, id) ? BUILDINGS[id] : null;
   if (!def || def.hall > hallLevel() || !unlocked(x, y) || state.run.tiles[key] || state.run.terrain[x][y] !== 'plain') return fail();
   if (!pay(buildCost(id))) return fail('Not enough resources for a ' + def.name + '.');
-  state.run.tiles[key] = { kind: 'building', id, level: 1 }; state.meta.stats.built++;
+  state.run.tiles[key] = { kind: 'building', id }; state.meta.stats.built++;
   return { ok: true };
 }
+// The hall is upgraded on its own tile; buildings are upgraded by kind (upgradeKind).
 function upgrade(key) {
   const t = state.run.tiles[key];
-  if (!t || t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
+  if (!t) return fail();
+  if (t.kind === 'building') return upgradeKind(t.id);
+  if (t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
   t.level++;
-  return { ok: true, icon: 'crown', msg: t.kind === 'hall' ? `Your seat is now a ${hallName(t.level)}!` : undefined };
+  return { ok: true, icon: 'crown', msg: `Your seat is now a ${hallName(t.level)}!` };
 }
-// Everything paid for a building: its build price plus each upgrade. Demolition returns REFUND_SHARE of it.
-function spentOn(t) {
-  const total = addCost({}, scaleCost(BUILDINGS[t.id].cost, Math.pow(buildGrowth(t.id), Math.max(0, count(t.id) - 1))));
-  for (let l = 1; l < t.level; l++) addCost(total, upgradeCost({ kind: t.kind, id: t.id, level: l }));
-  return total;
+// One upgrade raises every building of a kind, standing or yet to be built.
+function upgradeKind(id) {
+  if (!hasOwn(BUILDINGS, id) || count(id) < 1 || kindLevel(id) >= MAX_LEVEL || !pay(kindUpgradeCost(id))) return fail();
+  state.run.levels[id] = kindLevel(id) + 1; state.meta.stats.upgrades++; // kind upgrades, all time (the first one retires a hint)
+  return { ok: true, icon: 'up', msg: `Every ${BUILDINGS[id].name} is now level ${state.run.levels[id]}` };
 }
+// A building's share of what its kind has cost: the last copy's rise in worth at today's level, which is exactly
+// what building it again would cost. Demolition returns REFUND_SHARE of it, so building and demolishing always loses money.
+const spentOn = t => scaleCost(BUILDINGS[t.id].cost, copyStep(t.id, Math.max(0, count(t.id) - 1)) * levelWorth(t.id, kindLevel(t.id)));
 function demolishRefund(t) { const o = spentOn(t); for (const r in o) o[r] = Math.min(BIG, Math.floor(o[r] * REFUND_SHARE)); return o; }
 function demolish(key) {
   const t = state.run.tiles[key];
@@ -309,40 +471,12 @@ function clearLand(key) {
   return { ok: true, icon: 'lumber', msg: 'The land is cleared.' };
 }
 
-// Routine upgrades: the cheap building upgrades nobody needs to think about, made in one action so they do not
-// crowd out the real choices. An upgrade is routine when every material it costs is at most ROUTINE_SECONDS of the
-// town's income of that material, so the whole batch can never set the next hall back by much. Cheapest first;
-// workplaces wait while there would be no one to staff them. With `preview` nothing is bought: it only counts.
 // Seconds until the next hall is affordable at today's income (0 if it is; Infinity if a material is not being made).
 function hallWait() {
   const hall = state.run.tiles[HALL_KEY]; if (hall.level >= MAX_LEVEL) return Infinity;
   const cost = upgradeCost(hall); let w = 0;
   for (const r in cost) { const need = cost[r] - state.run.res[r]; if (need > 0) w = Math.max(w, calc.base[r] > 0 ? need / calc.base[r] : Infinity); }
   return w;
-}
-// While the next hall is within ROUTINE_RESERVE_SECONDS of income, routine upgrades leave its price in the stores.
-function routineReserve() { return hallWait() <= ROUTINE_RESERVE_SECONDS ? upgradeCost(state.run.tiles[HALL_KEY]) : {}; }
-function routineUpgrades(preview) {
-  const run = state.run, keep = preview ? JSON.stringify({ tiles: run.tiles, res: run.res, away: run.away }) : null, spent = {};
-  calc = compute(); const reserve = routineReserve();
-  let n = 0;
-  for (; n < ROUTINE_MAX; n++) {
-    calc = compute();
-    const made = r => Math.max(0, calc.base[r] + (r === 'food' ? calc.eaten : 0));
-    let best = null, bestCost = null, bestSum = Infinity;
-    for (const k in run.tiles) {
-      const t = run.tiles[k], def = BUILDINGS[t.id];
-      if (t.kind !== 'building' || t.level >= MAX_LEVEL || (def.work && calc.need + def.work > calc.cap)) continue;
-      const c = upgradeCost(t); let sum = 0, ok = true;
-      for (const r in c) { sum += c[r]; if (c[r] > made(r) * ROUTINE_SECONDS || run.res[r] - (reserve[r] || 0) < c[r]) { ok = false; break; } }
-      if (ok && sum < bestSum) { best = k; bestCost = c; bestSum = sum; }
-    }
-    if (!best) break;
-    pay(bestCost); run.tiles[best].level++; addCost(spent, bestCost);
-  }
-  if (preview) { const o = JSON.parse(keep); run.tiles = o.tiles; run.res = o.res; run.away = o.away; }
-  calc = compute();
-  return n ? { ok: true, count: n, spent, icon: 'up', msg: `${n} routine upgrade${n > 1 ? 's' : ''} made` } : Object.assign(fail(Object.keys(reserve).length ? 'The stewards are saving for the ' + hallName(hallLevel() + 1) + '.' : 'No routine upgrades to make just now.'), { count: 0, spent, saving: Object.keys(reserve).length > 0 });
 }
 
 // Decrees: DECREE_CHOICES of them are open at a time (the earliest ones not yet claimed). Any open decree can be
@@ -380,9 +514,12 @@ function prestige() {
 // Hand collection: a little gold per tap, there for the first minutes of a reign. It does not grow with income,
 // so keeping the game open and tapping earns nothing that matters later.
 const clickValue = () => CLICK_GOLD;
+// The button is shown only before the Manor, and only until CLICK_LIMIT gold has come in by hand this reign. The interface and the balance bot both ask this, so they agree.
+const canCollect = () => hallLevel() < 2 && state.run.collected < CLICK_LIMIT;
 function collectTaxes() {
-  const g = clickValue();
-  state.run.res.gold += g; earnGold(g); state.meta.stats.clicks++;
+  if (!canCollect()) return { ok: false, gold: 0 };
+  const g = Math.min(clickValue(), CLICK_LIMIT - state.run.collected);
+  state.run.collected += g; state.run.res.gold += g; earnGold(g); state.meta.stats.clicks++;
   return { ok: true, gold: g };
 }
 
@@ -441,14 +578,15 @@ function sanitizeSave(raw, now) {
   { const open = DECREES.filter(d => !meta.decreesDone[d.id]).slice(0, DECREE_CHOICES); // pursue the saved one if it is still open
     meta.decree = open.some(d => d.id === m.decree) ? m.decree : open.length ? open[0].id : null; }
   const st = isObj(m.stats) ? m.stats : {};
-  for (const k of ['clicks', 'prestiges', 'built']) meta.stats[k] = int(st[k], 0, 0, 1e15);
+  for (const k of ['clicks', 'prestiges', 'built', 'upgrades']) meta.stats[k] = int(st[k], 0, 0, 1e15);
   meta.stats.totalGold = num(st.totalGold, 0, 0, BIG);
   meta.stats.started = num(st.started, now, 0, now);
 
   run.seed = int(r.seed, run.seed, -(2 ** 31), 2 ** 31);
   const grid = r.terrain;
   const gridOk = Array.isArray(grid) && grid.length === MAP_SIZE && grid.every(col => Array.isArray(col) && col.length === MAP_SIZE && col.every(c => typeof c === 'string' && hasOwn(TERRAIN, c)));
-  run.terrain = gridOk ? grid.map(col => col.slice()) : genTerrain(run.seed); // version 1 regenerated terrain from the seed
+  run.gen = int(r.gen, 1, 1, TERRAIN_GEN); // saves from before the marker had their map from the old generator
+  run.terrain = gridOk ? grid.map(col => col.slice()) : run.gen === 2 ? genTerrain(run.seed) : genTerrainLegacy(run.seed); // a missing grid (version 1) is regrown from the seed by the generator that made it
   run.terrain[MAP_MID][MAP_MID] = 'plain';
   run.exp = int(r.exp, 0, 0, EXPAND_COST.length);
   run.cleared = int(r.cleared, 0, 0, MAP_SIZE * MAP_SIZE);
@@ -457,19 +595,25 @@ function sanitizeSave(raw, now) {
   run.gold = num(r.gold, 0, 0, BIG);
   run.clock = num(r.clock, 0, 0, BIG);
   run.away = num(r.away, 0, 0, 1e9);
+  run.collected = num(r.collected, 0, 0, CLICK_LIMIT);
   run.starving = r.starving === true;
 
-  let dropped = 0;
-  const radius = MAP_RADIUS[run.exp], tiles = isObj(r.tiles) ? r.tiles : {};
+  let dropped = 0, mixed = false; const seen = {}; // levels met per kind, for a version-3 save
+  const radius = MAP_RADIUS[run.exp], tiles = isObj(r.tiles) ? r.tiles : {}, levels = isObj(r.levels) ? r.levels : {};
+  for (const id of BUILD_ORDER) if (v >= 4) run.levels[id] = int(hasOwn(levels, id) ? levels[id] : 1, 1, 1, MAX_LEVEL);
   for (const k in tiles) {
     const t = tiles[k], mt = /^(\d{1,2}),(\d{1,2})$/.exec(k);
     if (!mt || !isObj(t)) { dropped++; continue; }
     const x = +mt[1], y = +mt[2], level = int(t.level, 1, 1, MAX_LEVEL);
     if (k === HALL_KEY) { run.tiles[k].level = level; continue; } // the centre is always the hall
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
-    run.tiles[x + ',' + y] = { kind: 'building', id: t.id, level };
+    run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
+    if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = hasOwn(seen, t.id) ? Math.min(seen[t.id], level) : level; } // version 3 kept a level per building
     run.terrain[x][y] = 'plain';
   }
+  // The kind takes the lowest level among its buildings, so migrating never upgrades anything for free.
+  if (v < 4) for (const id in seen) run.levels[id] = seen[id];
+  if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind. Where your buildings of one kind had different levels, all of them are now at the level of the lowest.');
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;
