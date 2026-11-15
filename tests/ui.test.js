@@ -123,7 +123,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const hallStates = {};
   for (const [w, h] of [[390, 844], [360, 640]]) {
     await page.setViewportSize({ width: w, height: h }); await settle(page);
-    for (const [name, lv, crowns, offer] of [['locked', 5, 12, 18], ['unlocked', 5, 30, 18], ['capped', 7, 80, 18], ['locked6', 6, 40, 18], ['longest', 6, 74, 123]]) {
+    for (const [name, lv, crowns, offer] of [['locked', 5, 12, 15], ['reach', 5, 12, 18], ['unlocked', 5, 30, 18], ['capped', 7, 80, 18], ['locked6', 6, 40, 18], ['longest', 6, 74, 123]]) {
       const s = await page.evaluate(([lv, crowns, offer]) => { const run = state.run, T = e => e ? e.textContent.replace(/\s+/g, ' ').trim() : null;
         run.tiles[HALL_KEY].level = lv; state.meta.crowns = crowns; run.gold = goldForCrowns(offer, crowns) * 1.001; run.repeatables = {}; closeModal();
         ui.tab = 'build'; ui.sheet = false; ui.sel = { tile: HALL_KEY }; render();
@@ -136,32 +136,40 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
           docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight, vw: innerWidth, vh: innerHeight, strip: (ins.innerText || '').trim().split('\n').map(x => x.trim()).filter(Boolean) };
         all.push(document.body.innerText);
         ui.sel = {}; ui.sheet = true; render(); out.hint = T(document.querySelector('#panel .card.hallhint .nm')); out.hintText = T(document.querySelector('#panel .card.hallhint')); all.push(document.body.innerText);
-        ui.tab = 'realm'; render(); out.realm = [...document.querySelectorAll('#panel .stat')].map(T).filter(x => /opens at/.test(x)); all.push(document.body.innerText);
+        ui.tab = 'realm'; render(); out.realm = [...document.querySelectorAll('#panel .stat')].map(T).filter(x => /Next hall/.test(x)); out.realmMuted = [...document.querySelectorAll('#panel p.muted')].map(T).join(' '); all.push(document.body.innerText);
         ui.sheet = false; render(); state.run.away = 0; catchUp(4 * 3600); out.welcome = T(document.getElementById('modalbox')); all.push(document.body.innerText); closeModal();
         out.plusN = all.join('\n').match(/(Hall|Manor|Keep|Castle|Palace) \+\d+/g); out.inf = /∞|Infinity|NaN|undefined/.test(all.join('\n'));
         out.toast = upgrade(HALL_KEY).msg; state.run.tiles[HALL_KEY].level = lv; render();
         return out; }, [lv, crowns, offer]);
       hallStates[name + w] = s;
-      if ((w === 390 && (name === 'locked' || name === 'unlocked')) || (w === 360 && name === 'locked')) { await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; ui.sheet = false; render(); }); await settle(page); await shot(page, `shot-${w}-hall-${name}.png`); }
+      if ((w === 390 && (name === 'locked' || name === 'unlocked')) || (w === 360 && (name === 'locked' || name === 'reach'))) { await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; ui.sheet = false; render(); }); await settle(page); await shot(page, `shot-${w}-hall-${name}.png`); }
     }
   }
   await page.setViewportSize({ width: 390, height: 844 }); await page.evaluate(() => { state.run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12; state.run.gold = 0; ui.sel = {}; ui.tab = 'build'; render(); }); await settle(page);
   { const L = hallStates.locked390, U = hallStates.unlocked390, C = hallStates.capped390, L6 = hallStates.locked6390;
-    ok(L.lines.join('|') === 'The Palace is the height of this reign.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (18 Crowns on offer).|A Royal Palace opens at 30 Crowns held (12/30).' && !L.insUp && !L.barUp
-      && L.note.join('|') === 'The height of this reign|Royal Palace at 30 Crowns held (12/30)',
-      'Palace, next hall locked: no upgrade button; the panel says it is the height of this reign, what is left to do and when a grander hall opens; the phone bar says so in short ' + JSON.stringify([L.lines, L.note]));
-    const SHORT = 'The height of this reign.|Build Monuments, then abdicate (18 Crowns on offer).|Royal Palace at 30 Crowns held (12/30).';
-    ok(L.short.join('|') === SHORT && L.strip.join('|') === SHORT && hallStates.locked360.strip.join('|') === SHORT && hallStates.capped360.strip.join('|') === 'The grandest hall there is.|Build Monuments, then abdicate (18 Crowns on offer).'
-      && hallStates.longest360.strip.join('|') === 'The height of this reign.|Build Monuments, then abdicate (123 Crowns on offer).|Imperial Palace at 75 Crowns held (74/75).',
-      'phone strip, locked or capped: only the short lines, at most three ' + JSON.stringify([hallStates.locked360.strip, hallStates.capped360.strip, hallStates.longest360.strip]));
-    ok(['locked', 'capped', 'locked6', 'longest'].every(n => hallStates[n + '360'].stripWhole && hallStates[n + '390'].stripWhole), '390x844 and 360x640: the short hall lines show whole in the strip, unclipped, with nothing to scroll ' + JSON.stringify(Object.entries(hallStates).map(([k, s]) => [k, s.stripWhole])));
-    ok(L.hint === 'The Palace is the height of this reign.' && /A Royal Palace opens at 30 Crowns held \(12\/30\)/.test(L.hintText) && (L.hintText.match(/Crowns on offer/g) || []).length === 1 && L.realm.join('|') === 'A Royal Palace opens at 30 Crowns held.' && !/Royal Palace/.test(L.welcome) && L.toast === 'A Royal Palace needs 30 Crowns held. You hold 12.',
-      'locked: the Build tab card says the same (the Crowns on offer once, in the abdicate line), the Realm tab names the unlock in one line, the welcome back has no next-hall wait, and an upgrade is refused plainly ' + JSON.stringify([L.hintText, L.realm, L.welcome, L.toast]));
-    ok(!U.lines.length && U.insUp && U.barUp && U.raise === 'Raise a Royal Palace' && /^Raise a Royal Palace/.test(U.deskRaise) && /Next: Royal Palace/.test(U.hint) && U.realm.join() === 'An Imperial Palace opens at 75 Crowns held.' && U.toast === 'Your seat is now a Royal Palace!',
+    const R = hallStates.reach390, LG = hallStates.longest360;
+    ok(L.lines.join('|') === 'The Palace is the height of this reign.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (15 Crowns on offer).|A Royal Palace opens at 30 Crowns held (12/30).' && !L.insUp && !L.barUp
+      && L.note.join('|') === 'Royal Palace at 30 Crowns held (12/30)',
+      'Palace, next hall locked: no upgrade button; the panel says it is the height of this reign, what is left to do and when a grander hall opens; the phone bar shows the unlock ' + JSON.stringify([L.lines, L.note]));
+    ok(R.lines[2] === 'A Royal Palace opens at 30 Crowns held (12/30). Abdicating now takes you to 30.' && R.short[2] === 'Abdicating now takes you to 30 Crowns held.' && R.note.join() === 'Royal Palace at 30 Crowns held (12/30)'
+      && LG.short[2] === 'Abdicating now takes you to 197 Crowns held.' && !L.short[2] && !hallStates.locked6390.short[2],
+      'when Crowns held plus Crowns on offer would open it, the unlock line says where abdicating now takes you (and only then) ' + JSON.stringify([R.lines[2], R.short, LG.short]));
+    const strips = { locked: 'The height of this reign.|Build Monuments, then abdicate (15 Crowns on offer).', reach: 'The height of this reign.|Build Monuments, then abdicate (18 Crowns on offer).|Abdicating now takes you to 30 Crowns held.',
+      capped: 'The grandest hall there is.|Build Monuments, then abdicate (18 Crowns on offer).', longest: 'The height of this reign.|Build Monuments, then abdicate (123 Crowns on offer).|Abdicating now takes you to 197 Crowns held.' };
+    ok(Object.keys(strips).every(n => hallStates[n + '360'].strip.join('|') === strips[n] && hallStates[n + '390'].strip.join('|') === strips[n] && hallStates[n + '360'].short.join('|') === strips[n]),
+      'phone strip at the end of a reign: only the short lines, at most three, the Crowns on offer once ' + JSON.stringify(Object.keys(strips).map(n => hallStates[n + '360'].strip)));
+    ok(Object.entries(hallStates).filter(([k]) => !/unlocked/.test(k)).every(([, s]) => !s.note.join(' ').includes('height of this reign') && (s.strip.join(' ').match(/height of this reign|grandest hall/g) || []).length === 1),
+      'phone, hall selected: "The height of this reign" (or "grandest hall") shows once, in the strip; the bar keeps the unlock ' + JSON.stringify(Object.entries(hallStates).map(([k, s]) => [k, s.note])));
+    ok(['locked', 'reach', 'capped', 'locked6', 'longest'].every(n => hallStates[n + '360'].stripWhole && hallStates[n + '390'].stripWhole), '390x844 and 360x640: the short hall lines show whole in the strip, unclipped, with nothing to scroll ' + JSON.stringify(Object.entries(hallStates).map(([k, s]) => [k, s.stripWhole])));
+    ok(L.hint === 'The Palace is the height of this reign.' && /A Royal Palace opens at 30 Crowns held \(12\/30\)/.test(L.hintText) && (L.hintText.match(/Crowns on offer/g) || []).length === 1 && (R.hintText.match(/Crowns on offer/g) || []).length === 1 && !/Royal Palace/.test(L.welcome) && L.toast === 'A Royal Palace needs 30 Crowns held. You hold 12.',
+      'locked: the Build tab card says the same (the Crowns on offer once, in the abdicate line), the welcome back has no next-hall wait, and an upgrade is refused plainly ' + JSON.stringify([L.hintText, R.hintText, L.welcome, L.toast]));
+    ok(L.realm.join('|') === 'Next hall: a Royal Palace, for reigns begun with 30 or more Crowns.' && /Once you hold more than 30 Crowns, each new one takes far more gold to earn/.test(L.realmMuted) && !/Past 30 Crowns held/.test(L.realmMuted),
+      'Realm tab: the next hall and the dearer Crowns past 30 are worded apart ' + JSON.stringify([L.realm, L.realmMuted.slice(0, 400)]));
+    ok(!U.lines.length && U.insUp && U.barUp && U.raise === 'Raise a Royal Palace' && /^Raise a Royal Palace/.test(U.deskRaise) && /Next: Royal Palace/.test(U.hint) && U.realm.join() === 'Next hall: an Imperial Palace, for reigns begun with 75 or more Crowns.' && U.toast === 'Your seat is now a Royal Palace!',
       'Palace with 30 Crowns held: the normal "Raise a Royal Palace" button, the next hall leads the Build tab, and the Realm tab names the hall still shut ' + JSON.stringify([U.raise, U.hint, U.realm]));
-    ok(C.lines.join('|') === 'The Imperial Palace is the grandest hall there is.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (18 Crowns on offer).' && !C.insUp && !C.barUp && C.note.join('|') === 'The grandest hall there is|Build Monuments, then abdicate' && !C.realm.length && C.toast === 'The Imperial Palace is the grandest hall there is.',
+    ok(C.lines.join('|') === 'The Imperial Palace is the grandest hall there is.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (18 Crowns on offer).' && !C.insUp && !C.barUp && C.note.join('|') === 'Abdicate from the Realm tab' && !C.realm.length && C.toast === 'The Imperial Palace is the grandest hall there is.',
       'Imperial Palace (the last hall): the same without the unlock line, and no button ' + JSON.stringify([C.lines, C.note]));
-    ok(L6.lines[2] === 'An Imperial Palace opens at 75 Crowns held (40/75).' && L6.note[1] === 'Imperial Palace at 75 Crowns held (40/75)' && L6.realm.join() === 'An Imperial Palace opens at 75 Crowns held.' && !L6.barUp, 'Royal Palace with 40 Crowns held: the Imperial Palace opens at 75 ' + JSON.stringify([L6.lines[2], L6.note, L6.realm]));
+    ok(L6.lines[2] === 'An Imperial Palace opens at 75 Crowns held (40/75).' && L6.note.join() === 'Imperial Palace at 75 Crowns held (40/75)' && L6.realm.join() === 'Next hall: an Imperial Palace, for reigns begun with 75 or more Crowns.' && !L6.barUp, 'Royal Palace with 40 Crowns held: the Imperial Palace opens at 75 ' + JSON.stringify([L6.lines[2], L6.note, L6.realm]));
     const states = Object.entries(hallStates);
     ok(states.every(([, s]) => !s.plusN && !s.inf), 'no "Palace +1" (or any "+N" hall), Infinity or NaN in the hall panel, bar, Build card, Realm tab or welcome back ' + JSON.stringify(states.filter(([, s]) => s.plusN || s.inf).map(([k, s]) => [k, s.plusN, s.inf])));
     ok(states.every(([, s]) => s.noteFits && s.docW <= s.vw && s.docH <= s.vh + 1), '390 and 360 wide: the hall bar fits its row, nothing overflows the screen ' + JSON.stringify(states.map(([k, s]) => [k, s.docW, s.vw, s.noteFits]))); }

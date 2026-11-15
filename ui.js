@@ -123,15 +123,21 @@ function hallDelay(cost, adds, work) {
 const AHall = level => 'A' + aHall(level).slice(1); // "A Royal Palace", to start a sentence
 const crownsText = n => fmt(n) + (n === 1 ? ' Crown' : ' Crowns');
 // With no next hall to raise (the last one, or the next needs more Crowns held): where the reign stands, what is
-// left to do in it, and when a grander hall opens. Lines for the hall panel and the Build tab; `short` holds the
-// phone's version, at most three lines that fit the strip under the map. offer: false leaves out the Crowns on
-// offer (where the abdicate line already gives them).
+// left to do in it, and when a grander hall opens, with a note when abdicating now would hold enough Crowns for it.
+// `short` is the phone strip's version, at most three lines that fit at 360px; the phone bar carries the unlock
+// (hallBarNote), so the strip leaves it out. offer: false leaves out the Crowns on offer (where the abdicate line gives them).
+function hallReach() { const lock = hallLocked(), after = state.meta.crowns + pendingCrowns(); return lock && canPrestige() && after >= lock.need ? after : 0; }
 function hallEndLines(offer) {
-  const name = hallName(hallLevel()), lock = hallLocked(), n = crownsText(pendingCrowns()), held = `(${fmt(state.meta.crowns)}/${lock ? lock.need : 0})`;
+  const name = hallName(hallLevel()), lock = hallLocked(), n = crownsText(pendingCrowns()), reach = hallReach(), was = offer === false ? '' : ` (${n} on offer)`;
   return { head: lock ? `The ${name} is the height of this reign.` : `The ${name} is the grandest hall there is.`,
-    left: `Left to do: build Monuments (Research tab) and abdicate from the Realm tab${offer === false ? '' : ` (${n} on offer)`}.`,
-    opens: lock ? `${AHall(lock.level)} opens at ${lock.need} Crowns held ${held}.` : '',
-    short: [lock ? 'The height of this reign.' : 'The grandest hall there is.', `Build Monuments, then abdicate (${n} on offer).`].concat(lock ? [`${hallName(lock.level)} at ${lock.need} Crowns held ${held}.`] : []) };
+    left: `Left to do: build Monuments (Research tab) and abdicate from the Realm tab${was}.`,
+    opens: lock ? `${AHall(lock.level)} opens at ${lock.need} Crowns held (${fmt(state.meta.crowns)}/${lock.need}).${reach ? ` Abdicating now takes you to ${fmt(reach)}.` : ''}` : '',
+    short: [lock ? 'The height of this reign.' : 'The grandest hall there is.', `Build Monuments, then abdicate (${n} on offer).`].concat(reach ? [`Abdicating now takes you to ${fmt(reach)} Crowns held.`] : []) };
+}
+// The phone bar where the hall's upgrade button would be: the unlock (or, at the last hall, where to go), never a button.
+function hallBarNote() {
+  const lock = hallLocked();
+  return `<div class="bb act wide note"><b>${lock ? `${hallName(lock.level)} at ${lock.need} Crowns held (${fmt(state.meta.crowns)}/${lock.need})` : 'Abdicate from the Realm tab'}</b></div>`;
 }
 // The next hall: its price and how long the town needs to afford it at today's income. Shown at the top of Build.
 function hallHint() {
@@ -332,9 +338,9 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>${sprite('crown')} Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
+      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Once you hold more than ${CROWN_DEAR_FROM} Crowns, each new one takes far more gold to earn, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
-      ${(u => u ? `<p class="stat">${AHall(u.level)} opens at <b>${u.need}</b> Crowns held.</p>` : '')(hallUnlockAhead())}
+      ${(u => u ? `<p class="stat">Next hall: ${aHall(u.level)}, for reigns begun with <b>${u.need}</b> or more Crowns.</p>` : '')(hallUnlockAhead())}
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       ${ok ? `<p class="stat ready">${abdicateLine().replace(' See the Realm tab.', '')}</p>` : ''}<p class="stat">${offerNote(n)}</p>
       <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} ${sprite('crown', 'Crowns')})`}</button></div>
@@ -361,8 +367,7 @@ function renderBuildBar() {
     const kind = tileKind(t);
     if (t.kind === 'hall' && nextHallOpen()) { const c = upgradeCost(t), ok = canAfford(c);
       h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>Raise ${aHall(t.level + 1)}</b>${costHTML(c)}</button>`; }
-    else if (t.kind === 'hall') { const lock = hallLocked(); // no next hall: a note where the button would be, not a button
-      h = `<div class="bb act wide note"><b>${lock ? 'The height of this reign' : 'The grandest hall there is'}</b><small>${lock ? `${hallName(lock.level)} at ${lock.need} Crowns held (${fmt(state.meta.crowns)}/${lock.need})` : 'Build Monuments, then abdicate'}</small></div>`; }
+    else if (t.kind === 'hall') h = hallBarNote(); // no next hall: a note where the button would be
     else h = kindUpgradeButton(t.id, 'bb act wide', true);
     if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">${sprite('demolish')}</span><small>Demolish</small></button>`;
     patch($('bbrow'), h + close);
