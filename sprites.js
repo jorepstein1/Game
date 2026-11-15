@@ -177,6 +177,9 @@ const SPRITES = {
   warn: `<path d="M16 4l13 23h-26z" fill="#f2cb45"/><path d="M16 12.500v7" stroke-width="2.800" fill="none"/><circle cx="16" cy="23" r="1.600" fill="#2b2118" ${N}/>`,
 };
 SPRITES.realm = SPRITES.crown;
+// The halls past the Palace are the Palace under other roofs: red for the Royal Palace, purple for the Imperial Palace.
+SPRITES.hall6 = SPRITES.hall5.replace(/#3f6fb0/g, '#b5352c').replace(/#6e9ad6/g, '#e0685c');
+SPRITES.hall7 = SPRITES.hall5.replace(/#3f6fb0/g, '#6b3f9a').replace(/#6e9ad6/g, '#9a72c8');
 
 // With a label the sprite is announced as an image of that name; without one it is decoration.
 const sprite = (id, label) => `<svg class="sp" viewBox="0 0 32 32" ${label ? `role="img" aria-label="${String(label).replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) + ';')}"` : 'aria-hidden="true"'}><use href="#sp-${id}"/></svg>`;

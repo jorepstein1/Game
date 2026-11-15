@@ -252,6 +252,8 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   .bb.act { flex: 0 0 74px; }
   .bb.act.wide { flex: 1 1 auto; min-width: 0; background: var(--red); border-color: #4d0e0e; color: #fff; font-size: 14px; }
   .bb.act.wide.cant { background: #9c8a7a; border-color: #6b5e52; opacity: 1; }
+  .bb.act.wide.note { background: #3a2b1d; border-color: #6b5e52; color: var(--parch); }   /* the last hall of a reign: a note, not a button */
+  .bb.note small { font-size: 11px; color: #e8d9b0; }
   .bb.act.wide .cost { font-size: 12px; white-space: nowrap; }
   .bb.act.wide .cost .lack { color: #ffd0c0; }
   .bb.act.wide .delay, .bb.act.wide .adds { color: #ffe9c4; font-size: 12px; line-height: 1.1; }
