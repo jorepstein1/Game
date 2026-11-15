@@ -362,7 +362,7 @@ function compute(opts) {
     if (t.kind !== 'building') continue;
     const [x, y] = xy(k);
     if (BUILDINGS[t.id].glob) glob += BUILDINGS[t.id].glob * kindLevel(t.id);
-    tiles[k] = { adj: adjBonus(t.id, x, y), levelMult: levelMult(t), mult: 0 };
+    tiles[k] = { adj: adjBonus(t.id, x, y), levelMult: levelMult(t), mult: 0, out: {} };
   }
   const rawCap = cap;
   cap = Math.floor(cap * repBonus('housing'));
@@ -375,7 +375,6 @@ function compute(opts) {
     const t = run.tiles[k], def = BUILDINGS[t.id]; if (!def.out) continue;
     const m = tiles[k].levelMult * (1 + tiles[k].adj) * researchMult(t.id) * mult * (def.work ? staff : 1) * (def.out.food ? foodMult : 1);
     const live = tiles[k].mult = m * (def.work && run.starving && !def.out.food ? STARVE_PENALTY : 1);
-    tiles[k].out = {};
     if (TRADES[t.id]) { // settled below, once the town's food and iron are known
       tiles[k].full = def.out.gold * m; trades.push({ k, id: t.id, m, live, wants: def.out.gold * tiles[k].levelMult * mult * (def.work ? staff : 1) * TRADES[t.id].per });
       continue; }

@@ -595,5 +595,112 @@ test('a missing grid is regrown by the generator that made the map (run.gen)', s
   const back = sim.sanitizeSave(JSON.parse(JSON.stringify(s)), 1000).state; assert.strictEqual(back.run.gen, 2, 'kept through a save');
 });
 
+// ── The trades: Markets sell spare food, Blacksmiths work iron, Guildhalls boost (see data.js, TRADES) ──
+// A plain field with the given buildings at the given plots, enough people for every job, and a store of food.
+function trades(sim, layout, food) {
+  const free = field(sim), run = sim.state.run; run.res.food = food === undefined ? 1e15 : food; run.res.iron = 0;
+  for (const [k, id] of layout) run.tiles[k] = { kind: 'building', id };
+  sim.setState(sim.state); run.pop = sim.calc.need + 1; sim.setState(sim.state);
+  return free;
+}
+const finite = c => ['gold', 'food', 'wood', 'stone', 'iron'].every(r => Number.isFinite(c.base[r]) && Number.isFinite(c.rates[r])) && [c.fill, c.smithRun, c.foodSold, c.ironUsed, c.surplus].every(Number.isFinite);
+
+test('Markets: fill = food sold / food wanted, gold = full rate × (base + (1 - base) × fill), and sold food leaves the food income', sim => {
+  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]);
+  let c = sim.calc; const k = '0,0', full = c.tiles[k].full, wanted = c.foodWanted;
+  assert.ok(wanted > 0 && c.surplus > 0 && c.surplus < wanted, 'one Farm cannot supply a Market: surplus ' + c.surplus + ' of ' + wanted);
+  near(c.fill, c.surplus / wanted, 1e-9, 'fill'); near(c.foodSold, c.surplus, 1e-9, 'all the spare food is sold');
+  near(c.tiles[k].out.gold, full * (sim.MARKET_BASE + (1 - sim.MARKET_BASE) * c.fill), 1e-9, 'Market gold');
+  near(c.base.food, c.foodMade - c.eaten - c.foodSold, 1e-9, 'food income is net of sales'); near(c.base.food, 0, 1e-9, 'so it is nil while the Market is short');
+  // Plenty of farms: the Market is full and the rest piles up.
+  for (let i = 0; i < 40; i++) sim.state.run.tiles[(i % 10) + ',' + (4 + Math.floor(i / 10))] = { kind: 'building', id: 'farm' };
+  sim.state.run.pop = 1e4; sim.setState(sim.state); sim.state.run.pop = sim.calc.need; sim.setState(sim.state); c = sim.calc;
+  if (c.surplus > c.foodWanted) { assert.strictEqual(c.fill, 1); near(c.tiles[k].out.gold, c.tiles[k].full, 1e-9); assert.ok(c.base.food > 0, 'food beyond the Markets is stored'); }
+});
+
+test('Markets sell only while the store holds MARKET_RESERVE_SECONDS of upkeep; below it they earn the base rate', sim => {
+  trades(sim, [['0,0', 'market'], ['2,0', 'farm'], ['4,0', 'farm']], 0);
+  let c = sim.calc; assert.ok(!c.stocked && c.foodSold === 0 && c.fill === 0, 'an empty store sells nothing');
+  near(c.tiles['0,0'].out.gold, c.tiles['0,0'].full * sim.MARKET_BASE, 1e-9, 'base rate'); assert.ok(c.base.food > 0, 'the store fills first');
+  sim.state.run.res.food = c.eaten * sim.MARKET_RESERVE_SECONDS * 1.01; sim.setState(sim.state); c = sim.calc;
+  assert.ok(c.stocked && c.foodSold > 0, 'past the reserve the Market sells');
+  assert.ok(sim.compute({ stocked: true }).foodSold > 0 && sim.MARKET_RESERVE_SECONDS >= sim.FOOD_RESERVE_SECONDS, 'the Market reserve is at least the one villagers move in on');
+});
+
+test('Markets never starve a town: random towns, long absences, the store never runs dry because of them', sim => {
+  const rnd = sim.mulberry(7), ids = ['cottage', 'farm', 'market', 'market', 'mill', 'smith', 'mine', 'guild', 'tavern'];
+  for (let n = 0; n < 25; n++) {
+    const free = field(sim), run = sim.state.run; run.res = { gold: 0, food: 50 + rnd() * 5000, wood: 0, stone: 0, iron: 0 };
+    for (let i = 0; i < 30; i++) run.tiles[free[(rnd() * free.length) | 0]] = { kind: 'building', id: ids[(rnd() * ids.length) | 0] };
+    for (const id of sim.BUILD_ORDER) run.levels[id] = 1 + ((rnd() * 4) | 0);
+    sim.setState(sim.state); run.pop = Math.min(sim.calc.cap, 5 + rnd() * 300); sim.setState(sim.state);
+    const feeds = sim.calc.foodMade >= sim.calc.eaten; // the farms alone feed the town as it stands
+    for (let h = 0; h < 6; h++) { sim.creditAway(4 * 3600 + rnd() * 20 * 3600); sim.setState(sim.state);
+      assert.ok(finite(sim.calc), 'finite numbers'); assert.ok(sim.calc.foodSold <= Math.max(0, sim.calc.foodMade - sim.calc.eaten) + 1e-9, 'Markets sell only the surplus');
+      if (feeds) assert.ok(!run.starving, 'town ' + n + ' starves'); }
+  }
+});
+
+test('population grows exactly as it would without Markets (growth reads food made before they sell)', sim => {
+  const grow = markets => { const free = trades(sim, [['0,0', 'farm'], ['2,0', 'farm'], ['4,0', 'mill'], ['6,0', 'farm']].concat(markets ? [['0,2', 'market'], ['2,2', 'market']] : []), 500);
+    const run = sim.state.run; for (let i = 0; i < 8; i++) run.tiles[free[40 + i]] = { kind: 'building', id: 'cottage' }; run.levels.cottage = 3; run.pop = 5; sim.setState(sim.state);
+    const pops = []; for (let i = 0; i < 12; i++) { sim.advance(600); pops.push(+run.pop.toFixed(6)); } sim.creditAway(10 * 3600); pops.push(+run.pop.toFixed(6)); return { pops, starving: run.starving }; };
+  const a = grow(false), b = grow(true);
+  assert.deepStrictEqual(b.pops, a.pops, 'population with Markets ' + b.pops.join(',') + ' against ' + a.pops.join(',')); assert.ok(!a.starving && !b.starving);
+});
+
+test('Blacksmiths: run = min(1, SMITH_SHARE × iron made / iron wanted), no base rate, iron income is net of the forges', sim => {
+  trades(sim, [['0,0', 'smith'], ['3,0', 'mine']]);
+  let c = sim.calc; const k = '0,0';
+  near(c.smithRun, Math.min(1, sim.SMITH_SHARE * c.ironMade / c.ironWanted), 1e-9, 'run'); assert.ok(c.smithRun < 1, 'one Mine cannot run a Blacksmith at full');
+  near(c.tiles[k].out.gold, c.tiles[k].full * c.smithRun, 1e-9, 'gold'); near(c.ironUsed, sim.SMITH_SHARE * c.ironMade, 1e-9, 'the forges take their share of the income');
+  near(c.base.iron, c.ironMade - c.ironUsed, 1e-9, 'iron income is net'); assert.ok(c.base.iron >= (1 - sim.SMITH_SHARE) * c.ironMade - 1e-9);
+  delete sim.state.run.tiles['3,0']; sim.setState(sim.state); c = sim.calc;
+  assert.strictEqual(c.smithRun, 0); assert.strictEqual(c.tiles[k].out.gold, 0); assert.strictEqual(c.base.iron, 0, 'no Mine: no gold, and the forge never draws on the stock');
+  for (let i = 0; i < 11; i++) sim.state.run.tiles[i + ',8'] = { kind: 'building', id: 'mine' };
+  sim.state.run.pop = 1e4; sim.setState(sim.state); sim.state.run.pop = sim.calc.need; sim.setState(sim.state); c = sim.calc;
+  assert.strictEqual(c.smithRun, 1, 'plenty of Mines: full run'); near(c.ironUsed, c.ironWanted, 1e-9);
+});
+
+test('the iron stock never falls because of the forges, open or away, even while starving', sim => {
+  trades(sim, [['0,0', 'smith'], ['2,0', 'smith'], ['4,0', 'smith'], ['6,0', 'mine']], 0);
+  const run = sim.state.run; run.res.iron = 1000;
+  let last = run.res.iron;
+  for (let i = 0; i < 40; i++) { sim.advance(30); assert.ok(run.res.iron >= last - 1e-9, 'iron fell'); last = run.res.iron; }
+  run.starving = true; sim.setState(sim.state); assert.ok(sim.calc.rates.iron >= 0, 'starving: the live iron income is still not negative');
+  sim.creditAway(20 * 3600); assert.ok(run.res.iron >= last, 'away');
+});
+
+test('the Guildhall makes nothing itself and boosts each Market and Blacksmith beside it by its adjacency × √level', sim => {
+  assert.ok(!sim.BUILDINGS.guild.out, 'no output of its own');
+  trades(sim, [['1,1', 'guild'], ['0,1', 'market'], ['1,0', 'smith'], ['3,1', 'market']]);
+  const c = sim.calc; assert.strictEqual(c.tiles['1,1'].out.gold, undefined); assert.strictEqual(c.tiles['1,1'].mult, 0);
+  near(c.tiles['0,1'].adj, sim.BUILDINGS.market.adj.building.guild, 1e-9, 'Market beside it'); near(c.tiles['1,0'].adj, sim.BUILDINGS.smith.adj.building.guild, 1e-9, 'Blacksmith beside it');
+  assert.strictEqual(c.tiles['3,1'].adj, 0, 'a Market two plots away gets nothing');
+  sim.state.run.levels.guild = 4; sim.setState(sim.state); near(sim.calc.tiles['0,1'].adj, 2 * sim.BUILDINGS.market.adj.building.guild, 1e-9, '√4 = 2');
+  // The boost raises the price, not what the trade takes in: food wanted is the same with or without it.
+  sim.state.run.pop = 1e6; sim.setState(sim.state); const w = sim.calc.foodWanted; delete sim.state.run.tiles['1,1']; sim.setState(sim.state); near(sim.calc.foodWanted, w, 1e-9, 'demand');
+});
+
+test('edge cases: no Markets, no Blacksmiths, no Mines, no Farms beyond need: finite numbers and the old rules', sim => {
+  for (const layout of [[], [['0,0', 'farm']], [['0,0', 'market']], [['0,0', 'smith']], [['0,0', 'guild']], [['0,0', 'mine'], ['2,0', 'farm']]]) {
+    for (const food of [0, 1e9]) { trades(sim, layout, food); const c = sim.calc;
+      assert.ok(finite(c), JSON.stringify(layout) + ' food ' + food);
+      if (!layout.some(l => l[1] === 'market')) { assert.strictEqual(c.foodSold, 0); near(c.base.food, c.foodMade - c.eaten, 1e-9); }
+      if (!layout.some(l => l[1] === 'smith')) { assert.strictEqual(c.ironUsed, 0); near(c.base.iron, c.ironMade, 1e-9); }
+      sim.advance(60); sim.creditAway(3600); assert.ok(finite(sim.compute()), 'after time passes'); }
+  }
+  // A town whose farms make exactly its upkeep: no surplus, the Market earns its base rate and nobody goes hungry for it.
+  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]); const run = sim.state.run; run.pop = sim.sustainablePop(1, 1e4, sim.calc.foodMade); sim.setState(sim.state);
+  assert.ok(sim.calc.foodSold <= 1e-6 && !run.starving);
+});
+
+test('previews: afterBuild of a Farm next to a short Market shows gold, and leaves the town as it was', sim => {
+  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]);
+  const before = JSON.stringify(plain(sim.state.run.tiles)), c0 = sim.compute({ stocked: true }), after = sim.afterBuild('farm');
+  assert.ok(after.base.gold > c0.base.gold, 'a Farm brings gold through the Market'); assert.strictEqual(JSON.stringify(plain(sim.state.run.tiles)), before);
+  const smith = sim.afterBuild('smith'); assert.ok(smith.base.gold === c0.base.gold || smith.smithRun === 0, 'a Blacksmith with no Mine adds no gold');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
