@@ -58,6 +58,15 @@ const FOOD_CROWD = 200;          // upkeep per villager is multiplied by 1 + (po
 const STARVE_PENALTY = 0.5;      // output of non-food workplaces while starving
 const STARVE_LOSS = 0.01;        // share of villagers who leave per second while starving
 const FOOD_RESERVE_SECONDS = 120; // villagers also move in while the stores cover this many seconds of upkeep
+// Trades (sim.js, compute). Markets sell the town's spare food and Blacksmiths work iron into gold. A trade's volume
+// (what it takes in at full supply) grows with its kind's level, the realm bonus and staffing; adjacency (Cottages,
+// a Mine, a Guildhall) and research raise the price it gets, not what it takes in.
+const MARKET_RESERVE_SECONDS = 600; // Markets sell only while the food store holds this many seconds of upkeep: the store fills first
+const MARKET_BASE = 0.25;        // share of its full rate a Market earns with no food to sell
+const MARKET_FOOD = 1;           // food a Market takes in per second, per gold of its volume
+const SMITH_SHARE = 0.5;         // the most of the town's iron income all forges together may use
+const SMITH_IRON = 0.05;         // iron a Blacksmith uses per second, per gold of its volume
+const TRADES = { market: { per: MARKET_FOOD }, smith: { per: SMITH_IRON } };
 // Upgrades are by kind: one upgrade raises every building of that kind, standing or still to be built. Prices
 // follow one rule (sim.js, "Prices"). A kind with n standing at level L has a worth
 //   worth(n, L) = cost × W(n) × U(L)
@@ -110,7 +119,7 @@ const BUILDINGS = {
   quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
   market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 8e4, wood: 3e4 }, work: 3, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
-    adj: { building: { cottage: 0.2, guild: 0.5 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
+    adj: { building: { cottage: 0.2, guild: 1 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
   mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 6e4, wood: 9e4 }, work: 2, linear: true, growth: 2, upgradeGrowth: 4, out: { food: 3 },
     desc: 'Grinds grain and boosts every farm beside it.' },
   tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 360000, wood: 180000 }, work: 2, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
@@ -118,10 +127,10 @@ const BUILDINGS = {
   mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { iron: 0.4 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron ore. Wants hills nearby.' },
   smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 12 },
-    adj: { building: { mine: 0.3, guild: 0.5 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
+    adj: { building: { mine: 0.3, guild: 1 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
   church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
     desc: 'Inspires the whole realm: +5% to all production per level while fully staffed.' },
-  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4, out: { gold: 12 },
+  guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4,
     desc: 'Organises the trades. Boosts markets and blacksmiths beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
@@ -146,10 +155,10 @@ const RESEARCH = [
   { id: 'carts', name: 'Ore Carts', desc: 'Mines ×2', hall: 4, cost: { gold: 2e7, stone: 5e6 }, mult: { mine: 2 } },
   { id: 'fields', name: 'Three-field System', desc: 'Farms ×3', hall: 4, cost: { gold: 2.5e7, stone: 6e6 }, mult: { farm: 3 } },
   { id: 'aqueduct', name: 'Aqueducts', desc: 'Cottage taxes ×2', hall: 4, cost: { gold: 3e7, stone: 7.5e6 }, mult: { cottage: 2 } },
-  { id: 'banking', name: 'Banking', desc: 'Markets and Guildhalls ×2', hall: 4, cost: { gold: 4e7, iron: 250000 }, mult: { market: 2, guild: 2 } },
+  { id: 'banking', name: 'Banking', desc: 'Markets ×2', hall: 4, cost: { gold: 4e7, iron: 250000 }, mult: { market: 2 } },
   { id: 'marks', name: "Maker's Marks", desc: 'Blacksmiths ×2', hall: 4, cost: { gold: 5e7, iron: 500000 }, mult: { smith: 2 } },
   { id: 'steel', name: 'Crucible Steel', desc: 'Mines and Blacksmiths ×2', hall: 5, cost: { gold: 1e8, iron: 1e6 }, mult: { mine: 2, smith: 2 } },
-  { id: 'mint', name: 'Royal Mint', desc: 'All gold buildings ×2', hall: 5, cost: { gold: 2e8, stone: 2.5e7 }, mult: { cottage: 2, market: 2, tavern: 2, smith: 2, guild: 2 } },
+  { id: 'mint', name: 'Royal Mint', desc: 'All gold buildings ×2', hall: 5, cost: { gold: 2e8, stone: 2.5e7 }, mult: { cottage: 2, market: 2, tavern: 2, smith: 2 } },
 ];
 
 // Repeatable upgrades: gold sinks with exponentially scaling costs. Levels reset on abdication.
