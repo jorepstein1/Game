@@ -96,7 +96,8 @@ function kindUpgradeEffect(id) {
 function kindUpgradeText(id, fx) {
   const d = BUILDINGS[id], parts = [];
   if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
-  else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); parts.push('boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); } // the Guildhall
+  else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); // the Guildhall
+    parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
   else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
   if (fx.housing > 0) parts.push('+' + fmt(fx.housing) + ' housing');
@@ -131,10 +132,18 @@ function tradeWarning(id) {
   if (id === 'smith' && count('smith') && calc.smithRun < 0.995) return `<p class="warn small">Forges run at ${pctOf(calc.smithRun)}: Mines first.</p>`;
   return '';
 }
-// What a Guildhall is boosting: the Markets and Blacksmiths beside it.
-function guildLine(key) {
+// The Markets and Blacksmiths beside a Guildhall, by kind.
+function guildTrades(key) {
   const [x, y] = xy(key), n = { market: 0, smith: 0 };
   for (const [a, b] of neighbors(x, y)) { const t = state.run.tiles[a + ',' + b]; if (t && t.kind === 'building' && hasOwn(n, t.id)) n[t.id]++; }
+  return n;
+}
+// True when no Guildhall of the town touches a Market or Blacksmith: upgrading them would change nothing yet.
+// Upgrades are by kind, so one Guildhall beside a trade is enough for the upgrade to count.
+const guildsIdle = () => !Object.keys(state.run.tiles).some(k => { const t = state.run.tiles[k]; if (t.kind !== 'building' || t.id !== 'guild') return false; const n = guildTrades(k); return n.market + n.smith > 0; });
+// What a Guildhall is boosting: the Markets and Blacksmiths beside it.
+function guildLine(key) {
+  const n = guildTrades(key);
   const parts = Object.keys(n).filter(id => n[id]).map(id => n[id] + ' ' + (n[id] > 1 ? plural(id) : BUILDINGS[id].name));
   return parts.length ? `Boosting <b>${parts.join(' and ')}</b> by ${pct(BUILDINGS.market.adj.building.guild * Math.sqrt(kindLevel('guild')))}` : 'Boosting nothing: build Markets or Blacksmiths beside it';
 }

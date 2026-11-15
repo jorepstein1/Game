@@ -647,6 +647,47 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ok(e3.length === 0, `${W}px trades: no console errors ` + JSON.stringify(e3));
     await cx.close();
   }
+  // --- the trades' Upgrade buttons at phone width: every line whole, nothing cut off with "…" (playtest);
+  //     and a Guildhall upgrade says plainly it does nothing while no Guildhall touches a Market or Blacksmith
+  for (const [w, h] of [[360, 740], [390, 844], [1280, 800]]) {
+    const cx = await br.newContext({ viewport: { width: w, height: h }, hasTouch: w < 800, isMobile: w < 800, deviceScaleFactor: 2, reducedMotion: 'reduce' }), pg = await cx.newPage(), e4 = []; watch(pg, e4);
+    await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(pg);
+    const got = await pg.evaluate(() => {
+      const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.exp = 1; run.tiles[HALL_KEY].level = 4; run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
+      const put = (k, id) => { run.tiles[k] = { kind: 'building', id }; };
+      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage'); put('2,6', 'guild');
+      calc = compute(); run.pop = calc.cap; ui.mapN = 0; calc = compute();
+      const phone = innerWidth < 800, T = e => e ? e.textContent.replace(/\s+/g, ' ').trim() : '';
+      // An element is cut off when it hides overflowing text (the "…" case), or sticks out of its button or the screen.
+      const cut = root => [...root.querySelectorAll('*')].filter(e => { const cs = getComputedStyle(e), r = e.getBoundingClientRect(), b = root.getBoundingClientRect();
+        return (cs.overflow !== 'visible' && e.scrollWidth > e.clientWidth + 1) || r.right > b.right + 0.5 || r.left < b.left - 0.5 || r.bottom > b.bottom + 0.5; }).map(T);
+      const look = k => { ui.sel = { tile: k }; ui.sheet = false; render();
+        const btn = document.querySelector((phone ? '#buildbar' : '#inspector') + ' [data-act="upkind"]'), job = document.querySelector('#inspector .job'), br = btn.getBoundingClientRect();
+        return { eff: T(btn.querySelector('.eff')), cut: cut(btn), stat: T(document.querySelector('#inspector .bstats')), cant: btn.classList.contains('cant'),
+          jobWhole: !phone || getComputedStyle(job).display === 'none' || job.scrollWidth <= job.clientWidth + 1, inView: br.right <= innerWidth && br.left >= 0 && (!phone || br.bottom <= document.getElementById('tabs').getBoundingClientRect().top + 1),
+          docW: document.documentElement.scrollWidth }; };
+      const out = { market: look('4,4'), smith: look('4,2'), guild: look('4,3'), lone: look('2,6') };
+      delete run.tiles['4,3']; calc = compute(); out.idle = look('2,6');
+      document.querySelector((phone ? '#buildbar' : '#inspector') + ' [data-act="upkind"]').click(); out.idle.bought = kindLevel('guild');
+      return out; });
+    const all = ['market', 'smith', 'guild', 'lone', 'idle'];
+    ok(all.every(k => !got[k].cut.length && got[k].jobWhole && got[k].inView && got[k].docW <= w) && all.every(k => /needs \d+ more/.test(got[k].eff)),
+      `${w}x${h}: the Market, Blacksmith and Guildhall Upgrade buttons and job lines show every line whole, no "…", the villagers needed included ` + JSON.stringify(all.map(k => [k, got[k].eff, got[k].cut])));
+    ok(/^output ×3/.test(got.market.eff) && /^output ×3/.test(got.smith.eff) && /^boost \+100% → \+141%/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
+      `${w}x${h}: a Guildhall beside a trade advertises its boost ` + JSON.stringify([got.guild.eff, got.guild.stat]));
+    ok(/^boost \+100% → \+141%/.test(got.lone.eff) && /Boosting nothing: build Markets or Blacksmiths beside it/.test(got.lone.stat),
+      `${w}x${h}: a Guildhall beside nothing, while another touches a Market: the upgrade keeps its boost figure, the panel says this one boosts nothing ` + JSON.stringify([got.lone.eff, got.lone.stat]));
+    ok(/^no effect yet: no Guildhall is beside a Market or Blacksmith/.test(got.idle.eff) && !/boost/.test(got.idle.eff) && /Boosting nothing/.test(got.idle.stat) && !got.idle.cant && got.idle.bought === 2,
+      `${w}x${h}: when no Guildhall touches a trade, the upgrade says it has no effect yet, and can still be bought ` + JSON.stringify(got.idle));
+    if (w < 800) { // the guild screenshots for the playtest folder (SHOTS=<dir>)
+      await pg.evaluate(() => { state.run.tiles['4,3'] = { kind: 'building', id: 'guild' }; state.run.levels.guild = 1; calc = compute(); ui.sel = { tile: '4,3' }; document.getElementById('toasts').innerHTML = ''; render(); }); await settle(pg); await shot(pg, `guild-${w}x${h}.png`);
+      await pg.evaluate(() => { delete state.run.tiles['4,3']; calc = compute(); ui.sel = { tile: '2,6' }; render(); }); await settle(pg); await shot(pg, `guild-idle-${w}x${h}.png`);
+      for (const [id, k] of [['market', '4,4'], ['smith', '4,2']]) { await pg.evaluate(k => { ui.sel = { tile: k }; render(); }, k); await settle(pg); await shot(pg, `${id}-${w}x${h}.png`); }
+    }
+    ok(e4.length === 0, `${w}x${h} trade buttons: no console errors ` + JSON.stringify(e4));
+    await cx.close();
+  }
+
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();
