@@ -67,10 +67,19 @@ const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(
   `<span class="${!plain && state.run.res[r] < cost[r] ? 'lack' : ''}">${RESOURCES[r].icon} ${fmt(cost[r])}</span>`).join('') + '</span>';
 const tileAt = key => state.run.tiles[key];
 // What a purchase would add each second at today's multipliers, for its card: "+4.0 gold/s".
-const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0); return ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''; };
+// A trade's card also says what it uses up: "uses 1.2 iron/s".
+const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0), us = Object.keys(adds).filter(r => adds[r] < 0 && r !== 'gold');
+  return (ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : '')
+    + (us.length ? '<span class="uses">uses ' + us.map(r => `${fmtRate(-adds[r]).slice(1)} ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''); };
 // The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
 const staffAfter = work => Math.min(1, state.run.pop / Math.max(1, calc.need + (work || 0)));
+// Buildings that feed or are the trades (food and the Markets, iron and the forges, the Guildhall) are previewed with
+// the game's own rules, so a Farm's card shows the gold its food fetches at the Markets and a Blacksmith's the iron it uses.
+const TRADE_LINKED = ['farm', 'mill', 'market', 'mine', 'smith', 'guild'];
+function diffAdds(after) { const before = compute({ stocked: true, staff: calc.staff }), a = {};
+  for (const r in before.base) { const d = after.base[r] - before.base[r]; if (Math.abs(d) > 1e-9) a[r] = d; } return a; }
 function buildAdds(id) { const d = BUILDINGS[id], a = {}, L = kindLevel(id), st = d.work ? staffAfter(d.work * L) : 1;
+  if (TRADE_LINKED.includes(id) && (count('market') || count('smith'))) { const o = diffAdds(afterBuild(id)); for (const r in o) o[r] *= st; return o; }
   if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob * L; }
   else for (const r in d.out || {}) a[r] = d.out[r] * levelMultAt(id, L) * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
   return a; }
@@ -87,11 +96,13 @@ function kindUpgradeEffect(id) {
 function kindUpgradeText(id, fx) {
   const d = BUILDINGS[id], parts = [];
   if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
+  else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); // the Guildhall
+    parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
   else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
   if (fx.housing > 0) parts.push('+' + fmt(fx.housing) + ' housing');
   if (fx.jobs > 0) parts.push('needs ' + fmt(fx.jobs) + ' more ' + sprite('pop', 'villagers'));
-  return parts.join(' · ');
+  return parts.map((p, i) => `<span class="part">${p}${i < parts.length - 1 ? ' ·' : ''}</span>`).join(' '); // the line breaks after a "·", never inside a part
 }
 // The one upgrade button of a building's kind, for the inspector and the phone bar.
 // The phone bar is narrow and already names the kind above the button, so it passes short and leaves the name out.
@@ -101,8 +112,41 @@ function kindUpgradeButton(id, cls, short) {
 }
 const kindLine = id => `level ${kindLevel(id)} · ${count(id)} standing`;
 function researchAdds(r) { const a = {}; if (!r.mult) return a;
+  if (Object.keys(r.mult).some(id => TRADE_LINKED.includes(id)) && (count('market') || count('smith'))) { const had = state.run.research[r.id]; state.run.research[r.id] = 1;
+    const after = compute({ stocked: true, staff: calc.staff }); if (had) state.run.research[r.id] = had; else delete state.run.research[r.id]; return diffAdds(after); }
   for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
   return a; }
+// The trades in plain words, for the resource bar, the panels and the build cards.
+const pctOf = x => Math.round(Math.max(0, Math.min(1, x)) * 100) + '%';
+const marketLine = () => `Markets sell ${fmtRate(calc.foodSold).slice(1, -2)} food/s (${pctOf(calc.fill)} supplied)`;
+const forgeLine = () => `Forges use ${fmtRate(calc.ironUsed).slice(1, -2)} iron/s (running at ${pctOf(calc.smithRun)})`;
+// Why the Markets are short, when they are: no spare food, or a store still filling to its reserve.
+function marketNote() {
+  if (calc.fill >= 0.995) return '';
+  if (!calc.stocked && calc.surplus > 0) return 'The food store is filling first.';
+  return calc.surplus <= 0 ? 'No spare food: build Farms or a Mill.' : 'More Farms or a Mill would supply them.';
+}
+// On a trade's build card, while the trades already standing are short of their supply.
+function tradeWarning(id) {
+  if (id === 'market' && count('market') && calc.fill < 0.995) return `<p class="warn small">Markets are ${pctOf(calc.fill)} supplied: Farms first.</p>`;
+  if (id === 'smith' && count('smith') && calc.smithRun < 0.995) return `<p class="warn small">Forges run at ${pctOf(calc.smithRun)}: Mines first.</p>`;
+  return '';
+}
+// The Markets and Blacksmiths beside a Guildhall, by kind.
+function guildTrades(key) {
+  const [x, y] = xy(key), n = { market: 0, smith: 0 };
+  for (const [a, b] of neighbors(x, y)) { const t = state.run.tiles[a + ',' + b]; if (t && t.kind === 'building' && hasOwn(n, t.id)) n[t.id]++; }
+  return n;
+}
+// True when no Guildhall of the town touches a Market or Blacksmith: upgrading them would change nothing yet.
+// Upgrades are by kind, so one Guildhall beside a trade is enough for the upgrade to count.
+const guildsIdle = () => !Object.keys(state.run.tiles).some(k => { const t = state.run.tiles[k]; if (t.kind !== 'building' || t.id !== 'guild') return false; const n = guildTrades(k); return n.market + n.smith > 0; });
+// What a Guildhall is boosting: the Markets and Blacksmiths beside it.
+function guildLine(key) {
+  const n = guildTrades(key);
+  const parts = Object.keys(n).filter(id => n[id]).map(id => n[id] + ' ' + (n[id] > 1 ? plural(id) : BUILDINGS[id].name));
+  return parts.length ? `Boosting <b>${parts.join(' and ')}</b> by ${pct(BUILDINGS.market.adj.building.guild * Math.sqrt(kindLevel('guild')))}` : 'Boosting nothing: build Markets or Blacksmiths beside it';
+}
 // One line on the rested bonus: what it is doing now, or how far off it is.
 function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
   if (left > 0) return `${sprite('rest')} Rest: time away counts extra once the town has worked undisturbed for ${fmtDuration(left)} more since your last purchase.`;
@@ -156,7 +200,8 @@ function renderResources() {
     if (r === 'iron' && hallLevel() < 3 && !res.iron) continue;
     if (r === 'stone' && !res.stone && !count('quarry')) continue;
     const bad = r === 'food' && run.starving;
-    h += `<div class="chip${bad ? ' bad' : ''}" title="${RESOURCES[r].name}"><span>${RESOURCES[r].icon}<b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r]).replace('/s', '<i>/s</i>')}</small></div>`;
+    const tip = RESOURCES[r].name + (r === 'food' && count('market') ? '. ' + marketLine() : r === 'iron' && count('smith') ? '. ' + forgeLine() : '');
+    h += `<div class="chip${bad ? ' bad' : ''}" title="${tip}"><span>${RESOURCES[r].icon}<b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r]).replace('/s', '<i>/s</i>')}</small></div>`;
   }
   const full = foodRateAt(calc.cap), hungry = run.pop < calc.cap - 0.5 && full < 0 && !run.starving;
   h += `<div class="chip${calc.staff < 1 ? ' bad' : ''}" title="Population of housing${hungry ? ' (short of food, so no one is moving in)' : ''}. Jobs to fill: ${fmt(calc.need)}${calc.staff < 1 ? ' (understaffed)' : ''}. Food upkeep: ${foodPerPop(run.pop).toFixed(2)} per villager per second. At full housing: food ${fmtRate(full)}"><span>${sprite('pop', 'villagers')}<b>${fmt(run.pop)}</b></span><small class="${calc.staff < 1 || hungry ? 'neg' : ''}">of ${fmt(calc.cap)}</small></div>`;
@@ -239,15 +284,19 @@ function renderInspector() {
         <div${end ? ' class="wide"' : ''}><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
         <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
         <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} ${RESOURCES.food.icon}/s</b> per villager. Bigger towns eat more per head.</p></div>
+        ${open && c.iron ? `<p class="stat">Iron income: <b>${fmtRate(calc.base.iron)}</b>${calc.ironUsed > 0 ? `<span class="wide"> after forges (they use ${fmtRate(calc.ironUsed).slice(1)}, never the stock)</span>` : ''}</p>` : ''}
         ${next.length ? `<p class="stat">Next level unlocks: <b>${next.join(', ')}</b></p>` : ''}
         ${t.level === PRESTIGE_HALL - 1 ? `<p class="stat">A Castle lets you found a new kingdom for ${sprite('crown')} Crowns.</p>` : ''}
         ${open ? `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Raise ${aHall(t.level + 1)} ${costHTML(c)}</button></div>` : ''}`;
     } else {
       const d = BUILDINGS[t.id], info = calc.tiles[k] || { adj: 0, mult: 0, levelMult: 1 };
-      h = `<h3 class="kindhead">${d.icon} ${d.name} <span class="muted">· ${kindLine(t.id)}</span></h3><div class="bstats">`; // phones: the bar above the button names the kind
+      h = `<h3 class="kindhead">${d.icon} ${d.name} <span class="muted">· ${kindLine(t.id)}</span></h3><p class="job">${d.desc}</p><div class="bstats">`; // phones: the bar above the button names the kind
       if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${fmt(kind.housing(t))}</b></p>`;
       if (d.out) h += '<p class="stat">Making ' + Object.keys(d.out).map(r => `<b>${fmtRate(d.out[r] * info.mult)} ${RESOURCES[r].icon}</b>`).join(' ') + '</p>';
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * kindLevel(t.id) * calc.staff)}</b></p>`;
+      if (t.id === 'market') h += `<p class="stat">Supplied: <b>${pctOf(info.supply)}</b><span class="wide"> · ${marketLine()}. ${marketNote()}</span></p>`;
+      if (t.id === 'smith') h += `<p class="stat">Running at <b>${pctOf(info.supply)}</b><span class="wide"> · ${forgeLine()}.${calc.smithRun < 0.995 ? ' More Mines would run them harder.' : ''}</span></p>`;
+      if (t.id === 'guild') h += `<p class="stat">${guildLine(k)}</p>`;
       if (d.adj) h += `<p class="stat">Adjacency<span class="wide"> bonus</span>: <b>${pct(info.adj)}</b></p>`;
       if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} ${sprite('pop', 'villagers')}${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed<span class="wide"> — build cottages</span>)</span>` : ''}</p>`;
       h += `</div><p class="muted kindnote">One upgrade raises every ${d.name} you have, and new ones are built at the same level.</p>`;
@@ -305,7 +354,7 @@ function renderPanel() {
       if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">${sprite('lock')}</div><div class="bd">${d.name} — requires ${aHall(d.hall)}</div></div>`; continue; }
       const c = buildCost(id), L = kindLevel(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
-        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}${L > 1 ? ' · level ' + L : ''}</span></div><div class="muted">${d.desc}</div>${L > 1 ? `<div class="muted lvnote">New ones are built at level ${L}.</div>` : ''}${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work * L)}${d.house ? housingWarning(Math.floor(d.house * levelMultAt(id, L) * repBonus('housing'))) : ''}</div></button>`;
+        <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}${L > 1 ? ' · level ' + L : ''}</span></div><div class="muted">${d.desc}</div>${L > 1 ? `<div class="muted lvnote">New ones are built at level ${L}.</div>` : ''}${costHTML(c)}${addsHTML(buildAdds(id))}${tradeWarning(id)}${hallDelay(c, buildAdds(id), d.work * L)}${d.house ? housingWarning(Math.floor(d.house * levelMultAt(id, L) * repBonus('housing'))) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
     if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
@@ -440,7 +489,8 @@ const MODAL_ACTIONS = {
     try {
       const notes = adoptSave(JSON.parse(decodeSave($('imp').value)), Date.now());
       lastTick = Date.now(); ui.sel = {}; ui.mapN = 0;
-      closeModal(); save(); toast('Kingdom restored.'); notes.forEach(toast);
+      closeModal(); save(); toast('Kingdom restored.');
+      if (notes.length) openModal(`<h2 id="modaltitle">Kingdom restored</h2>${notesHTML(notes)}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
     } catch (e) { toast('That save could not be read.'); }
   },
   takeover() { location.reload(); },
@@ -467,31 +517,35 @@ function requestPersistence() {
 const fmtDuration = sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60); return (h ? h + 'h ' : '') + m + 'm'; };
 // Hours to one decimal for the welcome-back line ("8 h", "18.5 h"); under an hour in minutes.
 const fmtHours = sec => sec < 3600 ? Math.round(sec / 60) + ' min' : (Math.round(sec / 360) / 10) + ' h';
+// Notes from loading a save (what changed since it was made), one paragraph each, for the welcome-back dialog.
+const notesHTML = notes => notes.map(n => `<p class="loadnote">${esc(n)}</p>`).join('');
 // Every stretch of missed time goes through here: page load, or the loop noticing the tab was asleep.
-function catchUp(sec) {
-  const r = creditAway(sec);
-  if (r.away <= OFFLINE_REPORT_SECONDS) return;
+// `notes` (page load only) are shown in the same dialog, which then opens even after a short absence.
+function catchUp(sec, notes) {
+  const r = creditAway(sec), away = r.away > OFFLINE_REPORT_SECONDS; notes = notes || [];
+  if (!away && !notes.length) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
-  openModal(`<h2 id="modaltitle">Welcome back</h2><p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>
-    ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
-    ${nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
-    ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
+  openModal(`<h2 id="modaltitle">Welcome back</h2>${away ? `<p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>` : ''}
+    ${notesHTML(notes)}
+    ${away && abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
+    ${away && nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
+    ${away ? gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>' : ''}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
 }
 function loadGame() {
-  const now = Date.now(); let raw = null, notes = [];
+  const now = Date.now(); let raw = null, notes = [], lost = false;
   try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { /* storage unavailable */ }
   if (raw) {
     try { notes = adoptSave(JSON.parse(raw), now); render(); } // a save that cannot be computed or drawn counts as unreadable
     catch (e) {
       try { localStorage.setItem(BACKUP_KEY, raw); } catch (e2) { /* storage unavailable */ }
-      startNewGame(now);
-      notes = ['Your saved kingdom could not be read, so a new one was started. A copy of the old data was kept in this browser.'];
+      startNewGame(now); notes = []; lost = true;
     }
   } else startNewGame(now);
   render();
   lastTick = now;
-  catchUp((now - state.last) / 1000);
-  notes.forEach(toast);
+  catchUp((now - state.last) / 1000, notes);
+  if (notes.length) save(); // the save now carries the current version, so its notes are not shown again
+  if (lost) toast('Your saved kingdom could not be read, so a new one was started. A copy of the old data was kept in this browser.');
 }
 // Two tabs would overwrite each other's saves. The newest tab owns the save; older ones pause until told to take over.
 function claimTab() {
