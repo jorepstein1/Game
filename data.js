@@ -22,9 +22,11 @@ const HALL_MAX = HALL_TIERS.length; // the last hall: there is none past the Imp
 const HALL_CROWNS = { 6: 30, 7: 75 }; // hall level: Crowns held needed to raise it
 // Hall costs set the pace: Manor in the first session, Keep about 4 hours in, Castle about 12, Palace about 37
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
+// The Castle's stone and the Palace's gold were raised when food and iron became the trades' supplies (a player who
+// feeds the Markets gets more from the same town).
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
   { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.1e5, wood: 8.4e4, stone: 5.04e4 },
-  { gold: 6.5e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
+  { gold: 6.5e5, stone: 3.8e5 }, { gold: 1.9e7, stone: 3e6, iron: 1.12e5 },
 ];
 const HALL_GROWTH = 4;           // Royal Palace 4x the Palace, Imperial 16x: in a reign begun with 30 (75) Crowns held it is affordable about when 20 Crowns come on offer
 const HALL_HOUSING = 5;          // villagers housed per hall level
@@ -62,10 +64,10 @@ const FOOD_RESERVE_SECONDS = 120; // villagers also move in while the stores cov
 // (what it takes in at full supply) grows with its kind's level, the realm bonus and staffing; adjacency (Cottages,
 // a Mine, a Guildhall) and research raise the price it gets, not what it takes in.
 const MARKET_RESERVE_SECONDS = 600; // Markets sell only while the food store holds this many seconds of upkeep: the store fills first
-const MARKET_BASE = 0.25;        // share of its full rate a Market earns with no food to sell
-const MARKET_FOOD = 1;           // food a Market takes in per second, per gold of its volume
-const SMITH_SHARE = 0.5;         // the most of the town's iron income all forges together may use
-const SMITH_IRON = 0.05;         // iron a Blacksmith uses per second, per gold of its volume
+const MARKET_BASE = 0.15;        // share of its full rate a Market earns with no food to sell
+const MARKET_FOOD = 25;          // food a Market takes in per second, per gold of its volume
+const SMITH_SHARE = 0.6;         // the most of the town's iron income all forges together may use
+const SMITH_IRON = 0.07;         // iron a Blacksmith uses per second, per gold of its volume
 const TRADES = { market: { per: MARKET_FOOD }, smith: { per: SMITH_IRON } };
 // Upgrades are by kind: one upgrade raises every building of that kind, standing or still to be built. Prices
 // follow one rule (sim.js, "Prices"). A kind with n standing at level L has a worth
@@ -115,23 +117,23 @@ const BUILDINGS = {
   lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { wood: 0.8 },
     adj: { terrain: { forest: 0.5 } }, desc: 'Fells timber. Wants forest nearby.' },
   farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 2.5, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 5, growth: 6 }, out: { food: 1.5 },
-    adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the village. Thrives beside water and mills.' },
+    adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the town; spare food stocks the Markets. Likes water and a Mill.' },
   quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
-  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 8e4, wood: 3e4 }, work: 3, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
-    adj: { building: { cottage: 0.2, guild: 1 } }, desc: 'Trade brings gold. Busier when surrounded by cottages.' },
+  market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 6e4, wood: 3e4 }, work: 3, growth: 2, upgradeGrowth: 4, out: { gold: 3 },
+    adj: { building: { cottage: 0.2, guild: 1 } }, desc: 'Sells spare food for gold; little without it. Likes Cottages beside it.' },
   mill: { name: 'Mill', icon: '🎡', hall: 2, cost: { gold: 6e4, wood: 9e4 }, work: 2, linear: true, growth: 2, upgradeGrowth: 4, out: { food: 3 },
-    desc: 'Grinds grain and boosts every farm beside it.' },
+    desc: 'Makes food and boosts every Farm beside it.' },
   tavern: { name: 'Tavern', icon: '🍺', hall: 2, cost: { gold: 360000, wood: 180000 }, work: 2, growth: 2, upgradeGrowth: 4, out: { gold: 2 },
     desc: 'Merry villagers pay more tax. Boosts cottages beside it.' },
-  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { iron: 0.4 },
-    adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron ore. Wants hills nearby.' },
-  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 12 },
-    adj: { building: { mine: 0.3, guild: 1 } }, desc: 'Forges goods worth a fortune. Likes a mine next door.' },
+  mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { iron: 0.8 },
+    adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron for halls and Blacksmiths. Wants hills nearby.' },
+  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 36 },
+    adj: { building: { mine: 0.3, guild: 1 } }, desc: 'Turns iron into gold, the best rate there is. Likes a Mine beside it.' },
   church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
     desc: 'Inspires the whole realm: +5% to all production per level while fully staffed.' },
   guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4,
-    desc: 'Organises the trades. Boosts markets and blacksmiths beside it.' },
+    desc: 'Makes no gold itself. Boosts every Market and Blacksmith beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
 
@@ -183,14 +185,14 @@ const DECREES = [
   { id: 'learned', title: 'Learned Folk', desc: 'Buy something in the Research tab.', done: () => Object.keys(state.run.research).length >= 1, reward: { gold: 150 } },
   { id: 'coffers', title: 'A Full Treasury', desc: 'Hold 2,000 gold at once. A Manor costs 2,500 gold, 1,000 wood and 250 stone: hold off on small purchases for a while and let the stores fill.', progress: () => [state.run.res.gold, 2000], reward: { wood: 300, stone: 100 } },
   { id: 'manor', title: 'Lord of the Manor', desc: 'Tap your Village Hall and upgrade it into a Manor.', done: () => hallLevel() >= 2, reward: { gold: 300, wood: 200 } },
-  { id: 'market', title: 'Market Day', desc: 'Build a Market.', done: () => count('market') >= 1, reward: { gold: 400 } },
+  { id: 'market', title: 'Market Day', desc: 'Build a Market. It sells the food your town does not eat, so keep the Farms ahead.', done: () => count('market') >= 1, reward: { gold: 400 } },
   { id: 'grist', title: 'Grist for the Mill', desc: 'Build a Mill right next to a Farm.', done: () => hasPair('mill', 'farm'), reward: { food: 500 } },
   { id: 'builders', title: 'Master Builders', desc: 'Raise any kind of building to level 3.', done: () => BUILD_ORDER.some(id => kindLevel(id) >= 3), reward: { stone: 300 } },
   { id: 'horizons', title: 'New Horizons', desc: 'Expand your borders (bottom of the Build tab).', done: () => state.run.exp >= 1, reward: { gold: 1500 } },
   { id: 'town', title: 'A Proper Town', desc: 'Reach a population of 150.', progress: () => [state.run.pop, 150], reward: { gold: 3000 } },
   { id: 'keep', title: 'Stronghold', desc: 'Raise a Keep.', done: () => hallLevel() >= 3, reward: { stone: 20000 } },
   { id: 'deep', title: 'Into the Deep', desc: 'Build a Mine.', done: () => count('mine') >= 1, reward: { gold: 20000 } },
-  { id: 'anvil', title: 'Hammer and Anvil', desc: 'Build a Blacksmith.', done: () => count('smith') >= 1, reward: { iron: 1000 } },
+  { id: 'anvil', title: 'Hammer and Anvil', desc: 'Build a Blacksmith. It turns part of your iron income into gold; Mines keep it busy.', done: () => count('smith') >= 1, reward: { iron: 1000 } },
   { id: 'bells', title: 'Bells at Dawn', desc: 'Build a Church.', done: () => count('church') >= 1, reward: { gold: 1e5 } },
   { id: 'treasury', title: 'Royal Treasury', desc: 'Earn 500 gold per second.', progress: () => [calc.base.gold, 500], reward: { gold: 5e5 } },
   { id: 'castle', title: 'Seat of Power', desc: 'Raise a Castle.', done: () => hallLevel() >= 4, reward: { iron: 20000 } },
@@ -198,7 +200,7 @@ const DECREES = [
   { id: 'spires', title: 'Three Spires', desc: 'Have three Churches standing. Each lifts all production while it is fully staffed.', progress: () => [count('church'), 3], reward: { gold: 3e6 } },
   { id: 'marches', title: 'The Marches', desc: 'Expand your borders a second time.', done: () => state.run.exp >= 2, reward: { stone: 5e5 } },
   { id: 'city', title: 'A Thriving City', desc: 'Reach a population of 750. Villagers need housing, and bigger towns eat more per head.', progress: () => [state.run.pop, 750], reward: { gold: 2e6 } },
-  { id: 'guild', title: 'Brotherhood of Trades', desc: 'Build a Guildhall.', done: () => count('guild') >= 1, reward: { gold: 2e6 } },
+  { id: 'guild', title: 'Brotherhood of Trades', desc: 'Build a Guildhall where it touches Markets or Blacksmiths. It boosts them, not itself.', done: () => count('guild') >= 1, reward: { gold: 2e6 } },
   { id: 'scholars', title: 'A Seat of Learning', desc: 'Hold twelve pieces of research at once.', progress: () => [Object.keys(state.run.research).length, 12], reward: { iron: 1e5 } },
   { id: 'roads', title: 'All Roads Lead Here', desc: 'Build Royal Roads twice (Research tab, repeatable upgrades).', progress: () => [repLevel('prod'), 2], reward: { gold: 2e7 } },
   { id: 'riches', title: 'Overflowing Coffers', desc: 'Earn 20,000 gold per second.', progress: () => [calc.base.gold, 20000], reward: { gold: 3e7 } },

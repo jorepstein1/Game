@@ -63,7 +63,7 @@ function play(seed, opts) {
   const trade = t => t && t.kind === 'building' && (t.id === 'market' || t.id === 'smith');
   const guildSite = (x, y) => sim.neighbors(x, y).some(([a, b]) => { const k = a + ',' + b; return !run().tiles[k] && run().terrain[a][b] === 'plain' &&
     sim.neighbors(a, b).some(([c, d]) => !(c === x && d === y) && trade(run().tiles[c + ',' + d])); });
-  const bestPlot = (id, ps) => { let best = null, bs = -1; for (const [x, y] of ps) { const v = sim.adjBonus(id, x, y) + 0.3 * sim.givesTo(id, x, y) + (id === 'market' || id === 'smith' ? 0.15 * guildSite(x, y) : 0); if (v > bs) { bs = v; best = x + ',' + y; } } return best; };
+  const bestPlot = (id, ps) => { let best = null, bs = -1; for (const [x, y] of ps) { const v = sim.adjBonus(id, x, y) + 0.3 * sim.givesTo(id, x, y) + (id === 'market' || id === 'smith' ? 0.3 * guildSite(x, y) : 0); if (v > bs) { bs = v; best = x + ',' + y; } } return best; };
   function candidates() {
     const c = [], ps = plots(), hl = sim.hallLevel();
     if (ps.length) for (const id of sim.BUILD_ORDER) if (B[id].hall <= hl) c.push({ k: 'build', id, cost: sim.buildCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.build(bestPlot(id, ps), id) });
@@ -110,7 +110,9 @@ function play(seed, opts) {
         // they hold under a fifth of the plots, which the town also needs for homes and trades.
         c = c.filter(a => (a.food && a.k === 'build' ? nf < 0.22 * nt : true) && !(a.house && roomy) && !(a.k === 'build' && sim.count(a.id) > 0 && few));
       }
-      c = c.filter(a => sim.canAfford(a.cost)).sort((a, b) => sum(a.cost) - sum(b.cost));
+      // A Guildhall only goes where it boosts a trade: the first is a new kind worth having once it can touch two.
+      const touches = a => { const key = bestPlot('guild', plots()); return key ? sim.givesTo('guild', ...key.split(',').map(Number)) : 0; };
+      c = c.filter(a => sim.canAfford(a.cost) && !(a.k === 'build' && a.id === 'guild' && !touches(a))).sort((a, b) => sum(a.cost) - sum(b.cost));
       if (!c.length) return bought;
       let pick = c[0];
       if (!hungry && !foodBound && !cramped) {
@@ -169,7 +171,7 @@ function play(seed, opts) {
           let best = 1 / 0; pick = null;
           for (const a of c) { // c is cheapest first, so ties go to the cheapest
             if (a.k === 'hall') continue;
-            const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
+            const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0 && (a.id !== 'guild' || touches(a) >= 2), slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
             if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) score = -1; // a town out of plots expands first, as it would build a new kind first
             if (score < best) { best = score; pick = a; }
@@ -343,7 +345,7 @@ if (require.main === module) {
       const night = first.filter(v => v.away === 8).map(v => v.bought), day = first.filter(v => v.away !== 8).map(v => v.bought);
       if (night.length) console.log(`  after a night: median ${median(night)}, most ${Math.max(...night)}; after 4h: median ${median(day)}`); }
     const felt = r.felt.filter(f => f.reign === 0 && f.t > 1800);
-    if (felt.length) { const q = (a, p) => { a = a.filter(x => isFinite(x)).sort((x, y) => x - y); return a.length ? a[Math.floor(p * (a.length - 1))] : null; };
+    if (felt.length) { const q = (a, p) => { a = a.filter(x => x !== null && isFinite(x)).sort((x, y) => x - y); return a.length ? a[Math.floor(p * (a.length - 1))] : null; };
       console.log(`  each build/upgrade after the opening: gain to its material median ${Math.round(100 * q(felt.map(f => f.gain), 0.5))}%, 10th pct ${Math.round(100 * q(felt.map(f => f.gain), 0.1))}%; payback median ${q(felt.map(f => f.payback), 0.5).toFixed(1)}h, 10th pct ${q(felt.map(f => f.payback), 0.1).toFixed(1)}h, 90th ${q(felt.map(f => f.payback), 0.9).toFixed(1)}h; under 10%: ${felt.filter(f => f.gain < 0.095).map(f => f.id + (f.k === 'up' ? '^' : '')).join(' ')}`); }
     if (LOG) for (const v of r.visits.filter(v => v.reign === 0)) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h  ${String(v.bought).padStart(2)} bought (${v.builds}b ${v.ups}u ${v.other}o)  hall ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  Crowns ${v.pending}${v.starving ? '  STARVING' : ''}  ${v.names.join(', ')}`);
     const sh = e => e ? Object.entries(e.shares).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + Math.round(100 * v) + '%').join(' ') : '-';
