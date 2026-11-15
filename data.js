@@ -117,7 +117,7 @@ const BUILDINGS = {
   lumber: { name: 'Lumber Camp', icon: '🪓', hall: 1, cost: { gold: 20, wood: 5 }, work: 2, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { wood: 0.8 },
     adj: { terrain: { forest: 0.5 } }, desc: 'Fells timber. Wants forest nearby.' },
   farm: { name: 'Farm', icon: '🌾', hall: 1, cost: { gold: 10, wood: 15 }, work: 2, linear: true, growth: 2.5, upgradeGrowth: 8, late: { from: 5, growth: 6 }, out: { food: 1.5 },
-    adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the town; spare food stocks the Markets. Likes water and a Mill.' },
+    adj: { terrain: { water: 0.5 }, building: { mill: 0.5 } }, desc: 'Feeds the town and stocks the Markets. Likes water and a Mill.' },
   quarry: { name: 'Quarry', icon: '⛏️', hall: 1, cost: { gold: 120, wood: 80 }, work: 3, growth: 3, upgradeGrowth: 18, lift: 10, late: { from: 4, growth: 8 }, out: { stone: 0.5 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Cuts stone. Wants hills nearby.' },
   market: { name: 'Market', icon: '🏪', hall: 2, cost: { gold: 6e4, wood: 3e4 }, work: 3, growth: 2, upgradeGrowth: 4, out: { gold: 2.5 },
@@ -131,9 +131,9 @@ const BUILDINGS = {
   smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 18 },
     adj: { building: { mine: 0.3, guild: 1 } }, desc: 'Turns iron into gold, the best rate there is. Likes a Mine beside it.' },
   church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
-    desc: 'Inspires the whole realm: +5% to all production per level while fully staffed.' },
+    desc: '+5% to all production per level, while fully staffed.' },
   guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4,
-    desc: 'Makes no gold itself. Boosts every Market and Blacksmith beside it.' },
+    desc: 'Makes no gold; boosts the Markets and Blacksmiths beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
 

@@ -101,7 +101,7 @@ function kindUpgradeText(id, fx) {
   else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
   if (fx.housing > 0) parts.push('+' + fmt(fx.housing) + ' housing');
   if (fx.jobs > 0) parts.push('needs ' + fmt(fx.jobs) + ' more ' + sprite('pop', 'villagers'));
-  return parts.join(' · ');
+  return parts.map((p, i) => `<span class="part">${p}${i < parts.length - 1 ? ' ·' : ''}</span>`).join(' '); // the line breaks after a "·", never inside a part
 }
 // The one upgrade button of a building's kind, for the inspector and the phone bar.
 // The phone bar is narrow and already names the kind above the button, so it passes short and leaves the name out.

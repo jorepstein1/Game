@@ -643,7 +643,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ok(['market', 'smith', 'guild', 'farm'].every(id => got[id].jobFits && got[id].docW <= W) && got.cardsFit && got.docW <= W, `${W}px: the job lines and build cards fit, no sideways scroll`);
     ok(got.tips.length === 2 && /Markets sell [\d.]+ food\/s \(\d+% supplied\)/.test(got.tips[0]) && /Forges use [\d.]+ iron\/s \(running at \d+%\)/.test(got.tips[1]) && /Iron income: \+[\d.]+\/s/.test(got.hall),
       `${W}px: the food and iron chips say what the Markets sell and the forges use; the hall panel gives the iron income when the next hall needs iron ` + JSON.stringify([got.tips, got.hall]));
-    ok(/Makes no gold itself/.test(got.cards[3]) && /best rate/.test(got.cards[2]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
+    ok(/Makes no gold; boosts/.test(got.cards[3]) && /best rate/.test(got.cards[2]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
     ok(e3.length === 0, `${W}px trades: no console errors ` + JSON.stringify(e3));
     await cx.close();
   }
