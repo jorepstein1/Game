@@ -601,6 +601,35 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   });
   ok(!art.missing.length && !art.tables.length && !art.text.length && art.welcome && art.kinds >= 30 && art.fit, 'every resource, terrain, hall level and building has a sprite that resolves, tiles show them at size, and no emoji is on screen (welcome-back dialog included) ' + JSON.stringify(art));
   ok(e2.length === 0, 'sprites: no console errors ' + JSON.stringify(e2));
+
+  // --- the trades: each building says its job; Market, Blacksmith and Guildhall panels say supply, run and what is boosted; it fits 360px
+  for (const [w, h] of [[360, 740], [390, 844], [1280, 800]]) {
+    const cx = await br.newContext({ viewport: { width: w, height: h }, hasTouch: w < 800, isMobile: w < 800, reducedMotion: 'reduce' }), pg = await cx.newPage(), e3 = []; watch(pg, e3);
+    await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(pg);
+    const got = await pg.evaluate(() => {
+      const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.exp = 1; run.tiles[HALL_KEY].level = 4; run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
+      const put = (k, id) => { run.tiles[k] = { kind: 'building', id }; };
+      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage');
+      calc = compute(); run.pop = calc.cap; ui.mapN = 0; calc = compute();
+      const out = {}, docW = () => document.documentElement.scrollWidth;
+      for (const id of ['market', 'smith', 'guild', 'farm']) { const k = Object.keys(run.tiles).find(k => run.tiles[k].id === id); ui.sel = { tile: k }; render();
+        const ins = document.getElementById('inspector'), job = ins.querySelector('.job'), r = job && job.getBoundingClientRect(), ir = ins.getBoundingClientRect();
+        out[id] = { text: ins.innerText.replace(/\s+/g, ' '), job: job ? job.textContent : '', jobFits: !!r && r.right <= ir.right + 1 && r.left >= ir.left - 1, docW: docW() }; }
+      ui.sel = { tile: HALL_KEY }; render(); out.hall = document.getElementById('inspector').innerText.replace(/\s+/g, ' ');
+      ui.sel = {}; ui.tab = 'build'; ui.sheet = true; render(); out.cards = ['farm', 'market', 'smith', 'guild'].map(id => document.querySelector(`#panel .card[data-id="${id}"] .muted`).textContent);
+      out.cardsFit = [...document.querySelectorAll('#panel .card')].every(c => c.scrollWidth <= c.clientWidth + 1); out.docW = docW();
+      out.tips = [...document.querySelectorAll('#res .chip')].map(c => c.title).filter(t => /Markets sell|Forges use/.test(t));
+      return out; });
+    const W = w;
+    ok(/Sells spare food/.test(got.market.job) && /Supplied: \d+%/.test(got.market.text) && /Running at \d+%/.test(got.smith.text) && /Boosting 1 Market and 1 Blacksmith by \+100%/.test(got.guild.text) && /Feeds the town/.test(got.farm.job),
+      `${W}px: each building panel states its job; the Market its supply, the Blacksmith its run, the Guildhall what it boosts ` + JSON.stringify([got.market.text, got.smith.text, got.guild.text]));
+    ok(['market', 'smith', 'guild', 'farm'].every(id => got[id].jobFits && got[id].docW <= W) && got.cardsFit && got.docW <= W, `${W}px: the job lines and build cards fit, no sideways scroll`);
+    ok(got.tips.length === 2 && /Markets sell [\d.]+ food\/s \(\d+% supplied\)/.test(got.tips[0]) && /Forges use [\d.]+ iron\/s \(running at \d+%\)/.test(got.tips[1]) && /Iron income: \+[\d.]+\/s/.test(got.hall),
+      `${W}px: the food and iron chips say what the Markets sell and the forges use; the hall panel gives the iron income when the next hall needs iron ` + JSON.stringify([got.tips, got.hall]));
+    ok(/Makes no gold itself/.test(got.cards[3]) && /best rate/.test(got.cards[2]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
+    ok(e3.length === 0, `${W}px trades: no console errors ` + JSON.stringify(e3));
+    await cx.close();
+  }
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();

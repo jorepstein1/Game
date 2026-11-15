@@ -110,6 +110,8 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 #inspector .narrow { display: none; }               /* phone-only text */
 .muted { color: var(--ink2); font-size: 13px; }
 .stat { font-size: 14px; }
+#inspector .job { margin: 2px 0 4px; font-size: 13px; color: var(--ink2); }
+.uses { display: block; font-size: 12px; color: #8a5a2b; }
 .stat b { color: var(--good); }
 .warn { color: var(--bad); }
 .warn.small { font-size: 12px; margin: 3px 0 0; font-family: system-ui, sans-serif; }
@@ -268,9 +270,10 @@ hr { border: 0; border-top: 1px solid #a88f5a; margin: 10px 0; }
   #inspector .narrow { display: block; }
   #inspector .hallend.narrow p { margin: 0; font-size: 13px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* three lines that fit a 60px strip */
   #inspector .bstats p.stat { display: inline; margin: 0 10px 0 0; }
+  #inspector .job { display: none; margin: 0 0 2px; font-size: 12px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* one line, on phones tall enough for it */
 }
 /* Taller phones have room for more lines of detail under the map (an 11x11 map still fits its 490px at 390x844). */
-@media (max-width: 800px) and (min-height: 740px) { #strip { height: 78px; } #inspector .goal, #inspector .lead { -webkit-line-clamp: 3; } }
+@media (max-width: 800px) and (min-height: 740px) { #strip { height: 78px; } #inspector .goal, #inspector .lead { -webkit-line-clamp: 3; } #inspector .job { display: block; } }
 @media (max-width: 800px) and (min-height: 830px) { #strip { height: 96px; } #inspector .goal, #inspector .lead { -webkit-line-clamp: 4; } }
 /* A phone on its side: the map takes the left at full height; the strip, bar and tabs stack on the right. */
 @media (max-height: 500px) and (orientation: landscape) {

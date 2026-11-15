@@ -274,7 +274,7 @@ function play(seed, opts) {
   }
   sim.setState(sim.state);
   out.totalGold = sim.state.meta.stats.totalGold; out.goldRate = sim.calc.base.gold; out.crowns = sim.state.meta.crowns; out.pending = sim.pendingCrowns();
-  out.hall = sim.hallName(sim.hallLevel()); out.fmt = sim.fmt; out.town = { tiles: JSON.parse(JSON.stringify(run().tiles)), terrain: run().terrain.map(c => c.slice()), levels: Object.assign({}, run().levels) };
+  out.hall = sim.hallName(sim.hallLevel()); out.fmt = sim.fmt; out.town = { tiles: JSON.parse(JSON.stringify(run().tiles)), terrain: run().terrain.map(c => c.slice()), levels: Object.assign({}, run().levels), save: sim.serialize() };
   return out;
 }
 
