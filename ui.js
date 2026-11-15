@@ -489,7 +489,8 @@ const MODAL_ACTIONS = {
     try {
       const notes = adoptSave(JSON.parse(decodeSave($('imp').value)), Date.now());
       lastTick = Date.now(); ui.sel = {}; ui.mapN = 0;
-      closeModal(); save(); toast('Kingdom restored.'); notes.forEach(toast);
+      closeModal(); save(); toast('Kingdom restored.');
+      if (notes.length) openModal(`<h2 id="modaltitle">Kingdom restored</h2>${notesHTML(notes)}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
     } catch (e) { toast('That save could not be read.'); }
   },
   takeover() { location.reload(); },
@@ -516,31 +517,35 @@ function requestPersistence() {
 const fmtDuration = sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60); return (h ? h + 'h ' : '') + m + 'm'; };
 // Hours to one decimal for the welcome-back line ("8 h", "18.5 h"); under an hour in minutes.
 const fmtHours = sec => sec < 3600 ? Math.round(sec / 60) + ' min' : (Math.round(sec / 360) / 10) + ' h';
+// Notes from loading a save (what changed since it was made), one paragraph each, for the welcome-back dialog.
+const notesHTML = notes => notes.map(n => `<p class="loadnote">${esc(n)}</p>`).join('');
 // Every stretch of missed time goes through here: page load, or the loop noticing the tab was asleep.
-function catchUp(sec) {
-  const r = creditAway(sec);
-  if (r.away <= OFFLINE_REPORT_SECONDS) return;
+// `notes` (page load only) are shown in the same dialog, which then opens even after a short absence.
+function catchUp(sec, notes) {
+  const r = creditAway(sec), away = r.away > OFFLINE_REPORT_SECONDS; notes = notes || [];
+  if (!away && !notes.length) return;
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
-  openModal(`<h2 id="modaltitle">Welcome back</h2><p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>
-    ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
-    ${nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
-    ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
+  openModal(`<h2 id="modaltitle">Welcome back</h2>${away ? `<p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>` : ''}
+    ${notesHTML(notes)}
+    ${away && abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
+    ${away && nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
+    ${away ? gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>' : ''}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
 }
 function loadGame() {
-  const now = Date.now(); let raw = null, notes = [];
+  const now = Date.now(); let raw = null, notes = [], lost = false;
   try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { /* storage unavailable */ }
   if (raw) {
     try { notes = adoptSave(JSON.parse(raw), now); render(); } // a save that cannot be computed or drawn counts as unreadable
     catch (e) {
       try { localStorage.setItem(BACKUP_KEY, raw); } catch (e2) { /* storage unavailable */ }
-      startNewGame(now);
-      notes = ['Your saved kingdom could not be read, so a new one was started. A copy of the old data was kept in this browser.'];
+      startNewGame(now); notes = []; lost = true;
     }
   } else startNewGame(now);
   render();
   lastTick = now;
-  catchUp((now - state.last) / 1000);
-  notes.forEach(toast);
+  catchUp((now - state.last) / 1000, notes);
+  if (notes.length) save(); // the save now carries the current version, so its notes are not shown again
+  if (lost) toast('Your saved kingdom could not be read, so a new one was started. A copy of the old data was kept in this browser.');
 }
 // Two tabs would overwrite each other's saves. The newest tab owns the save; older ones pause until told to take over.
 function claimTab() {

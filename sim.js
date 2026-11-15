@@ -3,7 +3,7 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
@@ -605,6 +605,8 @@ function upgradeLegacySave(o) {
     run: { seed: o.seed, res: o.res, pop: o.pop, exp: o.exp, tiles, research: o.research, starving: o.starving, gold: o.runGold } };
 }
 
+const TRADE_KINDS = ['market', 'smith', 'guild'];
+const JOBS_NOTE = 'The trades have changed. Markets now sell spare food, and Blacksmiths work the iron your Mines make. Guildhalls no longer make gold: they boost the Markets and Blacksmiths beside them, so it may pay to move a Guildhall or add Farms.';
 // Returns { state, notes }. Throws if the data is not a save at all (or is from a newer version).
 function sanitizeSave(raw, now) {
   if (!isObj(raw)) throw new Error('not a save');
@@ -665,6 +667,8 @@ function sanitizeSave(raw, now) {
   // The kind takes the lowest level among its buildings, so migrating never upgrades anything for free.
   if (v < 4) for (const id in seen) run.levels[id] = seen[id];
   if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind. Where your buildings of one kind had different levels, all of them are now at the level of the lowest.');
+  // Version 5 gave the trades their jobs: a town that already has one is told once why its gold income changed.
+  if (v < 5 && Object.keys(run.tiles).some(k => TRADE_KINDS.includes(run.tiles[k].id))) notes.push(JOBS_NOTE);
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;

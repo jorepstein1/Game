@@ -509,14 +509,31 @@ test('version-3 saves migrate: each kind takes the lowest level among its buildi
       tiles: { '5,5': { kind: 'hall', id: 'hall', level: 3 }, '5,4': { kind: 'building', id: 'farm', level: 2 }, '4,5': { kind: 'building', id: 'farm', level: 5 },
         '6,5': { kind: 'building', id: 'farm', level: 3 }, '5,6': { kind: 'building', id: 'quarry', level: 4 }, '4,4': { kind: 'building', id: 'cottage', level: 1 } } } };
   const { state: s, notes } = sim.sanitizeSave(v3, 1000);
-  assert.strictEqual(s.v, 4); assert.strictEqual(s.run.tiles['5,5'].level, 3, 'the hall keeps its level');
+  assert.strictEqual(s.v, sim.SAVE_VERSION); assert.strictEqual(s.run.tiles['5,5'].level, 3, 'the hall keeps its level');
   assert.deepStrictEqual(plain(s.run.levels), Object.assign(Object.fromEntries(sim.BUILD_ORDER.map(id => [id, 1])), { farm: 2, quarry: 4 }), 'farms at 2, 5 and 3 become farms at 2: nothing is upgraded for free');
   for (const k of ['5,4', '4,5', '6,5', '5,6', '4,4']) assert.strictEqual(s.run.tiles[k].level, undefined, k + ' has no level of its own');
   assert.ok(notes.some(n => /level of the lowest/.test(n)), 'farms at different levels: the player is told ' + notes.join('|'));
   const even = JSON.parse(JSON.stringify(v3)); even.run.tiles['5,4'].level = even.run.tiles['6,5'].level = 5;
   assert.strictEqual(sim.sanitizeSave(even, 1000).notes.length, 0, 'nothing to say when no level changed');
   sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['5,4'].levelMult, 2, 1e-9, 'every farm works at level 2:');
-  const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000); assert.strictEqual(JSON.stringify(back.state), sim.serialize(), 'and round-trips as version 4'); assert.strictEqual(back.notes.length, 0);
+  const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000); assert.strictEqual(JSON.stringify(back.state), sim.serialize(), 'and round-trips as the current version'); assert.strictEqual(back.notes.length, 0);
+});
+
+test('saves from before the trades had jobs say once what changed; new games never do', sim => {
+  const v4 = { v: 4, last: 900, meta: { crowns: 0 }, run: { seed: 12345, gen: 2, exp: 1, res: { gold: 50, food: 5, wood: 5, stone: 5, iron: 0 }, pop: 10, levels: { guild: 2 },
+    tiles: { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'farm' }, '6,6': { kind: 'building', id: 'guild' } } } };
+  const jobs = n => /Markets now sell spare food/.test(n) && /Blacksmiths work the iron your Mines make/.test(n) && /Guildhalls no longer make gold/.test(n) && /move a Guildhall or add Farms/.test(n);
+  const out = sim.sanitizeSave(v4, 1000);
+  assert.strictEqual(out.state.v, 5); assert.strictEqual(out.notes.filter(jobs).length, 1, 'a version-4 town with a Guildhall is told, once: ' + out.notes.join('|'));
+  assert.strictEqual(out.state.run.levels.guild, 2, 'its levels are kept');
+  for (const id of ['market', 'smith']) { const o = JSON.parse(JSON.stringify(v4)); o.run.tiles['6,6'].id = id; assert.ok(sim.sanitizeSave(o, 1000).notes.some(jobs), 'and one with a ' + id); }
+  const noTrade = JSON.parse(JSON.stringify(v4)); delete noTrade.run.tiles['6,6'];
+  assert.strictEqual(sim.sanitizeSave(noTrade, 1000).notes.length, 0, 'a town with no Market, Blacksmith or Guildhall has nothing to be told');
+  sim.setState(out.state); const again = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000);
+  assert.strictEqual(again.notes.length, 0, 'saved again, it loads as version 5 without the note');
+  sim.startNewGame(0); assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'a fresh game never shows it');
+  const s = town(sim, 4); for (const id of ['market', 'guild']) assert.ok(sim.build(s.shift(), id).ok, 'build ' + id);
+  assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'nor does a new town with a Market and a Guildhall');
 });
 
 // ── Terrain ──
@@ -585,7 +602,7 @@ test('terrain is deterministic per seed; version-1 saves keep the old generator'
 });
 
 test('a missing grid is regrown by the generator that made the map (run.gen)', sim => {
-  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 4);
+  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 5);
   const s = sim.newState(0); s.run = run; const raw = plain(s); delete raw.run.terrain;
   let got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 2); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 2: genTerrain');
   raw.run.terrain = [['<img>']]; assert.deepStrictEqual(plain(sim.sanitizeSave(raw, 1000).state.run.terrain), plain(sim.genTerrain(4242)), 'an invalid grid too');

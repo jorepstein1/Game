@@ -317,11 +317,12 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: Date.now() - 1e7 } };
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
-  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, toast: document.getElementById('toasts').textContent }));
-  ok(mig.v === 4 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && /1 building in this save was not recognised/.test(mig.toast) && /predates the rebalance/.test(mig.toast), 'v1 save migrated ' + JSON.stringify(mig));
-  ok(mig.clock >= 29 && mig.clock <= 33 && !mig.modal, 'a 30s reload gap is credited silently (' + mig.clock + 's)');
+  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, notes: document.getElementById('modalbox').textContent }));
+  ok(mig.v === 5 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /Markets now sell spare food/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
+  ok(mig.clock >= 29 && mig.clock <= 33 && !/Away/.test(mig.notes), 'a 30s reload gap is credited without an away summary (' + mig.clock + 's)');
+  await page.evaluate(() => closeModal());
   const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
-  ok(stored.v === 4 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  ok(stored.v === 5 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
   // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy
@@ -688,6 +689,24 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     await cx.close();
   }
 
+  // --- a save from before the trades had jobs: the welcome back says once what changed; a fresh game never does
+  { const cx = await br.newContext({ viewport: { width: 360, height: 740 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, reducedMotion: 'reduce' }), pg = await cx.newPage(), e5 = []; watch(pg, e5);
+    await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
+    const freshNote = await pg.evaluate(() => /Markets now sell/.test(document.body.innerText + document.getElementById('modalbox').textContent));
+    await pg.evaluate(() => { const s = JSON.parse(serialize()); s.v = 4; s.last = Date.now() - 3 * 3600 * 1000; s.run.tiles[HALL_KEY].level = 4; s.run.exp = 1;
+      for (const [k, id] of [['5,4', 'cottage'], ['4,5', 'farm'], ['6,5', 'guild'], ['5,6', 'market']]) { const [x, y] = k.split(',').map(Number); s.run.terrain[x][y] = 'plain'; s.run.tiles[k] = { kind: 'building', id }; }
+      ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); });
+    const load = async () => { await pg.reload(); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
+      return pg.evaluate(() => { const m = document.getElementById('modalbox'), r = m.getBoundingClientRect(); return { open: !document.getElementById('modal').hidden, text: m.innerText.replace(/\s+/g, ' '), notes: m.querySelectorAll('.loadnote').length, toasts: document.getElementById('toasts').textContent, fits: r.top >= 0 && r.bottom <= innerHeight, v: state.v, stored: JSON.parse(localStorage.getItem(SAVE_KEY)).v }; }); };
+    const first = await load(); await shot(pg, 'oldsave-welcome-360x740.png');
+    ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 1 && /The trades have changed\. Markets now sell spare food, and Blacksmiths work the iron your Mines make\. Guildhalls no longer make gold: they boost the Markets and Blacksmiths beside them, so it may pay to move a Guildhall or add Farms\./.test(first.text)
+      && !/Markets now sell/.test(first.toasts) && first.fits && first.v === 5 && first.stored === 5, 'first load of a version-4 save: the welcome back explains the new jobs in one note, and the save is rewritten as version 5 ' + JSON.stringify(first));
+    await pg.evaluate(() => { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); s.last = Date.now() - 3 * 3600 * 1000; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); ui.paused = true; });
+    const second = await load();
+    ok(second.open && /Away 3 h/.test(second.text) && !second.notes && !/Markets now sell/.test(second.text + second.toasts), 'the next load shows the usual welcome back without the note ' + JSON.stringify(second.text));
+    ok(!freshNote, 'a fresh game never shows it');
+    ok(e5.length === 0, 'old save note: no console errors ' + JSON.stringify(e5));
+    await cx.close(); }
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();
