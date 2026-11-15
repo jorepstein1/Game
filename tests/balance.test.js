@@ -7,7 +7,7 @@
 //     and the size of the town at the Palace, nobody starving;
 //   - a week abdicating at 20 Crowns at two, five and 49 check-ins a day and with the game never closed: what
 //     checking in more often (or never leaving) is worth;
-//   - a player who taps all session, and one who buys at one check-in a day only and rests through the others.
+//   - a player who taps whenever the button shows, and one who buys at one check-in a day only and rests through the others.
 // PASS/FAIL lines are requirements. GAP lines are targets the game does not meet yet: they print the measured
 // value and do not fail the run.
 // No dependencies: node tests/balance.test.js
@@ -18,7 +18,7 @@ const jobs = [];
 for (const seed of MAPS) jobs.push({ kind: 'first', seed, opts: { hours: 72, checkins: 5 } });
 for (const checkins of [2, 5, 49, 0]) for (const seed of MAPS) jobs.push({ kind: 'week', seed, checkins, opts: { hours: 168, checkins, policy: 'crowns:20', tick: checkins ? 0.5 : 5 } });
 for (const seed of [11, 33]) jobs.push({ kind: 'onebuy', seed, opts: { hours: 168, checkins: 5, policy: 'crowns:20', buyEvery: 5 } });
-for (const taps of [0, 3]) jobs.push({ kind: 'taps', seed: 11, taps, opts: { hours: 24, checkins: 5, taps } });
+for (const seed of MAPS) for (const taps of [0, 3]) jobs.push({ kind: 'taps', seed, taps, opts: { hours: 24, checkins: 5, taps } });
 for (const seed of [11, 33]) jobs.push({ kind: 'simple', seed, opts: { hours: 72, checkins: 5, buyer: 'simple' } });
 
 runAll(jobs).then(out => {
@@ -73,10 +73,16 @@ runAll(jobs).then(out => {
     const a = mean(one.map(crowns)), b = mean(base.map(crowns));
     console.log(`     five check-ins a day, buying at one of them only: Crowns at 7 days ${one.map(crowns).join(', ')} against ${base.map(crowns).join(', ')}`);
     check('buying at one check-in a day and resting through the others is not the better way to play', () => assert.ok(a <= b, `${a.toFixed(1)} Crowns against ${b.toFixed(1)}`)); }
-  { const [idle, tapper] = [0, 3].map(t => rows.find(r => r.kind === 'taps' && r.taps === t));
-    check('tapping three times a second whenever the game is open reaches no Keep or Castle sooner', () => assert.ok(tapper.keep === idle.keep && tapper.castle === idle.castle, `Keep ${tapper.keep} v ${idle.keep}, Castle ${tapper.castle} v ${idle.castle}`));
-    // The bot taps all the time the game is open, also after the Manor, where the game hides the button: an upper bound.
-    gap('target: tapping earns no more than 30% extra gold in a day', () => assert.ok(tapper.lifetimeGold <= 1.3 * idle.lifetimeGold, `${Math.round(100 * tapper.lifetimeGold / idle.lifetimeGold - 100)}% more (${tapper.lifetimeGold.toExponential(2)} against ${idle.lifetimeGold.toExponential(2)}); Manor at ${tapper.manorMin} against ${idle.manorMin} minutes`)); }
+  for (const seed of MAPS) { const [idle, tapper] = [0, 3].map(t => rows.find(r => r.kind === 'taps' && r.seed === seed && r.taps === t));
+    // The bot taps whenever the game shows the button (sim.canCollect), three times a second.
+    const notSooner = (a, b) => b == null || (a != null && a >= b);
+    check(`map ${seed}: tapping whenever the button shows brings no hall sooner (the Manor at most 2 minutes) and at most 30% more gold in a day`, () => {
+      const msg = `Manor ${tapper.manorMin} v ${idle.manorMin} min, Keep ${tapper.keep} v ${idle.keep} h, Castle ${tapper.castle} v ${idle.castle} h, gold ${Math.round(100 * tapper.lifetimeGold / idle.lifetimeGold - 100)}% more`;
+      console.log(`     map ${seed}, tapping against not: ${msg}`);
+      assert.ok(tapper.manorMin >= idle.manorMin - 2, msg);
+      assert.ok(notSooner(tapper.keep, idle.keep) && notSooner(tapper.castle, idle.castle), msg);
+      assert.ok(tapper.lifetimeGold <= 1.3 * idle.lifetimeGold, msg);
+    }); }
   { const simple = rows.filter(r => r.kind === 'simple'); // informational: a buyer that just takes the cheapest thing under a tenth of the hall
     console.log(`     simple buyer (cheapest first), maps ${simple.map(r => r.seed).join(', ')}: Manor ${simple.map(r => r.manorMin === null ? '-' : r.manorMin.toFixed(0) + 'm').join(', ')} | Keep ${hrs(simple.map(r => r.keep))}h | Castle ${hrs(simple.map(r => r.castle))}h | Palace ${hrs(simple.map(r => r.palace))}h`); }
 

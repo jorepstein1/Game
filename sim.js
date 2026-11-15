@@ -16,7 +16,7 @@ let state, calc;
 // ───────────────────────── State ─────────────────────────
 function newMeta(now) {
   return { crowns: 0, bonusCrowns: 0 /* how many of the Crowns came from Monuments */, decree: DECREES[0].id /* the decree being pursued */, decreesDone: {} /* ids already claimed */,
-    stats: { clicks: 0, totalGold: 0, prestiges: 0, built: 0, started: now || 0 } };
+    stats: { clicks: 0, totalGold: 0, prestiges: 0, built: 0, upgrades: 0, started: now || 0 } };
 }
 // A kingdom founded with Crowns held gets a small head start in resources (none for a first kingdom).
 function newRun(seed, crowns) {
@@ -26,7 +26,8 @@ function newRun(seed, crowns) {
     research: {}, repeatables: {}, cleared: 0, starving: false,
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
     away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
-    gold: 0 };      // gold earned this run
+    gold: 0,        // gold earned this run
+    collected: 0 }; // gold from hand collection this run, up to CLICK_LIMIT
   run.tiles[HALL_KEY] = { kind: 'hall', id: 'hall', level: 1 };
   if (crowns > 0) for (const r in HEAD_START) run.res[r] += HEAD_START[r];
   return run;
@@ -217,7 +218,7 @@ function neighbors(x, y) { return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1
 
 const kindLevel = id => (state.run.levels && state.run.levels[id]) || 1;
 // Output of one building at its kind's level: linear kinds gain their level-1 amount per level, the rest multiply by OUT_GROWTH.
-const levelMultAt = (id, level) => BUILDINGS[id].linear ? level : Math.pow(BUILDINGS[id].outGrowth || OUT_GROWTH, level - 1);
+const levelMultAt = (id, level) => BUILDINGS[id].linear ? level : Math.pow(OUT_GROWTH, level - 1);
 const levelMult = t => levelMultAt(t.id, kindLevel(t.id));
 function scaleCost(cost, k) { const o = {}; for (const r in cost) o[r] = Math.min(BIG, Math.ceil(cost[r] * k)); return o; } // never Infinity
 function addCost(total, cost) { for (const r in cost) total[r] = (total[r] || 0) + cost[r]; return total; }
@@ -259,8 +260,8 @@ const upgradeCost = t => tileKind(t).upgradeCost(t);
 //   upgrade (L → L+1)  = cost × W(n) × (U(L+1) - U(L))
 // So the price of reaching n buildings at level L is the same whatever the order (no exploit in building first
 // or upgrading first), and demolishing refunds REFUND_SHARE of the last building's share of the worth.
-const buildGrowth = id => BUILDINGS[id].growth || BUILD_GROWTH;
-const upgradeGrowth = id => BUILDINGS[id].upgradeGrowth || UPGRADE_GROWTH;
+const buildGrowth = id => BUILDINGS[id].growth;
+const upgradeGrowth = id => BUILDINGS[id].upgradeGrowth;
 // The price factor of the copy that makes n+1: g^n, or past `late.from` copies the steeper late.growth per copy.
 const copyStep = (id, n) => { const g = buildGrowth(id), late = BUILDINGS[id].late;
   return !late || n < late.from ? Math.pow(g, n) : Math.pow(g, late.from - 1) * Math.pow(late.growth, n - late.from + 1); };
@@ -430,7 +431,7 @@ function upgrade(key) {
 // One upgrade raises every building of a kind, standing or yet to be built.
 function upgradeKind(id) {
   if (!hasOwn(BUILDINGS, id) || count(id) < 1 || kindLevel(id) >= MAX_LEVEL || !pay(kindUpgradeCost(id))) return fail();
-  state.run.levels[id] = kindLevel(id) + 1;
+  state.run.levels[id] = kindLevel(id) + 1; state.meta.stats.upgrades++; // kind upgrades, all time (the first one retires a hint)
   return { ok: true, icon: 'up', msg: `Every ${BUILDINGS[id].name} is now level ${state.run.levels[id]}` };
 }
 // A building's share of what its kind has cost: the last copy's rise in worth at today's level, which is exactly
@@ -513,9 +514,12 @@ function prestige() {
 // Hand collection: a little gold per tap, there for the first minutes of a reign. It does not grow with income,
 // so keeping the game open and tapping earns nothing that matters later.
 const clickValue = () => CLICK_GOLD;
+// The button is shown only before the Manor, and only until CLICK_LIMIT gold has come in by hand this reign. The interface and the balance bot both ask this, so they agree.
+const canCollect = () => hallLevel() < 2 && state.run.collected < CLICK_LIMIT;
 function collectTaxes() {
-  const g = clickValue();
-  state.run.res.gold += g; earnGold(g); state.meta.stats.clicks++;
+  if (!canCollect()) return { ok: false, gold: 0 };
+  const g = Math.min(clickValue(), CLICK_LIMIT - state.run.collected);
+  state.run.collected += g; state.run.res.gold += g; earnGold(g); state.meta.stats.clicks++;
   return { ok: true, gold: g };
 }
 
@@ -574,7 +578,7 @@ function sanitizeSave(raw, now) {
   { const open = DECREES.filter(d => !meta.decreesDone[d.id]).slice(0, DECREE_CHOICES); // pursue the saved one if it is still open
     meta.decree = open.some(d => d.id === m.decree) ? m.decree : open.length ? open[0].id : null; }
   const st = isObj(m.stats) ? m.stats : {};
-  for (const k of ['clicks', 'prestiges', 'built']) meta.stats[k] = int(st[k], 0, 0, 1e15);
+  for (const k of ['clicks', 'prestiges', 'built', 'upgrades']) meta.stats[k] = int(st[k], 0, 0, 1e15);
   meta.stats.totalGold = num(st.totalGold, 0, 0, BIG);
   meta.stats.started = num(st.started, now, 0, now);
 
@@ -591,6 +595,7 @@ function sanitizeSave(raw, now) {
   run.gold = num(r.gold, 0, 0, BIG);
   run.clock = num(r.clock, 0, 0, BIG);
   run.away = num(r.away, 0, 0, 1e9);
+  run.collected = num(r.collected, 0, 0, CLICK_LIMIT);
   run.starving = r.starving === true;
 
   let dropped = 0, mixed = false; const seen = {}; // levels met per kind, for a version-3 save
@@ -603,10 +608,12 @@ function sanitizeSave(raw, now) {
     if (k === HALL_KEY) { run.tiles[k].level = level; continue; } // the centre is always the hall
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
     run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
-    if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = level; run.levels[t.id] = Math.max(run.levels[t.id], level); } // version 3 kept a level per building: the kind takes the highest
+    if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = hasOwn(seen, t.id) ? Math.min(seen[t.id], level) : level; } // version 3 kept a level per building
     run.terrain[x][y] = 'plain';
   }
-  if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind: each kind of building is now at the level of its best one.');
+  // The kind takes the lowest level among its buildings, so migrating never upgrades anything for free.
+  if (v < 4) for (const id in seen) run.levels[id] = seen[id];
+  if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind. Where your buildings of one kind had different levels, all of them are now at the level of the lowest.');
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;

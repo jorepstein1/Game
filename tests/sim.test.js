@@ -77,9 +77,9 @@ test('pendingCrowns and abdication: Crowns banked, Monuments counted, head start
 test('the price rule: a build costs one step of worth at the kind level, an upgrade the rise in worth over every copy', sim => {
   const free = field(sim), B = sim.BUILDINGS;
   // worth(n, L) = cost × W(n) × U(L), written out apart from sim.js
-  const step = (id, i) => { const d = B[id], g = d.growth || sim.BUILD_GROWTH; return !d.late || i < d.late.from ? g ** i : g ** (d.late.from - 1) * d.late.growth ** (i - d.late.from + 1); };
+  const step = (id, i) => { const d = B[id], g = d.growth; return !d.late || i < d.late.from ? g ** i : g ** (d.late.from - 1) * d.late.growth ** (i - d.late.from + 1); };
   const W = (id, n) => { let w = 0; for (let i = 0; i < n; i++) w += step(id, i); return w; };
-  const U = (id, L) => L === 1 ? 1 : (B[id].lift || 1) * (B[id].upgradeGrowth || sim.UPGRADE_GROWTH) ** (L - 1);
+  const U = (id, L) => L === 1 ? 1 : (B[id].lift || 1) * B[id].upgradeGrowth ** (L - 1);
   for (const id of sim.BUILD_ORDER) {
     const c0 = Object.keys(B[id].cost)[0], base = B[id].cost[c0];
     assert.strictEqual(sim.kindLevel(id), 1, id + ' starts at level 1');
@@ -152,7 +152,8 @@ test('one kind upgrade changes the output, jobs and housing of every building of
   const key = free.shift(); assert.ok(sim.build(key, 'quarry').ok); b = look(); assert.strictEqual(b.lv[key], sim.OUT_GROWTH, 'a new quarry starts at level 2');
   assert.deepStrictEqual(plain(run.tiles[key]), { kind: 'building', id: 'quarry' }, 'a building tile keeps no level of its own');
   assert.ok(sim.upgrade(key).ok); assert.strictEqual(sim.kindLevel('quarry'), 3);
-  for (const gone of ['routineUpgrades', 'routineReserve', 'ROUTINE_SECONDS', 'ROUTINE_RESERVE_SECONDS', 'UPGRADE_CREEP', 'UPGRADE_CREEP_FROM', 'kindWorth']) assert.strictEqual(sim[gone], undefined, gone + ' is gone');
+  for (const gone of ['routineUpgrades', 'routineReserve', 'ROUTINE_SECONDS', 'ROUTINE_RESERVE_SECONDS', 'UPGRADE_CREEP', 'UPGRADE_CREEP_FROM', 'kindWorth', 'BUILD_GROWTH', 'UPGRADE_GROWTH']) assert.strictEqual(sim[gone], undefined, gone + ' is gone');
+  for (const id of sim.BUILD_ORDER) assert.ok(sim.BUILDINGS[id].growth > 1 && sim.BUILDINGS[id].upgradeGrowth > 1 && sim.BUILDINGS[id].outGrowth === undefined, id + ' sets its own growth and upgradeGrowth');
   // the decrees that ask for levels read kind levels
   const done = id => !!sim.DECREES.find(d => d.id === id).done();
   assert.strictEqual(done('builders'), true, 'cottages are well past level 3');
@@ -226,7 +227,7 @@ test('sanitizeSave coerces and clamps every field', sim => {
   assert.deepStrictEqual(Object.keys(s).sort(), ['last', 'meta', 'run', 'v']);
   assert.strictEqual(s.last, 1000);
   assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, 'coffers', 'an unknown decree: the old chain counts as finished, the newer decrees are open');
-  assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, started: 1000 });
+  assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, upgrades: 0, started: 1000 });
   assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
   assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
   assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['0,0', '5,4', '5,5']);
@@ -325,11 +326,25 @@ test('linear buildings: flat gain per level and gentler upgrade prices', sim => 
   assert.ok(sim.LINEAR_UPGRADE_GROWTH < sim.BUILDINGS.quarry.upgradeGrowth, 'linear kinds have the gentler step');
 });
 
+test('hand collection stops at the Manor and after CLICK_LIMIT gold in a reign', sim => {
+  assert.ok(sim.canCollect());
+  let got = 0; for (let i = 0; i < sim.CLICK_LIMIT + 20; i++) got += sim.collectTaxes().gold;
+  assert.strictEqual(got, sim.CLICK_LIMIT); assert.strictEqual(sim.state.run.collected, sim.CLICK_LIMIT);
+  assert.ok(!sim.canCollect()); assert.deepStrictEqual(plain(sim.collectTaxes()), { ok: false, gold: 0 });
+  const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).state; assert.strictEqual(back.run.collected, sim.CLICK_LIMIT, 'the limit survives a reload');
+  const raw = JSON.parse(sim.serialize()); raw.run.collected = -5; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.collected, 0);
+  raw.run.collected = 1e9; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.collected, sim.CLICK_LIMIT);
+  sim.state.run.collected = 0; assert.ok(sim.canCollect());
+  for (const r in sim.state.run.res) sim.state.run.res[r] = 1e9; assert.ok(sim.upgrade(sim.HALL_KEY).ok);
+  assert.ok(!sim.canCollect(), 'not from the Manor on'); assert.strictEqual(sim.collectTaxes().gold, 0);
+  assert.strictEqual(sim.newRun(1, 0).collected, 0, 'a new reign starts at zero');
+});
+
 test('hand collection is a flourish: it does not grow with income, and there is no merchant or festival', sim => {
   assert.strictEqual(sim.clickValue(), 1);
   town(sim, 3); sim.advance(60);
   assert.ok(sim.calc.base.gold > 1); assert.strictEqual(sim.clickValue(), sim.CLICK_GOLD, 'the same single coin, whatever the town earns');
-  const gold = sim.state.run.res.gold; assert.strictEqual(sim.collectTaxes().gold, 1); assert.strictEqual(sim.state.run.res.gold, gold + 1);
+  const gold = sim.state.run.res.gold; assert.strictEqual(sim.collectTaxes().gold, 0, 'from the Manor on there is none'); assert.strictEqual(sim.state.run.res.gold, gold);
   sim.state.meta.crowns = 20; assert.strictEqual(sim.clickValue(), 1, 'and whatever Crowns are held');
   for (const gone of ['merchantVisit', 'festivalOn', 'FESTIVAL_MULT', 'MERCHANT_SECONDS', 'CLICK_SHARE']) assert.strictEqual(sim[gone], undefined, gone);
   assert.deepStrictEqual(sim.calc.rates, sim.calc.base, 'nothing temporary multiplies production');
@@ -442,19 +457,19 @@ test('the next hall: hallWait, and the hall is raised by hand one level at a tim
   run.tiles[sim.HALL_KEY].level = sim.MAX_LEVEL; assert.strictEqual(sim.hallWait(), Infinity);
 });
 
-test('version-3 saves migrate: each kind takes the highest level among its buildings, tiles lose theirs', sim => {
+test('version-3 saves migrate: each kind takes the lowest level among its buildings, tiles lose theirs', sim => {
   const v3 = { v: 3, last: 900, meta: { crowns: 2, decree: 'roof', decreesDone: { timber: 1 } },
     run: { seed: 12345, gen: 2, exp: 1, res: { gold: 50, food: 5, wood: 5, stone: 5, iron: 0 }, pop: 10,
       tiles: { '5,5': { kind: 'hall', id: 'hall', level: 3 }, '5,4': { kind: 'building', id: 'farm', level: 2 }, '4,5': { kind: 'building', id: 'farm', level: 5 },
         '6,5': { kind: 'building', id: 'farm', level: 3 }, '5,6': { kind: 'building', id: 'quarry', level: 4 }, '4,4': { kind: 'building', id: 'cottage', level: 1 } } } };
   const { state: s, notes } = sim.sanitizeSave(v3, 1000);
   assert.strictEqual(s.v, 4); assert.strictEqual(s.run.tiles['5,5'].level, 3, 'the hall keeps its level');
-  assert.deepStrictEqual(plain(s.run.levels), Object.assign(Object.fromEntries(sim.BUILD_ORDER.map(id => [id, 1])), { farm: 5, quarry: 4 }));
+  assert.deepStrictEqual(plain(s.run.levels), Object.assign(Object.fromEntries(sim.BUILD_ORDER.map(id => [id, 1])), { farm: 2, quarry: 4 }), 'farms at 2, 5 and 3 become farms at 2: nothing is upgraded for free');
   for (const k of ['5,4', '4,5', '6,5', '5,6', '4,4']) assert.strictEqual(s.run.tiles[k].level, undefined, k + ' has no level of its own');
-  assert.ok(notes.some(n => /every building of a kind/.test(n)), 'farms at different levels: the player is told ' + notes.join('|'));
+  assert.ok(notes.some(n => /level of the lowest/.test(n)), 'farms at different levels: the player is told ' + notes.join('|'));
   const even = JSON.parse(JSON.stringify(v3)); even.run.tiles['5,4'].level = even.run.tiles['6,5'].level = 5;
   assert.strictEqual(sim.sanitizeSave(even, 1000).notes.length, 0, 'nothing to say when no level changed');
-  sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['5,4'].levelMult, 5, 1e-9, 'every farm works at level 5:');
+  sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['5,4'].levelMult, 2, 1e-9, 'every farm works at level 2:');
   const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000); assert.strictEqual(JSON.stringify(back.state), sim.serialize(), 'and round-trips as version 4'); assert.strictEqual(back.notes.length, 0);
 });
 

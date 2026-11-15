@@ -65,9 +65,7 @@ const FOOD_RESERVE_SECONDS = 120; // villagers also move in while the stores cov
 // REFUND_SHARE of what building that copy again would cost, so building and demolishing always loses money.
 // g, late, u (upgradeGrowth) and lift are set per kind in BUILDINGS below; for example the first Lumber Camp
 // upgrade costs 20 gold × 10 × 18 - 20 = 3.58K gold, the first Farm upgrade 10 gold × (6 - 1) = 50 gold.
-const BUILD_GROWTH = 3;          // g: default worth growth per copy standing
-const UPGRADE_GROWTH = 6;        // u: default worth growth per kind level; a building's own upgradeGrowth overrides it
-const LINEAR_UPGRADE_GROWTH = 6;   // buildings that gain a flat amount per level
+const LINEAR_UPGRADE_GROWTH = 6; // u for the buildings that gain a flat amount per level (Cottage, Farm)
 const OUT_GROWTH = 3;            // output multiplier per kind level (buildings that are not linear)
 const MAX_LEVEL = 60;            // keeps every cost, refund and rate a finite number (level 60 costs about 1e155)
 const REFUND_SHARE = 0.75;       // share of the last copy's price returned on demolition
@@ -84,6 +82,7 @@ const CROWN_DEAR = 4;            // so later reigns must grow further, not just 
 const CROWN_MIN = 15;            // Crowns that must be on offer before abdication opens: a first Palace, not a first Castle
 const CROWN_GOAL = 20;           // Crowns on offer at which the game suggests abdicating
 const CLICK_GOLD = 1;            // gold per hand collection: a flourish for the first minutes, not an income
+const CLICK_LIMIT = 100;         // hand collection gold per reign; past it the button goes, so tapping cannot buy a hall sooner
 const OFFLINE_HOURS = 8;         // offline progress cap without research
 const REST_AFTER_HOURS = 1;      // a rested town: every hour of one absence past this many (within the cap)...
 const REST_BONUS = 1.5;            // ...is worth this much extra, so long absences lose less to the wait for the player
@@ -93,9 +92,9 @@ const OFFLINE_REPORT_SECONDS = 60; // shorter absences are credited without a su
 
 // Buildings. out: per second at level 1. work: villagers needed per level.
 // adj: bonus per adjacent terrain type / per adjacent building, times the square root of that building kind's level.
-// linear: housing/output grows by a flat amount per level instead of doubling. growth: build cost growth.
+// linear: housing/output grows by its level-1 amount per level instead of tripling. growth: g, the worth step per copy.
 // late: { from, growth }: past `from` copies each further copy multiplies the price by `growth` instead of g.
-// upgradeGrowth: worth growth per kind level (default UPGRADE_GROWTH). lift: one-off extra worth step at level 2 (default 1). outGrowth: output per level (default OUT_GROWTH).
+// upgradeGrowth: u, the worth step per kind level. Every kind sets growth and upgradeGrowth. lift: one-off extra worth step at level 2 (default 1).
 const BUILDINGS = {
   cottage: { name: 'Cottage', icon: '🏠', hall: 1, cost: { gold: 5, wood: 10 }, house: 5, linear: true, growth: 2, upgradeGrowth: LINEAR_UPGRADE_GROWTH, late: { from: 6, growth: 5 }, out: { gold: 0.4 },
     adj: { building: { tavern: 0.5 } }, desc: 'Houses villagers, who pay a modest tax.' },

@@ -197,7 +197,7 @@ function play(seed, opts) {
     while (t < end) {
       if (TICK > 0.5 && t >= SESSION * 60) { sim.stepCity(TICK); t += TICK; } else { sim.advance(0.5); t += 0.5; } now = t; // tick: a coarser step for long never-closed runs, after the opening
       if (run().starving) out.starve += 0.5;
-      if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1) { sim.collectTaxes(); tapDebt--; } if (buying) act(); else while (sim.decreeDone()) sim.claimDecree(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
+      if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1 && sim.canCollect()) { sim.collectTaxes(); tapDebt--; } if (!sim.canCollect()) tapDebt = 0; if (buying) act(); else while (sim.decreeDone()) sim.claimDecree(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
       afterStep();
     }
   };
