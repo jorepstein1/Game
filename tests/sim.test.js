@@ -231,7 +231,7 @@ test('sanitizeSave coerces and clamps every field', sim => {
   assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
   assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
   assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['0,0', '5,4', '5,5']);
-  assert.strictEqual(s.run.tiles['5,5'].level, sim.MAX_LEVEL); assert.strictEqual(s.run.tiles['5,5'].kind, 'hall');
+  assert.strictEqual(s.run.tiles['5,5'].level, sim.HALL_MAX, 'a hall above the last is the last'); assert.strictEqual(s.run.tiles['5,5'].kind, 'hall');
   assert.deepStrictEqual(plain(s.run.tiles['5,4']), { kind: 'building', id: 'farm' }, 'a building tile keeps no level'); assert.strictEqual(s.run.levels.farm, 1, 'bad levels read as level 1');
   assert.deepStrictEqual(plain(s.run.research), { axes: 1 });
   assert.deepStrictEqual(plain(s.run.repeatables), { food: sim.MAX_REPEATABLE });
@@ -454,7 +454,53 @@ test('the next hall: hallWait, and the hall is raised by hand one level at a tim
   const w = sim.hallWait(); assert.ok(w > 60 && isFinite(w), 'far off: ' + w);
   near(w, Math.max(...Object.keys(cost).map(r => cost[r] / sim.calc.base[r])), 1, 'the slowest material sets the wait');
   for (const r in run.res) run.res[r] = 1e30; assert.ok(sim.upgrade(sim.HALL_KEY).ok); assert.strictEqual(sim.hallLevel(), 2, 'one level per purchase');
-  run.tiles[sim.HALL_KEY].level = sim.MAX_LEVEL; assert.strictEqual(sim.hallWait(), Infinity);
+  run.tiles[sim.HALL_KEY].level = sim.HALL_MAX; assert.strictEqual(sim.hallWait(), null, 'no next hall: no wait at all');
+});
+
+test('past the Palace: two named halls that open with Crowns held, at 20 times the last price each, and none after them', sim => {
+  assert.strictEqual(sim.HALL_MAX, 7); assert.strictEqual(sim.HALL_GROWTH, 20); assert.deepStrictEqual(plain(sim.HALL_CROWNS), { 6: 30, 7: 75 });
+  assert.deepStrictEqual([1, 2, 3, 4, 5, 6, 7].map(sim.hallName), ['Village Hall', 'Manor', 'Keep', 'Castle', 'Palace', 'Royal Palace', 'Imperial Palace']);
+  for (let l = 1; l <= sim.MAX_LEVEL; l++) assert.ok(!/\+/.test(sim.hallName(l)), 'no "+N" hall names: ' + sim.hallName(l));
+  field(sim); const run = sim.state.run, hall = run.tiles[sim.HALL_KEY], meta = sim.state.meta;
+  // the cost ladder: the Palace's price times 20, then times 20 again
+  const at = l => { hall.level = l; return plain(sim.upgradeCost(hall)); };
+  const castle = at(4), palace = at(5), royal = at(6);
+  for (const r in castle) { assert.strictEqual(palace[r], castle[r] * 20, 'Royal Palace ' + r); assert.strictEqual(royal[r], castle[r] * 400, 'Imperial Palace ' + r); }
+  // Crowns held open them, not Crowns on offer
+  hall.level = 5; run.gold = sim.goldForCrowns(80, 0) * 2; meta.crowns = 29; sim.setState(sim.state);
+  assert.ok(sim.pendingCrowns() >= 80, 'plenty on offer');
+  assert.deepStrictEqual(plain(sim.hallLocked()), { level: 6, need: 30 }); assert.strictEqual(sim.nextHallOpen(), false);
+  assert.strictEqual(sim.hallWait(), null, 'a locked hall is no next hall: no wait, no Infinity');
+  const gold0 = run.res.gold, no = sim.upgrade(sim.HALL_KEY);
+  assert.strictEqual(no.ok, false); assert.strictEqual(no.msg, 'A Royal Palace needs 30 Crowns held. You hold 29.'); assert.strictEqual(sim.hallLevel(), 5); assert.strictEqual(run.res.gold, gold0, 'and nothing is paid');
+  meta.crowns = 30; sim.setState(sim.state);
+  assert.strictEqual(sim.hallLocked(), null); assert.strictEqual(sim.hallWait(), 0);
+  const yes = sim.upgrade(sim.HALL_KEY); assert.ok(yes.ok && sim.hallLevel() === 6 && yes.msg === 'Your seat is now a Royal Palace!', JSON.stringify(yes));
+  assert.strictEqual(run.res.gold, gold0 - palace.gold, 'at the Royal Palace price');
+  meta.crowns = 74; assert.deepStrictEqual(plain(sim.hallLocked()), { level: 7, need: 75 });
+  assert.strictEqual(sim.upgrade(sim.HALL_KEY).msg, 'An Imperial Palace needs 75 Crowns held. You hold 74.'); assert.strictEqual(sim.hallLevel(), 6);
+  meta.crowns = 75; assert.ok(sim.upgrade(sim.HALL_KEY).ok); assert.strictEqual(sim.hallLevel(), 7);
+  // the cap
+  meta.crowns = 1000; sim.setState(sim.state);
+  assert.ok(sim.hallCapped() && sim.hallLocked() === null && !sim.nextHallOpen() && sim.hallWait() === null && sim.hallUnlockAhead() === null);
+  const cap = sim.upgrade(sim.HALL_KEY); assert.ok(!cap.ok && cap.msg === 'The Imperial Palace is the grandest hall there is.' && sim.hallLevel() === 7, JSON.stringify(cap));
+  // the halls give what a hall level gives, nothing else changes
+  sim.setState(sim.state); assert.strictEqual(sim.calc.mult, (1 + sim.HALL_BONUS * 6) * sim.crownMult(1000));
+  assert.strictEqual(sim.TILE_KINDS.hall.housing(hall), sim.HALL_HOUSING * 7); assert.strictEqual(sim.PRESTIGE_HALL, 4);
+  // the first hall the Crowns held do not open, whatever the hall stands at
+  for (const [c, want] of [[0, { level: 6, need: 30 }], [30, { level: 7, need: 75 }], [75, null]]) { meta.crowns = c; hall.level = 2; assert.deepStrictEqual(plain(sim.hallUnlockAhead()), want, c + ' Crowns held'); }
+  // every reign still starts at a Village Hall
+  meta.crowns = 100; assert.strictEqual(sim.newRun(5, 100).tiles[sim.HALL_KEY].level, 1);
+});
+
+test('saves: a hall is kept up to the last one, whatever the Crowns held, and clamped to the last above it', sim => {
+  const load = (level, crowns) => { const s = sim.newState(0); s.run = sim.newRun(77); s.run.tiles[sim.HALL_KEY].level = level; s.meta.crowns = crowns; return sim.sanitizeSave(plain(s), 1000).state; };
+  assert.strictEqual(load(6, 0).run.tiles['5,5'].level, 6, 'a Royal Palace with no Crowns held is not taken away');
+  assert.strictEqual(load(7, 31).run.tiles['5,5'].level, 7, 'nor an Imperial Palace with too few');
+  for (const lv of [8, 9, 60, 1e9]) assert.strictEqual(load(lv, 500).run.tiles['5,5'].level, 7, 'level ' + lv + ' becomes the Imperial Palace');
+  assert.strictEqual(load(5, 0).run.tiles['5,5'].level, 5);
+  const s = load(6, 0); sim.setState(s); assert.deepStrictEqual(plain(sim.hallLocked()), { level: 7, need: 75 }); assert.strictEqual(sim.hallWait(), null);
+  assert.strictEqual(s.v, sim.SAVE_VERSION);
 });
 
 test('version-3 saves migrate: each kind takes the lowest level among its buildings, tiles lose theirs', sim => {

@@ -210,7 +210,17 @@ const xy = key => key.split(',').map(Number);
 
 const hallLevel = () => state.run.tiles[HALL_KEY].level;
 const hallTier = level => HALL_TIERS[Math.min(level, HALL_TIERS.length) - 1];
-const hallName = level => hallTier(level).name + (level > HALL_TIERS.length ? ' +' + (level - HALL_TIERS.length) : '');
+const hallName = level => hallTier(level).name;
+const aHall = level => (/^[AEIOU]/.test(hallName(level)) ? 'an ' : 'a ') + hallName(level); // "a Keep", "an Imperial Palace"
+// The halls past the Palace open with Crowns held (HALL_CROWNS); none goes past HALL_MAX.
+const hallCrowns = level => HALL_CROWNS[level] || 0;
+const hallCapped = () => hallLevel() >= HALL_MAX;
+// While the next hall needs more Crowns held than the realm has: { level, need }. Otherwise (open, or no next hall) null.
+function hallLocked() { const next = hallLevel() + 1; return next <= HALL_MAX && state.meta.crowns < hallCrowns(next) ? { level: next, need: hallCrowns(next) } : null; }
+// Whether there is a next hall to save for: not the last one, and not one still shut for want of Crowns.
+const nextHallOpen = () => !hallCapped() && !hallLocked();
+// The first hall the Crowns held do not open yet, whatever the hall stands at now: { level, need }, or null once all are open.
+function hallUnlockAhead() { for (let l = 2; l <= HALL_MAX; l++) if (state.meta.crowns < hallCrowns(l)) return { level: l, need: hallCrowns(l) }; return null; }
 const count = id => { let c = 0; const tiles = state.run.tiles; for (const k in tiles) if (tiles[k].kind === 'building' && tiles[k].id === id) c++; return c; };
 const mapRadius = () => MAP_RADIUS[state.run.exp];
 const unlocked = (x, y) => Math.abs(x - MAP_MID) <= mapRadius() && Math.abs(y - MAP_MID) <= mapRadius();
@@ -424,9 +434,12 @@ function upgrade(key) {
   const t = state.run.tiles[key];
   if (!t) return fail();
   if (t.kind === 'building') return upgradeKind(t.id);
-  if (t.level >= MAX_LEVEL || !pay(upgradeCost(t))) return fail();
+  if (t.level >= HALL_MAX) return fail(`The ${hallName(t.level)} is the grandest hall there is.`);
+  const lock = hallLocked();
+  if (lock) return fail(`A${aHall(lock.level).slice(1)} needs ${lock.need} Crowns held. You hold ${fmt(state.meta.crowns)}.`);
+  if (!pay(upgradeCost(t))) return fail();
   t.level++;
-  return { ok: true, icon: 'crown', msg: `Your seat is now a ${hallName(t.level)}!` };
+  return { ok: true, icon: 'crown', msg: `Your seat is now ${aHall(t.level)}!` };
 }
 // One upgrade raises every building of a kind, standing or yet to be built.
 function upgradeKind(id) {
@@ -472,9 +485,10 @@ function clearLand(key) {
 }
 
 // Seconds until the next hall is affordable at today's income (0 if it is; Infinity if a material is not being made).
+// null when there is no next hall to wait for: the last hall, or one that needs more Crowns held (see nextHallOpen).
 function hallWait() {
-  const hall = state.run.tiles[HALL_KEY]; if (hall.level >= MAX_LEVEL) return Infinity;
-  const cost = upgradeCost(hall); let w = 0;
+  if (!nextHallOpen()) return null;
+  const cost = upgradeCost(state.run.tiles[HALL_KEY]); let w = 0;
   for (const r in cost) { const need = cost[r] - state.run.res[r]; if (need > 0) w = Math.max(w, calc.base[r] > 0 ? need / calc.base[r] : Infinity); }
   return w;
 }
@@ -605,7 +619,7 @@ function sanitizeSave(raw, now) {
     const t = tiles[k], mt = /^(\d{1,2}),(\d{1,2})$/.exec(k);
     if (!mt || !isObj(t)) { dropped++; continue; }
     const x = +mt[1], y = +mt[2], level = int(t.level, 1, 1, MAX_LEVEL);
-    if (k === HALL_KEY) { run.tiles[k].level = level; continue; } // the centre is always the hall
+    if (k === HALL_KEY) { run.tiles[k].level = Math.min(level, HALL_MAX); continue; } // the centre is always the hall. A hall the Crowns held would not open is kept: loading never takes one away
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
     run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
     if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = hasOwn(seen, t.id) ? Math.min(seen[t.id], level) : level; } // version 3 kept a level per building
