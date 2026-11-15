@@ -26,7 +26,7 @@ const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the
   { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.1e5, wood: 8.4e4, stone: 5.04e4 },
   { gold: 6.5e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
 ];
-const HALL_GROWTH = 20;
+const HALL_GROWTH = 4;           // Royal Palace 4x the Palace, Imperial 16x: in a reign begun with 30 (75) Crowns held it is affordable about when 20 Crowns come on offer
 const HALL_HOUSING = 5;          // villagers housed per hall level
 const HALL_FORAGE = 0.5;         // food per second per hall level
 const HALL_BONUS = 0.25;         // all production per hall level above 1

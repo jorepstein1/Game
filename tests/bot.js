@@ -80,7 +80,8 @@ function play(seed, opts) {
     for (let i = 0; i < 20; i++) {
       sim.setState(sim.state); const C = sim.calc, goal = sim.nextHallOpen(); // goal: there is a next hall to save for
       while (sim.decreeDone()) sim.claimDecree();
-      if (out.prestiges.length === 0 && !out.marks.hall6affordable && sim.hallLevel() === 5 && goal && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks.hall6affordable = { min: +(now / 60).toFixed(1) };
+      { const lv = sim.hallLevel(), key = 'hall' + (lv + 1) + 'affordable'; // when a hall past the Palace can first be paid for (at a check-in)
+        if (out.prestiges.length === 0 && lv >= 5 && goal && !out.marks[key] && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks[key] = { min: +(now / 60).toFixed(1) }; }
       let c = candidates();
       const hungry = C.rates.food < 0.1 * C.eaten && !(C.rates.food > 0 && run().res.food > C.eaten * 600);
       const cramped = C.cap < C.need * 1.05 + 3;
@@ -91,9 +92,10 @@ function play(seed, opts) {
       else {
         if (C.staff < 1) return bought; // housing is there: wait for villagers to move in
         const nt = Object.keys(run().tiles).length, nf = sim.count('farm') + sim.count('mill'), roomy = C.cap >= C.need * 1.25 + 10, few = plots().length <= 3;
-        // No point raising output of a material already piled up far beyond anything on the shopping list. The next
-        // hall's price is only a yardstick here for what counts as a small purchase; with no next hall it is not on the list.
-        const lim = 0.2 * sum(sim.upgradeCost(run().tiles[sim.HALL_KEY])), want = {};
+        // No point raising output of a material already piled up far beyond anything on the shopping list. A hall's
+        // price is the yardstick for what counts as a small purchase: the next hall's, or with no next hall to raise,
+        // the price of the hall that stands (never the price of one that is shut).
+        const lim = 0.2 * sum(sim.TILE_KINDS.hall.upgradeCost({ level: goal ? sim.hallLevel() : Math.max(1, sim.hallLevel() - 1) })), want = {};
         for (const a of c) if (a.k === 'hall' || a.k === 'expand' || a.k === 'research' || sum(a.cost) <= lim) for (const r in a.cost) want[r] = Math.max(want[r] || 0, a.cost[r]);
         const glut = a => GLUT && (a.k === 'up' || a.k === 'build') && B[a.id] && B[a.id].out && sim.count(a.id) > 0 && Object.keys(B[a.id].out).every(r => r !== 'gold' && r !== 'food' && run().res[r] > 5 * (want[r] || 0) + 1000);
         c = c.filter(a => !glut(a));
@@ -158,7 +160,6 @@ function play(seed, opts) {
             const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
             if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) score = -1; // a town out of plots expands first, as it would build a new kind first
-            if (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod') && sim.hallLevel() >= 5) score = -1; // from the Palace on, Crowns come first even with a next hall open
             if (score < best) { best = score; pick = a; }
           }
         }
@@ -262,7 +263,7 @@ function summary(seed, opts) {
   const week = r.visits.filter(v => v.hour <= 168.5).pop();
   return { seed, taps: opts.taps || 0, policy: opts.policy || 'none', checkins: opts.checkins || 0, lifetimeGold: r.totalGold, goldRate: r.goldRate, crowns: r.crowns, pending: r.pending, hall: r.hall,
     manorMin: r.marks.Manor ? r.marks.Manor.min : null, keep: at('Keep'), castle: at('Castle'), palace: at('Palace'), crowns15: at('crowns15'), crowns20: at('crowns20'), legend: at('held100'),
-    royal: at('Royal Palace'), royalAffordable: at('hall6affordable'), imperial: at('Imperial Palace'),
+    royal: at('Royal Palace'), royalAffordable: at('hall6affordable'), imperial: at('Imperial Palace'), imperialAffordable: at('hall7affordable'),
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
     reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,

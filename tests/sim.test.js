@@ -457,15 +457,15 @@ test('the next hall: hallWait, and the hall is raised by hand one level at a tim
   run.tiles[sim.HALL_KEY].level = sim.HALL_MAX; assert.strictEqual(sim.hallWait(), null, 'no next hall: no wait at all');
 });
 
-test('past the Palace: two named halls that open with Crowns held, at 20 times the last price each, and none after them', sim => {
-  assert.strictEqual(sim.HALL_MAX, 7); assert.strictEqual(sim.HALL_GROWTH, 20); assert.deepStrictEqual(plain(sim.HALL_CROWNS), { 6: 30, 7: 75 });
+test('past the Palace: two named halls that open with Crowns held, at HALL_GROWTH (4) times the last price each, and none after them', sim => {
+  assert.strictEqual(sim.HALL_MAX, 7); assert.strictEqual(sim.HALL_GROWTH, 4); assert.deepStrictEqual(plain(sim.HALL_CROWNS), { 6: 30, 7: 75 });
   assert.deepStrictEqual([1, 2, 3, 4, 5, 6, 7].map(sim.hallName), ['Village Hall', 'Manor', 'Keep', 'Castle', 'Palace', 'Royal Palace', 'Imperial Palace']);
   for (let l = 1; l <= sim.MAX_LEVEL; l++) assert.ok(!/\+/.test(sim.hallName(l)), 'no "+N" hall names: ' + sim.hallName(l));
   field(sim); const run = sim.state.run, hall = run.tiles[sim.HALL_KEY], meta = sim.state.meta;
-  // the cost ladder: the Palace's price times 20, then times 20 again
+  // the cost ladder: the Palace's price times 4, then times 4 again
   const at = l => { hall.level = l; return plain(sim.upgradeCost(hall)); };
   const castle = at(4), palace = at(5), royal = at(6);
-  for (const r in castle) { assert.strictEqual(palace[r], castle[r] * 20, 'Royal Palace ' + r); assert.strictEqual(royal[r], castle[r] * 400, 'Imperial Palace ' + r); }
+  for (const r in castle) { assert.strictEqual(palace[r], castle[r] * 4, 'Royal Palace ' + r); assert.strictEqual(royal[r], castle[r] * 16, 'Imperial Palace ' + r); }
   // Crowns held open them, not Crowns on offer
   hall.level = 5; run.gold = sim.goldForCrowns(80, 0) * 2; meta.crowns = 29; sim.setState(sim.state);
   assert.ok(sim.pendingCrowns() >= 80, 'plenty on offer');
