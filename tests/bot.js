@@ -174,7 +174,7 @@ function play(seed, opts) {
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
       if (pick.k === 'expand' && out.prestiges.length === 0) out.marks['exp' + (run().exp + 1)] = { min: +(now / 60).toFixed(1) };
-      pick.go(); bought++; sim.setState(sim.state);
+      pick.go(); bought++; sim.setState(sim.state); if (pick.k === 'hall') noteHall();
       const dg = sim.calc.base.gold - g0;
       if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
         const mk = B[pick.id].glob ? 'gold' : Object.keys(B[pick.id].out || { gold: 0 })[0], before = mk === 'food' ? C.base.food + C.eaten : C.base[mk], after = mk === 'food' ? sim.calc.base.food + sim.calc.eaten : sim.calc.base[mk];
@@ -191,10 +191,14 @@ function play(seed, opts) {
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
       stone: sim.fmt(C.base.stone) + '/s', iron: sim.fmt(C.base.iron) + '/s', stock: Object.keys(run().res).map(r => r + ' ' + sim.fmt(run().res[r])).join(', '), plots: plots().length }; };
   let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
-  // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
-  function afterStep() {
+  // A new hall level, noted the moment it is raised (the town as it stands then, before the rest of that check-in's purchases).
+  function noteHall() {
     if (sim.hallLevel() > hall) { hall = sim.hallLevel(); const name = sim.hallName(hall);
       if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), buildings: Object.values(run().tiles).filter(x => x.kind === 'building').length, kindsBuilt: sim.BUILD_ORDER.filter(id => sim.count(id) > 0).length, levels: Object.assign({}, run().levels), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold }; }
+  }
+  // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
+  function afterStep() {
+    noteHall();
     if (out.prestiges.length === 0) for (const n of [15, 20]) if (!out.marks['crowns' + n] && sim.pendingCrowns() >= n) out.marks['crowns' + n] = { min: +(t / 60).toFixed(1) };
     for (const n of [100]) if (!out.marks['held' + n] && sim.state.meta.crowns >= n) out.marks['held' + n] = { min: +(t / 60).toFixed(1) };
     if (out.week === undefined && t >= 168 * 3600) out.week = sim.state.meta.crowns + sim.pendingCrowns();
