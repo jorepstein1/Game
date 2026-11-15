@@ -7,7 +7,8 @@
 //     and the size of the town at the Palace, nobody starving;
 //   - a week abdicating at 20 Crowns at two, five and 49 check-ins a day and with the game never closed: what
 //     checking in more often (or never leaving) is worth;
-//   - a player who taps whenever the button shows, and one who buys at one check-in a day only and rests through the others.
+//   - a player who taps whenever the button shows, and one who buys at one check-in a day only and rests through the others;
+//   - a reign started with 30 Crowns held (the Royal Palace open): when its hall is affordable against 20 Crowns on offer.
 // PASS/FAIL lines are requirements. GAP lines are targets the game does not meet yet: they print the measured
 // value and do not fail the run.
 // No dependencies: node tests/balance.test.js
@@ -20,6 +21,7 @@ for (const checkins of [2, 5, 49, 0]) for (const seed of MAPS) jobs.push({ kind:
 for (const seed of [11, 33]) jobs.push({ kind: 'onebuy', seed, opts: { hours: 168, checkins: 5, policy: 'crowns:20', buyEvery: 5 } });
 for (const seed of MAPS) for (const taps of [0, 3]) jobs.push({ kind: 'taps', seed, taps, opts: { hours: 24, checkins: 5, taps } });
 for (const seed of [11, 33]) jobs.push({ kind: 'simple', seed, opts: { hours: 72, checkins: 5, buyer: 'simple' } });
+for (const seed of MAPS) jobs.push({ kind: 'royal', seed, opts: { hours: 72, checkins: 5, crowns: 30 } });
 
 runAll(jobs).then(out => {
   const rows = out.map((r, i) => Object.assign(r, jobs[i]));
@@ -58,6 +60,12 @@ runAll(jobs).then(out => {
   gap('target: a build or kind upgrade pays for itself in 6 hours or more (median)', () => assert.ok(payback >= 6, 'median payback ' + payback.toFixed(1) + 'h'));
   gap('target: the third expansion within a day of the Palace', () => { const late = first.map(r => r.expansions[2] === null ? Infinity : r.expansions[2] - r.palace);
     assert.ok(late.every(x => x <= 24), 'hours from the Palace to the third expansion, per map: ' + late.map(x => isFinite(x) ? x.toFixed(1) : 'not in 72h').join(', ')); });
+
+  // ── A later reign: started with 30 Crowns held, so the Royal Palace (level 6) opens after the Palace ──
+  { const royal = rows.filter(r => r.kind === 'royal'), lead = r => r.royalAffordable === null || r.crowns20 === null ? null : r.royalAffordable - r.crowns20;
+    console.log('     reign started with 30 Crowns held, map: Palace / 20 Crowns on offer / Royal Palace affordable (h): ' + royal.map(r => `${r.seed}: ${hrs([r.palace, r.crowns20, r.royalAffordable]).replace(/, /g, ' / ')}`).join('; '));
+    gap('target: in a reign started with 30 Crowns held, the Royal Palace is affordable by the time 20 Crowns are on offer', () => assert.ok(royal.every(r => lead(r) !== null && lead(r) <= 0),
+      'Royal Palace affordable this many hours after 20 Crowns on offer, per map: ' + royal.map(r => lead(r) === null ? (r.royalAffordable === null ? 'not in 72h' : 'no 20 Crowns') : (lead(r) >= 0 ? '+' : '') + lead(r).toFixed(1)).join(', ') + '; median ' + (median(royal.map(lead)) === null ? '-' : median(royal.map(lead)).toFixed(1)))); }
 
   // ── What checking in more often is worth: a week abdicating at 20 Crowns ──
   const week = n => rows.filter(r => r.kind === 'week' && r.checkins === n), crowns = r => r.weekCrowns === null ? r.crowns + r.pending : r.weekCrowns;
