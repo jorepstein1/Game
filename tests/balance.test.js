@@ -65,6 +65,27 @@ runAll(jobs).then(out => {
   gap('target: the third expansion within a day of the Palace', () => { const late = first.map(r => r.expansions[2] === null ? Infinity : r.expansions[2] - r.palace);
     assert.ok(late.every(x => x <= 24), 'hours from the Palace to the third expansion, per map: ' + late.map(x => isFinite(x) ? x.toFixed(1) : 'not in 72h').join(', ')); });
 
+  // ── The jobs of the buildings (see data.js, TRADES): gold by kind, food and iron at the Palace and at 20 Crowns ──
+  const pc = x => x === null || x === undefined ? '-' : Math.round(100 * x) + '%', share = (e, k) => (e && e.shares[k]) || 0;
+  const shares = e => e ? Object.entries(e.shares).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + pc(v)).join(' ') : '-';
+  const midFill = r => { const v = r.visits.filter(v => v.reign === 0 && v.markets > 0 && v.hour <= r.palace + 0.1); return v.length ? mean(v.map(v => v.fill)) : null; };
+  console.log('     map  gold by kind at the Palace / at 20 Crowns on offer; Markets supplied (mean to the Palace); forge run at the Palace; food store / upkeep (s) at the Palace and 20 Crowns; iron made / used / stock at the Palace; trades each Guildhall touches');
+  for (const r of first) { const e = r.econPalace || {}, f = r.econ20 || {};
+    console.log(`     ${String(r.seed).padStart(3)}  ${shares(r.econPalace)} / ${shares(r.econ20)}; ${pc(midFill(r))}; ${pc(e.run)}; ${Math.round(e.store)} / ${Math.round(f.store)}; ${(e.ironMade || 0).toFixed(1)} / ${(e.ironUsed || 0).toFixed(1)} / ${Math.round(e.ironStock || 0)}; ${(f.guilds || e.guilds || []).join(', ') || '-'}`); }
+  for (const r of first) for (const [when, e] of [['the Palace', r.econPalace], ['20 Crowns on offer', r.econ20]])
+    check(`map ${r.seed}: at ${when} no kind makes more than half the gold, and Markets and Blacksmiths each make at least a fifth`, () => {
+      assert.ok(e, 'not reached'); const top = Object.entries(e.shares).sort((a, b) => b[1] - a[1])[0];
+      assert.ok(top[1] <= 0.5 && share(e, 'market') >= 0.2 && share(e, 'smith') >= 0.2, shares(e)); });
+  gap('target: Markets are 50-90% supplied on average through the mid game, on every map', () => assert.ok(first.every(r => midFill(r) >= 0.5 && midFill(r) <= 0.9), first.map(r => r.seed + ': ' + pc(midFill(r))).join(', ')));
+  gap('target: Farms, Mills or food research are bought for the gold they bring, on every map', () => assert.ok(first.every(r => r.foodBuys.gold > 0), first.map(r => `${r.seed}: ${r.foodBuys.gold} for gold, ${r.foodBuys.hunger} for hunger`).join('; ')));
+  gap('target: the food store stops growing once the Markets are short (no more at 20 Crowns than at the Palace, or under an hour of upkeep)', () => assert.ok(first.every(r => r.econ20 && r.econPalace && (r.econ20.store <= r.econPalace.store * 1.05 || r.econ20.store < 3600)),
+    first.map(r => `${r.seed}: ${r.econPalace ? Math.round(r.econPalace.store) : '-'}s to ${r.econ20 ? Math.round(r.econ20.store) : '-'}s`).join(', ')));
+  gap('target: the forges run below full for part of the reign, on every map', () => assert.ok(first.every(r => r.visits.some(v => v.reign === 0 && v.smiths > 0 && v.run < 0.999)), first.map(r => r.seed + ': ' + r.visits.filter(v => v.reign === 0 && v.smiths > 0 && v.run < 0.999).length + ' check-ins').join(', ')));
+  gap('target: a hall that needs iron waits longest for iron at no more than one check-in', () => { const n = r => r.visits.filter(v => v.reign === 0 && v.waits && v.waits.iron > 0 && Object.values(v.waits).every(x => (x === null ? Infinity : x) <= (v.waits.iron === null ? Infinity : v.waits.iron))).length;
+    assert.ok(first.every(r => n(r) <= 1), first.map(r => r.seed + ': ' + n(r)).join(', ')); });
+  gap('target: on every map a Guildhall touches at least two trades', () => assert.ok(first.every(r => Math.max(0, ...((r.econ20 || r.econPalace || {}).guilds || [])) >= 2), first.map(r => r.seed + ': ' + ((r.econ20 || r.econPalace || {}).guilds || []).join(',')).join('; ')));
+  gap('target: a second Guildhall is bought on some maps', () => assert.ok(first.some(r => ((r.econ20 || r.econPalace || {}).guilds || []).length >= 2), 'Guildhalls per map: ' + first.map(r => r.seed + ': ' + ((r.econ20 || r.econPalace || {}).guilds || []).length).join(', ')));
+
   // ── Later reigns: the halls past the Palace come about when 20 Crowns are on offer, so a reign that ends there raises them ──
   // A reign begun with 30 Crowns held opens the Royal Palace (level 6); one begun with 75 the Imperial Palace (level 7).
   for (const [kind, held, name, key] of [['royal', 30, 'Royal Palace', 'royalAffordable'], ['imperial', 75, 'Imperial Palace', 'imperialAffordable']]) {
