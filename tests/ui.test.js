@@ -119,6 +119,60 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(/×\d+ · level 13/.test(kind.card) && /New ones are built at level 13/.test(kind.card) && kind.card.includes(kind.price), 'the Farm card in Build shows the next copy\'s price at level 13 and that new ones arrive at that level ' + JSON.stringify(kind.card));
   const hallText = await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; render(); const t = document.getElementById('inspector').textContent; ui.sel = {}; render(); return t; });
   ok(!/tax collection richer/.test(hallText) && /to all production/.test(hallText), 'the hall no longer claims to make tax collection richer');
+  // --- the end of a reign: past the Palace the halls open with Crowns held, and none goes past the Imperial Palace
+  const hallStates = {};
+  for (const [w, h] of [[390, 844], [360, 640]]) {
+    await page.setViewportSize({ width: w, height: h }); await settle(page);
+    for (const [name, lv, crowns, offer] of [['locked', 5, 12, 15], ['reach', 5, 12, 18], ['unlocked', 5, 30, 18], ['capped', 7, 80, 18], ['locked6', 6, 40, 18], ['longest', 6, 74, 123]]) {
+      const s = await page.evaluate(([lv, crowns, offer]) => { const run = state.run, T = e => e ? e.textContent.replace(/\s+/g, ' ').trim() : null;
+        run.tiles[HALL_KEY].level = lv; state.meta.crowns = crowns; run.gold = goldForCrowns(offer, crowns) * 1.001; run.repeatables = {}; closeModal();
+        ui.tab = 'build'; ui.sheet = false; ui.sel = { tile: HALL_KEY }; render();
+        const note = document.querySelector('#bbrow .note'), all = [];
+        const ins = document.getElementById('inspector'), ir = ins.getBoundingClientRect(), shortP = [...ins.querySelectorAll('.hallend.narrow p')];
+        const out = { lines: [...document.querySelectorAll('#inspector .hallend.wide p')].map(T), short: shortP.map(T),
+          stripWhole: ins.scrollHeight <= ins.clientHeight + 1 && ins.scrollTop === 0 && shortP.every(p => { const r = p.getBoundingClientRect(); return p.scrollWidth <= p.clientWidth && r.height > 0 && r.top >= ir.top && r.bottom <= ir.bottom - 2 && r.right <= ir.right; }), insUp: !!document.querySelector('#inspector [data-act="up"]'), barUp: !!document.querySelector('#bbrow [data-act="up"]'),
+          raise: T(document.querySelector('#bbrow [data-act="up"] b')), deskRaise: T(document.querySelector('#inspector [data-act="up"]')), note: note ? [...note.children].map(T) : null,
+          noteFits: !note || ([...note.children].every(c => c.scrollWidth <= c.clientWidth + 1 && c.getBoundingClientRect().right <= note.getBoundingClientRect().right + 1) && note.getBoundingClientRect().right <= innerWidth),
+          docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight, vw: innerWidth, vh: innerHeight, strip: (ins.innerText || '').trim().split('\n').map(x => x.trim()).filter(Boolean) };
+        all.push(document.body.innerText);
+        ui.sel = {}; ui.sheet = true; render(); out.hint = T(document.querySelector('#panel .card.hallhint .nm')); out.hintText = T(document.querySelector('#panel .card.hallhint')); all.push(document.body.innerText);
+        ui.tab = 'realm'; render(); out.realm = [...document.querySelectorAll('#panel .stat')].map(T).filter(x => /Next hall/.test(x)); out.realmMuted = [...document.querySelectorAll('#panel p.muted')].map(T).join(' '); all.push(document.body.innerText);
+        ui.sheet = false; render(); state.run.away = 0; catchUp(4 * 3600); out.welcome = T(document.getElementById('modalbox')); all.push(document.body.innerText); closeModal();
+        out.plusN = all.join('\n').match(/(Hall|Manor|Keep|Castle|Palace) \+\d+/g); out.inf = /∞|Infinity|NaN|undefined/.test(all.join('\n'));
+        out.toast = upgrade(HALL_KEY).msg; state.run.tiles[HALL_KEY].level = lv; render();
+        return out; }, [lv, crowns, offer]);
+      hallStates[name + w] = s;
+      if ((w === 390 && (name === 'locked' || name === 'unlocked')) || (w === 360 && (name === 'locked' || name === 'reach'))) { await page.evaluate(() => { ui.sel = { tile: HALL_KEY }; ui.sheet = false; render(); }); await settle(page); await shot(page, `shot-${w}-hall-${name}.png`); }
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 }); await page.evaluate(() => { state.run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12; state.run.gold = 0; ui.sel = {}; ui.tab = 'build'; render(); }); await settle(page);
+  { const L = hallStates.locked390, U = hallStates.unlocked390, C = hallStates.capped390, L6 = hallStates.locked6390;
+    const R = hallStates.reach390, LG = hallStates.longest360;
+    ok(L.lines.join('|') === 'The Palace is the height of this reign.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (15 Crowns on offer).|A Royal Palace opens at 30 Crowns held (12/30).' && !L.insUp && !L.barUp
+      && L.note.join('|') === 'Royal Palace at 30 Crowns held (12/30)',
+      'Palace, next hall locked: no upgrade button; the panel says it is the height of this reign, what is left to do and when a grander hall opens; the phone bar shows the unlock ' + JSON.stringify([L.lines, L.note]));
+    ok(R.lines[2] === 'A Royal Palace opens at 30 Crowns held (12/30). Abdicating now takes you to 30.' && R.short[2] === 'Abdicating now takes you to 30 Crowns held.' && R.note.join() === 'Royal Palace at 30 Crowns held (12/30)'
+      && LG.short[2] === 'Abdicating now takes you to 197 Crowns held.' && !L.short[2] && !hallStates.locked6390.short[2],
+      'when Crowns held plus Crowns on offer would open it, the unlock line says where abdicating now takes you (and only then) ' + JSON.stringify([R.lines[2], R.short, LG.short]));
+    const strips = { locked: 'The height of this reign.|Build Monuments, then abdicate (15 Crowns on offer).', reach: 'The height of this reign.|Build Monuments, then abdicate (18 Crowns on offer).|Abdicating now takes you to 30 Crowns held.',
+      capped: 'The grandest hall there is.|Build Monuments, then abdicate (18 Crowns on offer).', longest: 'The height of this reign.|Build Monuments, then abdicate (123 Crowns on offer).|Abdicating now takes you to 197 Crowns held.' };
+    ok(Object.keys(strips).every(n => hallStates[n + '360'].strip.join('|') === strips[n] && hallStates[n + '390'].strip.join('|') === strips[n] && hallStates[n + '360'].short.join('|') === strips[n]),
+      'phone strip at the end of a reign: only the short lines, at most three, the Crowns on offer once ' + JSON.stringify(Object.keys(strips).map(n => hallStates[n + '360'].strip)));
+    ok(Object.entries(hallStates).filter(([k]) => !/unlocked/.test(k)).every(([, s]) => !s.note.join(' ').includes('height of this reign') && (s.strip.join(' ').match(/height of this reign|grandest hall/g) || []).length === 1),
+      'phone, hall selected: "The height of this reign" (or "grandest hall") shows once, in the strip; the bar keeps the unlock ' + JSON.stringify(Object.entries(hallStates).map(([k, s]) => [k, s.note])));
+    ok(['locked', 'reach', 'capped', 'locked6', 'longest'].every(n => hallStates[n + '360'].stripWhole && hallStates[n + '390'].stripWhole), '390x844 and 360x640: the short hall lines show whole in the strip, unclipped, with nothing to scroll ' + JSON.stringify(Object.entries(hallStates).map(([k, s]) => [k, s.stripWhole])));
+    ok(L.hint === 'The Palace is the height of this reign.' && /A Royal Palace opens at 30 Crowns held \(12\/30\)/.test(L.hintText) && (L.hintText.match(/Crowns on offer/g) || []).length === 1 && (R.hintText.match(/Crowns on offer/g) || []).length === 1 && !/Royal Palace/.test(L.welcome) && L.toast === 'A Royal Palace needs 30 Crowns held. You hold 12.',
+      'locked: the Build tab card says the same (the Crowns on offer once, in the abdicate line), the welcome back has no next-hall wait, and an upgrade is refused plainly ' + JSON.stringify([L.hintText, R.hintText, L.welcome, L.toast]));
+    ok(L.realm.join('|') === 'Next hall: a Royal Palace, for reigns begun with 30 or more Crowns.' && /Once you hold more than 30 Crowns, each new one takes far more gold to earn/.test(L.realmMuted) && !/Past 30 Crowns held/.test(L.realmMuted),
+      'Realm tab: the next hall and the dearer Crowns past 30 are worded apart ' + JSON.stringify([L.realm, L.realmMuted.slice(0, 400)]));
+    ok(!U.lines.length && U.insUp && U.barUp && U.raise === 'Raise a Royal Palace' && /^Raise a Royal Palace/.test(U.deskRaise) && /Next: Royal Palace/.test(U.hint) && U.realm.join() === 'Next hall: an Imperial Palace, for reigns begun with 75 or more Crowns.' && U.toast === 'Your seat is now a Royal Palace!',
+      'Palace with 30 Crowns held: the normal "Raise a Royal Palace" button, the next hall leads the Build tab, and the Realm tab names the hall still shut ' + JSON.stringify([U.raise, U.hint, U.realm]));
+    ok(C.lines.join('|') === 'The Imperial Palace is the grandest hall there is.|Left to do: build Monuments (Research tab) and abdicate from the Realm tab (18 Crowns on offer).' && !C.insUp && !C.barUp && C.note.join('|') === 'Abdicate from the Realm tab' && !C.realm.length && C.toast === 'The Imperial Palace is the grandest hall there is.',
+      'Imperial Palace (the last hall): the same without the unlock line, and no button ' + JSON.stringify([C.lines, C.note]));
+    ok(L6.lines[2] === 'An Imperial Palace opens at 75 Crowns held (40/75).' && L6.note.join() === 'Imperial Palace at 75 Crowns held (40/75)' && L6.realm.join() === 'Next hall: an Imperial Palace, for reigns begun with 75 or more Crowns.' && !L6.barUp, 'Royal Palace with 40 Crowns held: the Imperial Palace opens at 75 ' + JSON.stringify([L6.lines[2], L6.note, L6.realm]));
+    const states = Object.entries(hallStates);
+    ok(states.every(([, s]) => !s.plusN && !s.inf), 'no "Palace +1" (or any "+N" hall), Infinity or NaN in the hall panel, bar, Build card, Realm tab or welcome back ' + JSON.stringify(states.filter(([, s]) => s.plusN || s.inf).map(([k, s]) => [k, s.plusN, s.inf])));
+    ok(states.every(([, s]) => s.noteFits && s.docW <= s.vw && s.docH <= s.vh + 1), '390 and 360 wide: the hall bar fits its row, nothing overflows the screen ' + JSON.stringify(states.map(([k, s]) => [k, s.docW, s.vw, s.noteFits]))); }
   // --- the next hall's price and wait lead the Build tab; cards say what a purchase adds; decrees come three at a time
   const guide = await page.evaluate(() => { const keep = JSON.stringify(state), said = el => { const c = el.cloneNode(true); c.querySelectorAll('svg[aria-label]').forEach(v => v.replaceWith('[' + v.getAttribute('aria-label') + ']')); return c.textContent; };
     startNewGame(Date.now()); state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; ui.tab = 'build'; ui.sel = {}; render();
@@ -228,7 +282,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
     return { xss: window.__xss, img: document.querySelectorAll('#app img, #app script, #toasts img').length + [...document.querySelectorAll('#app svg, #toasts svg')].filter(v => !(v.children.length === 1 && v.firstElementChild.localName === 'use' && /^#sp-\w+$/.test(v.firstElementChild.getAttribute('href')) && [...v.attributes].every(a => !/^on/i.test(a.name)))).length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], farmLv: kindLevel('farm'), decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
-  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 60 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 7 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
   ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
@@ -535,7 +589,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     state.run.res = { gold: 1e9, food: 1e9, wood: 1e9, stone: 1e9, iron: 1e9 }; state.meta.crowns = 3; state.run.tiles[HALL_KEY].level = 5; state.run.exp = 3; ui.mapN = 0;
     let i = 0; for (const id of BUILD_ORDER) { state.run.levels[id] = 2; for (let x = 0; x < MAP_SIZE && i >= 0; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] === 'plain' && !state.run.tiles[x + ',' + y]) { state.run.tiles[x + ',' + y] = { kind: 'building', id }; x = MAP_SIZE; break; } }
     calc = compute();
-    for (const lv of [1, 2, 3, 4, 5]) { state.run.tiles[HALL_KEY].level = lv; calc = compute();
+    for (const lv of [1, 2, 3, 4, 5, 6, 7]) { state.run.tiles[HALL_KEY].level = lv; state.meta.crowns = lv > 5 ? 80 : 3; calc = compute();
       for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; ui.sel = {}; render(); scan(); }
       ui.sel = { tile: HALL_KEY }; render(); scan(); }
     const k = Object.keys(state.run.tiles).find(k => state.run.tiles[k].id === 'cottage'); ui.sel = { tile: k }; render(); scan();

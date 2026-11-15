@@ -35,6 +35,7 @@
 // spend-weighted median per hall level.
 const { loadSim } = require('./harness');
 const sum = c => Object.values(c).reduce((a, b) => a + b, 0);
+const NO_GOAL_PAYBACK = 1e9 - 1; // with no next hall, any purchase that adds something may be made (own() is 1e9 for one that adds nothing)
 
 function play(seed, opts) {
   opts = opts || {};
@@ -48,7 +49,7 @@ function play(seed, opts) {
   const TICK = (opts && opts.tick) || 0.5, CHECKINS = (opts && opts.checkins) || 0, SESSION = (opts && opts.session) || 25, VISIT = (opts && opts.visit) || 3;
   const GAPS = !CHECKINS ? [] : CHECKINS === 1 ? [24] : CHECKINS === 2 ? [12, 12] : Array(CHECKINS - 1).fill(16 / (CHECKINS - 1)).concat(8); // hours; the last is the night
   const sim = loadSim(patch);
-  const s = sim.newState(0); s.run = sim.newRun(seed);
+  const s = sim.newState(0); s.run = sim.newRun(seed, opts && opts.crowns); // with Crowns held, the head start a new kingdom gets
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
   const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], buys: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
@@ -60,7 +61,7 @@ function play(seed, opts) {
   function candidates() {
     const c = [], ps = plots(), hl = sim.hallLevel();
     if (ps.length) for (const id of sim.BUILD_ORDER) if (B[id].hall <= hl) c.push({ k: 'build', id, cost: sim.buildCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.build(bestPlot(id, ps), id) });
-    c.push({ k: 'hall', id: 'hall', key: sim.HALL_KEY, cost: sim.upgradeCost(run().tiles[sim.HALL_KEY]), go: () => sim.upgrade(sim.HALL_KEY) });
+    if (sim.nextHallOpen()) c.push({ k: 'hall', id: 'hall', key: sim.HALL_KEY, cost: sim.upgradeCost(run().tiles[sim.HALL_KEY]), go: () => sim.upgrade(sim.HALL_KEY) }); // none past the last hall, or while the next needs more Crowns held
     for (const id of sim.BUILD_ORDER) if (sim.count(id) > 0 && sim.kindLevel(id) < sim.MAX_LEVEL) // one upgrade raises every building of the kind
       c.push({ k: 'up', id, cost: sim.kindUpgradeCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.upgradeKind(id) });
     for (const r of sim.RESEARCH) if (!sim.hasResearch(r.id) && r.hall <= hl) c.push({ k: 'research', id: r.id, mult: r.mult, cost: r.cost, food: !!(r.mult && (r.mult.farm || r.mult.mill)), go: () => sim.buyResearch(r.id) });
@@ -77,8 +78,10 @@ function play(seed, opts) {
   function act() {
     let bought = 0;
     for (let i = 0; i < 20; i++) {
-      sim.setState(sim.state); const C = sim.calc;
+      sim.setState(sim.state); const C = sim.calc, goal = sim.nextHallOpen(); // goal: there is a next hall to save for
       while (sim.decreeDone()) sim.claimDecree();
+      { const lv = sim.hallLevel(), key = 'hall' + (lv + 1) + 'affordable'; // when a hall past the Palace can first be paid for (at a check-in)
+        if (out.prestiges.length === 0 && lv >= 5 && goal && !out.marks[key] && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks[key] = { min: +(now / 60).toFixed(1) }; }
       let c = candidates();
       const hungry = C.rates.food < 0.1 * C.eaten && !(C.rates.food > 0 && run().res.food > C.eaten * 600);
       const cramped = C.cap < C.need * 1.05 + 3;
@@ -89,8 +92,10 @@ function play(seed, opts) {
       else {
         if (C.staff < 1) return bought; // housing is there: wait for villagers to move in
         const nt = Object.keys(run().tiles).length, nf = sim.count('farm') + sim.count('mill'), roomy = C.cap >= C.need * 1.25 + 10, few = plots().length <= 3;
-        // No point raising output of a material already piled up far beyond anything on the shopping list.
-        const lim = 0.2 * sum(sim.upgradeCost(run().tiles[sim.HALL_KEY])), want = {};
+        // No point raising output of a material already piled up far beyond anything on the shopping list. A hall's
+        // price is the yardstick for what counts as a small purchase: the next hall's, or with no next hall to raise,
+        // the price of the hall that stands (never the price of one that is shut).
+        const lim = 0.2 * sum(sim.TILE_KINDS.hall.upgradeCost({ level: goal ? sim.hallLevel() : Math.max(1, sim.hallLevel() - 1) })), want = {};
         for (const a of c) if (a.k === 'hall' || a.k === 'expand' || a.k === 'research' || sum(a.cost) <= lim) for (const r in a.cost) want[r] = Math.max(want[r] || 0, a.cost[r]);
         const glut = a => GLUT && (a.k === 'up' || a.k === 'build') && B[a.id] && B[a.id].out && sim.count(a.id) > 0 && Object.keys(B[a.id].out).every(r => r !== 'gold' && r !== 'food' && run().res[r] > 5 * (want[r] || 0) + 1000);
         c = c.filter(a => !glut(a));
@@ -100,48 +105,61 @@ function play(seed, opts) {
       if (!c.length) return bought;
       let pick = c[0];
       if (!hungry && !foodBound && !cramped) {
-        // The hall is the goal. L is the material it will wait longest for and eta that wait at today's rates.
-        const hcost = sim.upgradeCost(run().tiles[sim.HALL_KEY]), res = run().res;
+        // The hall is the goal, if there is a next one. L is the material it will wait longest for and eta that wait at today's rates.
+        const hcost = goal ? sim.upgradeCost(run().tiles[sim.HALL_KEY]) : {}, res = run().res;
         let L = 'gold', eta = 0;
         for (const r in hcost) if (res[r] < hcost[r]) { const w = C.base[r] > 0 ? (hcost[r] - res[r]) / C.base[r] : Infinity; if (w >= eta) { eta = w; L = r; } }
+        // What a purchase adds per second of material r, estimated from what the town makes now.
+        const gain = (a, r) => {
+          const def = B[a.id], tiles = run().tiles;
+          if (a.k === 'up' && def) { const L = sim.kindLevel(a.id), step = sim.levelMultAt(a.id, L + 1) / sim.levelMultAt(a.id, L) - 1;
+            if (def.glob) return def.glob * sim.count(a.id) * C.base[r] / (1 + def.glob * sim.count(a.id) * L);
+            let d = 0; if (def.out && def.out[r]) for (const key in C.tiles) if (tiles[key].id === a.id) d += def.out[r] * C.tiles[key].mult * step; return d; }
+          if (a.k === 'build') return def.glob ? def.glob * C.base[r] : def.out && def.out[r] ? def.out[r] * C.mult * sim.researchMult(a.id) : 0;
+          if (a.k === 'research' && a.mult) { let d = 0; for (const key in C.tiles) { const t = tiles[key], o = B[t.id].out; if (a.mult[t.id] && o && o[r]) d += o[r] * C.tiles[key].mult * (a.mult[t.id] - 1); } return d; }
+          if (a.k === 'rep' && a.id === 'prod') return C.base[r] * sim.repeatable('prod').per / sim.repBonus('prod');
+          return 0;
+        };
+        // A sensible player takes the best value, not the cheapest: the purchase that pays for itself soonest in what
+        // it makes (land counts as half a day). Seconds; 1e9 for a purchase that adds nothing.
+        const own = a => { const def = B[a.id], cost = Object.keys(a.cost).reduce((t, r) => t + (C.base[r] > 0 ? a.cost[r] / C.base[r] : 1e9), 0);
+          if (a.k === 'expand' || a.k === 'clear') return 12 * 3600;
+          let best = 0; for (const r of ['gold', 'food', 'wood', 'stone', 'iron']) { const base = r === 'food' ? C.base.food + C.eaten : C.base[r]; if (base > 0) best = Math.max(best, gain(a, r) / base); }
+          if (a.k === 'rep' && (a.id === 'housing' || a.id === 'food')) best = Math.max(best, 0.1);
+          if (def && def.house && C.cap > 0) best = Math.max(best, (a.k === 'build' ? def.house * sim.levelMultAt(a.id, sim.kindLevel(a.id)) : def.house * sim.count(a.id)) / C.cap * 0.5);
+          return best > 0 ? cost / best : 1e9; };
         const steward = c.find(a => a.k === 'research' && a.id === 'steward'); // a full day away counts: the first thing a player who sleeps buys
+        const full = plots().length <= 3;
         if (steward) pick = steward;
-        else if (SIMPLE) { // the cross-check buyer: no estimates at all. The hall when it can, else the cheapest thing on offer, if it costs a small share of the hall
-          pick = !eta ? c.find(a => a.k === 'hall') : c.find(a => a.k !== 'hall' && sum(a.cost) <= SIMPLE * sum(hcost));
+        else if (SIMPLE) { // the cross-check buyer: no estimates at all. The hall when it can, else the cheapest thing on offer, if it costs a small share of the hall (with no next hall, simply the cheapest)
+          pick = !goal ? c[0] : !eta ? c.find(a => a.k === 'hall') : c.find(a => a.k !== 'hall' && sum(a.cost) <= SIMPLE * sum(hcost));
+        }
+        else if (!goal) {
+          // No next hall (the last one, or the next needs more Crowns held): the reign's goal is the abdication. Monuments
+          // and Royal Roads first, a new kind of building or land when out of plots next, then whatever pays for itself
+          // soonest; nothing is held back for a hall.
+          let best = 1 / 0; pick = null;
+          for (const a of c) {
+            const first = (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod')) || (a.k === 'build' && sim.count(a.id) === 0) || (a.k === 'expand' && full);
+            const score = first ? -1 : own(a);
+            if (score <= NO_GOAL_PAYBACK && score < best) { best = score; pick = a; }
+          }
         }
         else if (!eta) pick = c.find(a => a.k === 'hall');
         else {
           // A purchase is worth making if the hall then comes sooner: after paying for it and counting what it adds
           // (estimated from what the town makes now), the longest wait for any hall material is shorter than before.
           // Things that add nothing the hall needs (land, a first building of a kind) may cost a little of the wait.
-          const gain = (a, r) => {
-            const def = B[a.id], tiles = run().tiles;
-            if (a.k === 'up' && def) { const L = sim.kindLevel(a.id), step = sim.levelMultAt(a.id, L + 1) / sim.levelMultAt(a.id, L) - 1;
-              if (def.glob) return def.glob * sim.count(a.id) * C.base[r] / (1 + def.glob * sim.count(a.id) * L);
-              let d = 0; if (def.out && def.out[r]) for (const key in C.tiles) if (tiles[key].id === a.id) d += def.out[r] * C.tiles[key].mult * step; return d; }
-            if (a.k === 'build') return def.glob ? def.glob * C.base[r] : def.out && def.out[r] ? def.out[r] * C.mult * sim.researchMult(a.id) : 0;
-            if (a.k === 'research' && a.mult) { let d = 0; for (const key in C.tiles) { const t = tiles[key], o = B[t.id].out; if (a.mult[t.id] && o && o[r]) d += o[r] * C.tiles[key].mult * (a.mult[t.id] - 1); } return d; }
-            if (a.k === 'rep' && a.id === 'prod') return C.base[r] * sim.repeatable('prod').per / sim.repBonus('prod');
-            return 0;
-          };
           const waitAfter = a => { let w = 0;
             for (const r in hcost) { const need = hcost[r] - res[r] + (a.cost[r] || 0); if (need > 0) { const rate = C.base[r] + gain(a, r); w = Math.max(w, rate > 0 ? need / rate : 1 / 0); } }
             return w; };
-          // Among purchases that leave the hall no later without bringing it sooner, a sensible player takes the best
-          // value, not the cheapest: the one that pays for itself soonest in what it makes (land counts as half a day).
-          const own = a => { const def = B[a.id], cost = Object.keys(a.cost).reduce((t, r) => t + (C.base[r] > 0 ? a.cost[r] / C.base[r] : 1e9), 0);
-            if (a.k === 'expand' || a.k === 'clear') return 12 * 3600;
-            let best = 0; for (const r of ['gold', 'food', 'wood', 'stone', 'iron']) { const base = r === 'food' ? C.base.food + C.eaten : C.base[r]; if (base > 0) best = Math.max(best, gain(a, r) / base); }
-            if (a.k === 'rep' && (a.id === 'housing' || a.id === 'food')) best = Math.max(best, 0.1);
-            if (def && def.house && C.cap > 0) best = Math.max(best, (a.k === 'build' ? def.house * sim.levelMultAt(a.id, sim.kindLevel(a.id)) : def.house * sim.count(a.id)) / C.cap * 0.5);
-            return best > 0 ? cost / best : 1e9; };
-          let best = 1 / 0; pick = null; const full = plots().length <= 3;
+          // Among purchases that leave the hall no later without bringing it sooner, the best value (own) wins.
+          let best = 1 / 0; pick = null;
           for (const a of c) { // c is cheapest first, so ties go to the cheapest
             if (a.k === 'hall') continue;
             const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0, slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
             if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) score = -1; // a town out of plots expands first, as it would build a new kind first
-            if (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod') && sim.hallLevel() >= 5) score = -1; // with a Palace the goal is the abdication, not a sixth hall
             if (score < best) { best = score; pick = a; }
           }
         }
@@ -157,7 +175,7 @@ function play(seed, opts) {
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
       if (pick.k === 'expand' && out.prestiges.length === 0) out.marks['exp' + (run().exp + 1)] = { min: +(now / 60).toFixed(1) };
-      pick.go(); bought++; sim.setState(sim.state);
+      pick.go(); bought++; sim.setState(sim.state); if (pick.k === 'hall') noteHall();
       const dg = sim.calc.base.gold - g0;
       if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
         const mk = B[pick.id].glob ? 'gold' : Object.keys(B[pick.id].out || { gold: 0 })[0], before = mk === 'food' ? C.base.food + C.eaten : C.base[mk], after = mk === 'food' ? sim.calc.base.food + sim.calc.eaten : sim.calc.base[mk];
@@ -174,10 +192,14 @@ function play(seed, opts) {
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
       stone: sim.fmt(C.base.stone) + '/s', iron: sim.fmt(C.base.iron) + '/s', stock: Object.keys(run().res).map(r => r + ' ' + sim.fmt(run().res[r])).join(', '), plots: plots().length }; };
   let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
-  // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
-  function afterStep() {
+  // A new hall level, noted the moment it is raised (the town as it stands then, before the rest of that check-in's purchases).
+  function noteHall() {
     if (sim.hallLevel() > hall) { hall = sim.hallLevel(); const name = sim.hallName(hall);
       if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), buildings: Object.values(run().tiles).filter(x => x.kind === 'building').length, kindsBuilt: sim.BUILD_ORDER.filter(id => sim.count(id) > 0).length, levels: Object.assign({}, run().levels), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold }; }
+  }
+  // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
+  function afterStep() {
+    noteHall();
     if (out.prestiges.length === 0) for (const n of [15, 20]) if (!out.marks['crowns' + n] && sim.pendingCrowns() >= n) out.marks['crowns' + n] = { min: +(t / 60).toFixed(1) };
     for (const n of [100]) if (!out.marks['held' + n] && sim.state.meta.crowns >= n) out.marks['held' + n] = { min: +(t / 60).toFixed(1) };
     if (out.week === undefined && t >= 168 * 3600) out.week = sim.state.meta.crowns + sim.pendingCrowns();
@@ -211,7 +233,7 @@ function play(seed, opts) {
       t = t0 + gap; now = t;
       const visit = { hour: +(t / 3600).toFixed(1), reign: out.prestiges.length, away: gap / 3600, credited: r.credited / 3600, hall, starving: run().starving, lostPop: Math.max(0, pop0 - run().pop), bought: 0, goldRate: 0,
         hallShare: 0, limit: '' };
-      { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // how many such absences the next hall costs, and the material that sets it
+      if (sim.nextHallOpen()) { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // how many such absences the next hall costs, and the material that sets it
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
       buying = !opts.buyEvery || i % opts.buyEvery === opts.buyEvery - 1; // with five check-ins a day and buyEvery 5: the one after the night
@@ -241,6 +263,7 @@ function summary(seed, opts) {
   const week = r.visits.filter(v => v.hour <= 168.5).pop();
   return { seed, taps: opts.taps || 0, policy: opts.policy || 'none', checkins: opts.checkins || 0, lifetimeGold: r.totalGold, goldRate: r.goldRate, crowns: r.crowns, pending: r.pending, hall: r.hall,
     manorMin: r.marks.Manor ? r.marks.Manor.min : null, keep: at('Keep'), castle: at('Castle'), palace: at('Palace'), crowns15: at('crowns15'), crowns20: at('crowns20'), legend: at('held100'),
+    royal: at('Royal Palace'), royalAffordable: at('hall6affordable'), imperial: at('Imperial Palace'), imperialAffordable: at('hall7affordable'),
     starvedHours: r.starve / 3600, lostPop: r.visits.reduce((a, v) => a + v.lostPop, 0),
     reigns: r.prestiges.map(p => ({ hours: p.runMin / 60, hall: p.hall, crowns: p.crowns })), weekCrowns: week ? week.crowns + week.pending : r.week === undefined ? null : r.week,
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,

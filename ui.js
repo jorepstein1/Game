@@ -113,19 +113,40 @@ const abdicateLine = () => canPrestige() ? `${sprite('crown')} <b>You can abdica
 const HALL_NEAR_HOURS = 12;
 function hallDelay(cost, adds, work) {
   // no estimate while the town is short of hands, or would be after this purchase: the sum below assumes full staffing
-  if (calc.staff < 1 || staffAfter(work) < 1) return '';
-  const hall = tileAt(HALL_KEY), w = hallWait(); if (hall.level >= MAX_LEVEL || !isFinite(w) || w > HALL_NEAR_HOURS * 3600 || !canAfford(cost)) return '';
+  if (calc.staff < 1 || staffAfter(work) < 1 || !nextHallOpen()) return ''; // and none with no next hall to wait for
+  const hall = tileAt(HALL_KEY), w = hallWait(); if (!isFinite(w) || w > HALL_NEAR_HOURS * 3600 || !canAfford(cost)) return '';
   const hc = upgradeCost(hall); let after = 0;
   for (const r in hc) { const need = hc[r] - state.run.res[r] + (cost[r] || 0), rate = calc.base[r] + ((adds && adds[r]) || 0); if (need > 0) after = Math.max(after, rate > 0 ? need / rate : Infinity); }
   const d = after - w, name = hallName(hall.level + 1);
   return d > 60 ? `<span class="delay">delays the ${name} by about ${isFinite(d) ? fmtDuration(d) : 'a long while'}</span>` : d < -60 ? `<span class="adds">brings the ${name} about ${fmtDuration(-d)} closer</span>` : '';
 }
+const AHall = level => 'A' + aHall(level).slice(1); // "A Royal Palace", to start a sentence
+const crownsText = n => fmt(n) + (n === 1 ? ' Crown' : ' Crowns');
+// With no next hall to raise (the last one, or the next needs more Crowns held): where the reign stands, what is
+// left to do in it, and when a grander hall opens, with a note when abdicating now would hold enough Crowns for it.
+// `short` is the phone strip's version, at most three lines that fit at 360px; the phone bar carries the unlock
+// (hallBarNote), so the strip leaves it out. offer: false leaves out the Crowns on offer (where the abdicate line gives them).
+function hallReach() { const lock = hallLocked(), after = state.meta.crowns + pendingCrowns(); return lock && canPrestige() && after >= lock.need ? after : 0; }
+function hallEndLines(offer) {
+  const name = hallName(hallLevel()), lock = hallLocked(), n = crownsText(pendingCrowns()), reach = hallReach(), was = offer === false ? '' : ` (${n} on offer)`;
+  return { head: lock ? `The ${name} is the height of this reign.` : `The ${name} is the grandest hall there is.`,
+    left: `Left to do: build Monuments (Research tab) and abdicate from the Realm tab${was}.`,
+    opens: lock ? `${AHall(lock.level)} opens at ${lock.need} Crowns held (${fmt(state.meta.crowns)}/${lock.need}).${reach ? ` Abdicating now takes you to ${fmt(reach)}.` : ''}` : '',
+    short: [lock ? 'The height of this reign.' : 'The grandest hall there is.', `Build Monuments, then abdicate (${n} on offer).`].concat(reach ? [`Abdicating now takes you to ${fmt(reach)} Crowns held.`] : []) };
+}
+// The phone bar where the hall's upgrade button would be: the unlock (or, at the last hall, where to go), never a button.
+function hallBarNote() {
+  const lock = hallLocked();
+  return `<div class="bb act wide note"><b>${lock ? `${hallName(lock.level)} at ${lock.need} Crowns held (${fmt(state.meta.crowns)}/${lock.need})` : 'Abdicate from the Realm tab'}</b></div>`;
+}
 // The next hall: its price and how long the town needs to afford it at today's income. Shown at the top of Build.
 function hallHint() {
-  const hall = tileAt(HALL_KEY); if (hall.level >= MAX_LEVEL) return '';
+  const hall = tileAt(HALL_KEY), icon = tileKind(hall).icon(hall);
+  if (!nextHallOpen()) { const end = hallEndLines(!abdicateLine()); // the Crowns on offer once: in the abdicate line when it shows
+    return `<button class="card hallhint" data-act="hall"><div class="ic">${icon}</div><div class="bd"><div class="nm">${end.head}</div><div class="muted when">${end.left}${end.opens ? ' ' + end.opens : ''}</div>${abdicateLine() ? `<div class="when">${abdicateLine()}</div>` : ''}<div class="muted when">${restLine()}</div></div></button>`; }
   const c = upgradeCost(hall), w = hallWait(), name = hallName(hall.level + 1);
   const when = w === 0 ? '<b class="ready">Ready to raise: tap here.</b>' : isFinite(w) ? `At this rate: ${name} in about <b>${fmtDuration(w)}</b>.` : 'Not all of this is being produced yet.';
-  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${tileKind(hall).icon(hall)}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div>${abdicateLine() ? `<div class="when">${abdicateLine()}</div>` : ''}<div class="muted when">${restLine()}</div></div></button>`;
+  return `<button class="card hallhint${w === 0 ? ' glowcard' : ''}" data-act="hall"><div class="ic">${icon}</div><div class="bd"><div class="nm">Next: ${name}</div>${costHTML(c)}<div class="muted when">${when} Purchases that add income bring it closer; anything else puts it off.</div>${abdicateLine() ? `<div class="when">${abdicateLine()}</div>` : ''}<div class="muted when">${restLine()}</div></div></button>`;
 }
 
 function renderResources() {
@@ -210,14 +231,17 @@ function renderInspector() {
   } else if (sel.tile && tileAt(sel.tile)) {
     const k = sel.tile, t = tileAt(k), kind = tileKind(t);
     if (t.kind === 'hall') {
-      const c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
+      const open = nextHallOpen(), c = upgradeCost(t), ok = open && canAfford(c), end = open ? null : hallEndLines();
       const next = BUILD_ORDER.filter(b => BUILDINGS[b].hall === t.level + 1).map(b => BUILDINGS[b].icon + ' ' + BUILDINGS[b].name);
-      h = `<h3>${kind.icon(t)} ${kind.name(t)}</h3><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
+      // With no next hall there is no upgrade button: the lines come first. Phones (which hide the heading, as for
+      // buildings: the bar names the hall) show only the short version, whole, in the strip under the map.
+      h = `<h3 class="kindhead">${kind.icon(t)} ${kind.name(t)}</h3>${end ? `<div class="hallend wide"><p><b>${end.head}</b></p><p>${end.left}</p>${end.opens ? `<p>${end.opens}</p>` : ''}</div><div class="hallend narrow">${end.short.map((l, i) => `<p>${i ? l : `<b>${l}</b>`}</p>`).join('')}</div>` : ''}
+        <div${end ? ' class="wide"' : ''}><p>The heart of your realm. Its household forages a little food, and each level adds ${pct(HALL_BONUS)} to all production.</p>
         <p class="stat">Realm bonus: <b>×${calc.mult.toFixed(2)}</b></p>
-        <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} ${RESOURCES.food.icon}/s</b> per villager. Bigger towns eat more per head.</p>
+        <p class="stat">Food upkeep: <b>${foodPerPop(state.run.pop).toFixed(2)} ${RESOURCES.food.icon}/s</b> per villager. Bigger towns eat more per head.</p></div>
         ${next.length ? `<p class="stat">Next level unlocks: <b>${next.join(', ')}</b></p>` : ''}
         ${t.level === PRESTIGE_HALL - 1 ? `<p class="stat">A Castle lets you found a new kingdom for ${sprite('crown')} Crowns.</p>` : ''}
-        <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Raise a ${hallName(t.level + 1)} ${costHTML(c)}</button></div>`;
+        ${open ? `<div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="up" data-id="${k}">Raise ${aHall(t.level + 1)} ${costHTML(c)}</button></div>` : ''}`;
     } else {
       const d = BUILDINGS[t.id], info = calc.tiles[k] || { adj: 0, mult: 0, levelMult: 1 };
       h = `<h3 class="kindhead">${d.icon} ${d.name} <span class="muted">· ${kindLine(t.id)}</span></h3><div class="bstats">`; // phones: the bar above the button names the kind
@@ -278,7 +302,7 @@ function renderPanel() {
     if (!meta.stats.upgrades && BUILD_ORDER.some(id => count(id) > 0)) h += '<p class="muted uptip">To upgrade, tap one of your buildings on the map. One upgrade raises every building of that kind.</p>';
     for (const id of BUILD_ORDER) {
       const d = BUILDINGS[id];
-      if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">${sprite('lock')}</div><div class="bd">${d.name} — requires a ${hallName(d.hall)}</div></div>`; continue; }
+      if (d.hall > hall) { if (d.hall === hall + 1) h += `<div class="card locked"><div class="ic">${sprite('lock')}</div><div class="bd">${d.name} — requires ${aHall(d.hall)}</div></div>`; continue; }
       const c = buildCost(id), L = kindLevel(id);
       h += `<button class="card${ui.sel.build === id ? ' on' : ''}${canAfford(c) ? '' : ' cant'}" data-act="pick" data-id="${id}">
         <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}${L > 1 ? ' · level ' + L : ''}</span></div><div class="muted">${d.desc}</div>${L > 1 ? `<div class="muted lvnote">New ones are built at level ${L}.</div>` : ''}${costHTML(c)}${addsHTML(buildAdds(id))}${hallDelay(c, buildAdds(id), d.work * L)}${d.house ? housingWarning(Math.floor(d.house * levelMultAt(id, L) * repBonus('housing'))) : ''}</div></button>`;
@@ -292,7 +316,7 @@ function renderPanel() {
     for (const r of avail) h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="research" data-id="${r.id}">
       <div class="ic">${sprite('research')}</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`;
     if (!avail.length) h += '<p class="muted">Your scholars have nothing new to offer for now.</p>';
-    if (RESEARCH.some(r => r.hall > hall)) h += `<p class="muted">More to discover once you raise a ${hallName(hall + 1)}.</p>`;
+    if (RESEARCH.some(r => r.hall > hall)) h += `<p class="muted">More to discover once you raise ${aHall(hall + 1)}.</p>`;
     const reps = REPEATABLES.filter(r => r.hall <= hall);
     if (reps.length) h += '<hr><h3>Repeatable upgrades</h3><p class="muted">Each level costs more than the last. Levels reset when you found a new kingdom.</p>';
     for (const r of reps) { const c = repCost(r);
@@ -314,8 +338,9 @@ function renderPanel() {
   } else {
     const n = pendingCrowns(), ok = canPrestige();
     h += `<h3>${sprite('crown')} Dynasty</h3><p>Once you hold a Castle you may abdicate and found a new kingdom. You start over, but earn Crowns that boost all production by ${Math.round(CROWN_BONUS * 100)}% each, forever.</p>
-      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Past ${CROWN_DEAR_FROM} Crowns held each one takes far more gold, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
+      <p class="muted">Crowns on offer come from the gold earned this reign, and each further one takes more gold. Abdication opens at ${CROWN_MIN} on offer, about when a first Palace stands; ${CROWN_GOAL} or more pays best. Once you hold more than ${CROWN_DEAR_FROM} Crowns, each new one takes far more gold to earn, so later reigns have to grow further. A new kingdom also begins with a few extra supplies, enough to skip the first steps.</p>
       <p class="stat">Crowns held: <b>${fmt(meta.crowns)}</b> (production ×${crownMult(meta.crowns).toFixed(2)}) · on abdication: <b>+${fmt(n)}</b>${n ? ` (production ×${crownMult(meta.crowns + n).toFixed(2)})` : ''}</p>
+      ${(u => u ? `<p class="stat">Next hall: ${aHall(u.level)}, for reigns begun with <b>${u.need}</b> or more Crowns.</p>` : '')(hallUnlockAhead())}
       <p class="stat">Gold this reign: <b>${fmt(run.gold)}</b> · next Crown at <b>${fmt(goldForCrowns(n - repLevel('monument') + 1, meta.crowns))}</b></p>
       ${ok ? `<p class="stat ready">${abdicateLine().replace(' See the Realm tab.', '')}</p>` : ''}<p class="stat">${offerNote(n)}</p>
       <div class="row"><button class="btn${ok ? '' : ' cant'}" data-act="prestige">${hall < PRESTIGE_HALL ? 'Requires a Castle' : n < CROWN_MIN ? `Needs ${CROWN_MIN} Crowns on offer` : `Found a new kingdom (+${fmt(n)} ${sprite('crown', 'Crowns')})`}</button></div>
@@ -340,8 +365,9 @@ function renderBuildBar() {
   ui.barMode = t ? 'tile' : tr && tr !== 'plain' ? 'terrain' : 'build';
   if (t) { // a selected building: its actions sit in the bar, in reach without scrolling
     const kind = tileKind(t);
-    if (t.kind === 'hall') { const c = upgradeCost(t), ok = canAfford(c) && t.level < MAX_LEVEL;
-      h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>Raise a ${hallName(t.level + 1)}</b>${costHTML(c)}</button>`; }
+    if (t.kind === 'hall' && nextHallOpen()) { const c = upgradeCost(t), ok = canAfford(c);
+      h = `<button class="bb act wide${ok ? '' : ' cant'}" data-act="up" data-id="${k}"><b>Raise ${aHall(t.level + 1)}</b>${costHTML(c)}</button>`; }
+    else if (t.kind === 'hall') h = hallBarNote(); // no next hall: a note where the button would be
     else h = kindUpgradeButton(t.id, 'bb act wide', true);
     if (kind.removable) h += `<button class="bb act" data-act="demolish" data-id="${k}"><span class="ic">${sprite('demolish')}</span><small>Demolish</small></button>`;
     patch($('bbrow'), h + close);
@@ -448,7 +474,7 @@ function catchUp(sec) {
   const gains = Object.keys(r.gains).map(k => `<p class="stat">${sprite(k)} ${RESOURCES[k].name}: <b>+${fmt(r.gains[k])}</b></p>`).join('');
   openModal(`<h2 id="modaltitle">Welcome back</h2><p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>
     ${abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
-    ${hallLevel() < MAX_LEVEL ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise a <b>${hallName(hallLevel() + 1)}</b>.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
+    ${nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>'}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
 }
 function loadGame() {

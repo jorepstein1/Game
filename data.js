@@ -14,14 +14,19 @@ const TERRAIN = {
 const HALL_TIERS = [
   { name: 'Village Hall', icon: '🛖' }, { name: 'Manor', icon: '🏡' }, { name: 'Keep', icon: '🗼' },
   { name: 'Castle', icon: '🏰' }, { name: 'Palace', icon: '👑' },
+  { name: 'Royal Palace', icon: '👑' }, { name: 'Imperial Palace', icon: '👑' },
 ];
+const HALL_MAX = HALL_TIERS.length; // the last hall: there is none past the Imperial Palace
+// The Palace is the last hall of a first reign. The two after it open only with Crowns held (not Crowns on offer),
+// so later reigns end somewhere new; every reign still starts at a Village Hall.
+const HALL_CROWNS = { 6: 30, 7: 75 }; // hall level: Crowns held needed to raise it
 // Hall costs set the pace: Manor in the first session, Keep about 4 hours in, Castle about 12, Palace about 37
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
   { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.1e5, wood: 8.4e4, stone: 5.04e4 },
   { gold: 6.5e5, stone: 3.024e5 }, { gold: 1.12e7, stone: 2.24e6, iron: 1.12e5 },
 ];
-const HALL_GROWTH = 50;
+const HALL_GROWTH = 4;           // Royal Palace 4x the Palace, Imperial 16x: in a reign begun with 30 (75) Crowns held it is affordable about when 20 Crowns come on offer
 const HALL_HOUSING = 5;          // villagers housed per hall level
 const HALL_FORAGE = 0.5;         // food per second per hall level
 const HALL_BONUS = 0.25;         // all production per hall level above 1
