@@ -73,13 +73,14 @@ const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0)
     + (us.length ? '<span class="uses">uses ' + us.map(r => `${fmtRate(-adds[r]).slice(1)} ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''); };
 // The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
 const staffAfter = work => Math.min(1, state.run.pop / Math.max(1, calc.need + (work || 0)));
-// Buildings that feed or are the trades (food and the Markets, iron and the forges, the Guildhall) are previewed with
-// the game's own rules, so a Farm's card shows the gold its food fetches at the Markets and a Blacksmith's the iron it uses.
-const TRADE_LINKED = ['farm', 'mill', 'market', 'mine', 'smith', 'guild'];
-function diffAdds(after) { const before = compute({ stocked: true, staff: calc.staff }), a = {};
+// Buildings that feed or are the trades (food and every trade, iron and the forges, the Guildhall and the Tavern) are
+// previewed with the game's own rules, so a Farm's card shows the gold its food brings the trades and a Blacksmith's the iron it uses.
+const TRADE_LINKED = ['farm', 'mill', 'market', 'tavern', 'mine', 'smith', 'guild'];
+const anyTrade = () => count('market') + count('smith') + count('guild') > 0;
+function diffAdds(after) { const before = compute({ staff: calc.staff }), a = {};
   for (const r in before.base) { const d = after.base[r] - before.base[r]; if (Math.abs(d) > 1e-9) a[r] = d; } return a; }
 function buildAdds(id) { const d = BUILDINGS[id], a = {}, L = kindLevel(id), st = d.work ? staffAfter(d.work * L) : 1;
-  if (TRADE_LINKED.includes(id) && (count('market') || count('smith'))) { const o = diffAdds(afterBuild(id)); for (const r in o) o[r] *= st; return o; }
+  if (TRADE_LINKED.includes(id) && anyTrade()) { const o = diffAdds(afterBuild(id)); for (const r in o) o[r] *= st; return o; }
   if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob * L; }
   else for (const r in d.out || {}) a[r] = d.out[r] * levelMultAt(id, L) * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
   return a; }
@@ -96,6 +97,8 @@ function kindUpgradeEffect(id) {
 function kindUpgradeText(id, fx) {
   const d = BUILDINGS[id], parts = [];
   if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
+  else if (id === 'tavern') { const L = kindLevel(id), cut = l => pct(1 - 1 / (1 + TAVERN_SAVING * Math.sqrt(l)));
+    parts.push(tavernsIdle() ? 'no effect yet: no Tavern is beside a trade' : 'food saving ' + cut(L) + ' → ' + cut(L + 1)); }
   else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); // the Guildhall
     parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
@@ -112,23 +115,22 @@ function kindUpgradeButton(id, cls, short) {
 }
 const kindLine = id => `level ${kindLevel(id)} · ${count(id)} standing`;
 function researchAdds(r) { const a = {}; if (!r.mult) return a;
-  if (Object.keys(r.mult).some(id => TRADE_LINKED.includes(id)) && (count('market') || count('smith'))) { const had = state.run.research[r.id]; state.run.research[r.id] = 1;
-    const after = compute({ stocked: true, staff: calc.staff }); if (had) state.run.research[r.id] = had; else delete state.run.research[r.id]; return diffAdds(after); }
+  if (Object.keys(r.mult).some(id => TRADE_LINKED.includes(id)) && anyTrade()) { const had = state.run.research[r.id]; state.run.research[r.id] = 1;
+    const after = compute({ staff: calc.staff }); if (had) state.run.research[r.id] = had; else delete state.run.research[r.id]; return diffAdds(after); }
   for (const k in calc.tiles) { const t = state.run.tiles[k], o = BUILDINGS[t.id] && BUILDINGS[t.id].out; if (o && r.mult[t.id]) for (const res in o) a[res] = (a[res] || 0) + o[res] * calc.tiles[k].mult * (r.mult[t.id] - 1); }
   return a; }
 // The trades in plain words, for the resource bar, the panels and the build cards.
 const pctOf = x => Math.round(Math.max(0, Math.min(1, x)) * 100) + '%';
-const marketLine = () => `Markets sell ${fmtRate(calc.foodSold).slice(1, -2)} food/s (${pctOf(calc.fill)} supplied)`;
+const tradeLine = () => `Trades eat ${fmtRate(calc.foodUsed).slice(1, -2)} of ${fmtRate(calc.surplus).slice(1, -2)} spare food/s (${pctOf(calc.supply)} fed)`;
 const forgeLine = () => `Forges use ${fmtRate(calc.ironUsed).slice(1, -2)} iron/s (running at ${pctOf(calc.smithRun)})`;
-// Why the Markets are short, when they are: no spare food, or a store still filling to its reserve.
-function marketNote() {
-  if (calc.fill >= 0.995) return '';
-  if (!calc.stocked && calc.surplus > 0) return 'The food store is filling first.';
-  return calc.surplus <= 0 ? 'No spare food: build Farms or a Mill.' : 'More Farms or a Mill would supply them.';
+// What would feed the trades, when they are short.
+function tradeNote() {
+  if (calc.supply >= 0.995) return '';
+  return calc.surplus <= 0 ? 'No spare food: build Farms or a Mill.' : 'More Farms, a Mill or a Tavern beside them would feed them.';
 }
 // On a trade's build card, while the trades already standing are short of their supply.
 function tradeWarning(id) {
-  if (id === 'market' && count('market') && calc.fill < 0.995) return `<p class="warn small">Markets are ${pctOf(calc.fill)} supplied: Farms first.</p>`;
+  if (TRADES[id] && anyTrade() && calc.supply < 0.995) return `<p class="warn small">Trades are ${pctOf(calc.supply)} fed: Farms${count('tavern') ? '' : ', a Mill or a Tavern'} first.</p>`;
   if (id === 'smith' && count('smith') && calc.smithRun < 0.995) return `<p class="warn small">Forges run at ${pctOf(calc.smithRun)}: Mines first.</p>`;
   return '';
 }
@@ -146,6 +148,18 @@ function guildLine(key) {
   const n = guildTrades(key);
   const parts = Object.keys(n).filter(id => n[id]).map(id => n[id] + ' ' + (n[id] > 1 ? plural(id) : BUILDINGS[id].name));
   return parts.length ? `Boosting <b>${parts.join(' and ')}</b> by ${pct(BUILDINGS.market.adj.building.guild * Math.sqrt(kindLevel('guild')))}` : 'Boosting nothing: build Markets or Blacksmiths beside it';
+}
+// The trades beside a Tavern, by kind, and whether any Tavern of the town touches one.
+function tavernTrades(key) {
+  const [x, y] = xy(key), n = { market: 0, smith: 0, guild: 0 };
+  for (const [a, b] of neighbors(x, y)) { const t = state.run.tiles[a + ',' + b]; if (t && t.kind === 'building' && hasOwn(n, t.id)) n[t.id]++; }
+  return n;
+}
+const tavernsIdle = () => !Object.keys(state.run.tiles).some(k => { const t = state.run.tiles[k]; if (t.kind !== 'building' || t.id !== 'tavern') return false; const n = tavernTrades(k); return n.market + n.smith + n.guild > 0; });
+function tavernLine(key) {
+  const n = tavernTrades(key), cut = pct(1 - 1 / (1 + TAVERN_SAVING * Math.sqrt(kindLevel('tavern'))));
+  const parts = Object.keys(n).filter(id => n[id]).map(id => n[id] + ' ' + (n[id] > 1 ? plural(id) : BUILDINGS[id].name));
+  return parts.length ? `Feeding <b>${parts.join(', ')}</b>: ${cut} less food` : 'Feeding nothing: build Markets, Blacksmiths or Guildhalls beside it';
 }
 // One line on the rested bonus: what it is doing now, or how far off it is.
 function restLine() { const left = REST_AFTER_HOURS * 3600 - state.run.away;
@@ -200,7 +214,7 @@ function renderResources() {
     if (r === 'iron' && hallLevel() < 3 && !res.iron) continue;
     if (r === 'stone' && !res.stone && !count('quarry')) continue;
     const bad = r === 'food' && run.starving;
-    const tip = RESOURCES[r].name + (r === 'food' && count('market') ? '. ' + marketLine() : r === 'iron' && count('smith') ? '. ' + forgeLine() : '');
+    const tip = RESOURCES[r].name + (r === 'food' && anyTrade() ? '. ' + tradeLine() : r === 'iron' && count('smith') ? '. ' + forgeLine() : '');
     h += `<div class="chip${bad ? ' bad' : ''}" title="${tip}"><span>${RESOURCES[r].icon}<b>${fmt(res[r])}</b></span><small class="${calc.rates[r] < 0 ? 'neg' : ''}">${fmtRate(calc.rates[r]).replace('/s', '<i>/s</i>')}</small></div>`;
   }
   const full = foodRateAt(calc.cap), hungry = run.pop < calc.cap - 0.5 && full < 0 && !run.starving;
@@ -259,7 +273,9 @@ function buildingStats(id) {
   const adj = d.adj || {};
   for (const a in adj.terrain || {}) h += `<p class="stat"><b>${pct(adj.terrain[a])}</b> per adjacent ${TERRAIN[a].name} ${TERRAIN[a].icon}</p>`;
   for (const a in adj.building || {}) h += `<p class="stat"><b>${pct(adj.building[a])}</b> per adjacent ${BUILDINGS[a].name} ${BUILDINGS[a].icon} (per level)</p>`;
-  for (const o of BUILD_ORDER) if (boosts(o, id)) h += `<p class="stat">Boosts adjacent ${BUILDINGS[o].name}s ${BUILDINGS[o].icon} by <b>${pct(BUILDINGS[o].adj.building[id])}</b> per level</p>`;
+  if (id === 'tavern') h += `<p class="stat">Adjacent ${BUILD_ORDER.filter(o => TRADES[o]).map(o => plural(o) + ' ' + BUILDINGS[o].icon).join(', ')} need <b>${pct(1 - 1 / (1 + TAVERN_SAVING))}</b> less food (more with its level)</p>`;
+  else for (const o of BUILD_ORDER) if (boosts(o, id)) h += `<p class="stat">Boosts adjacent ${plural(o)} ${BUILDINGS[o].icon} by <b>${pct(BUILDINGS[o].adj.building[id])}</b> per level</p>`;
+  if (TRADES[id]) h += `<p class="stat">Eats spare food: <b>${fmt(TRADES[id].food * (d.out ? d.out.gold : 1))} ${RESOURCES.food.icon}/s</b> at level 1</p>`;
   return h;
 }
 // Shown before buying housing the farms cannot feed: villagers only move in while there is food for them.
@@ -294,8 +310,9 @@ function renderInspector() {
       if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${fmt(kind.housing(t))}</b></p>`;
       if (d.out) h += '<p class="stat">Making ' + Object.keys(d.out).map(r => `<b>${fmtRate(d.out[r] * info.mult)} ${RESOURCES[r].icon}</b>`).join(' ') + '</p>';
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * kindLevel(t.id) * calc.staff)}</b></p>`;
-      if (t.id === 'market') h += `<p class="stat">Supplied: <b>${pctOf(info.supply)}</b><span class="wide"> · ${marketLine()}. ${marketNote()}</span></p>`;
-      if (t.id === 'smith') h += `<p class="stat">Running at <b>${pctOf(info.supply)}</b><span class="wide"> · ${forgeLine()}.${calc.smithRun < 0.995 ? ' More Mines would run them harder.' : ''}</span></p>`;
+      if (TRADES[t.id]) h += `<p class="stat">Fed: <b>${pctOf(info.supply)}</b>${info.tavern ? ` · ${pct(info.tavern)} less food (Tavern)` : ''}<span class="wide"> · ${tradeLine()}. ${tradeNote()}</span></p>`;
+      if (t.id === 'smith') h += `<p class="stat">Running at <b>${pctOf(info.run)}</b><span class="wide"> · ${forgeLine()}.${calc.smithRun < 0.995 ? ' More Mines would run them harder.' : ''}</span></p>`;
+      if (t.id === 'tavern') h += `<p class="stat">${tavernLine(k)}</p>`;
       if (t.id === 'guild') h += `<p class="stat">${guildLine(k)}</p>`;
       if (d.adj) h += `<p class="stat">Adjacency<span class="wide"> bonus</span>: <b>${pct(info.adj)}</b></p>`;
       if (d.work) h += `<p class="stat">Workers: ${kind.jobs(t)} ${sprite('pop', 'villagers')}${calc.staff < 1 ? ` <span class="warn">(${Math.round(calc.staff * 100)}% staffed<span class="wide"> — build cottages</span>)</span>` : ''}</p>`;

@@ -3,7 +3,7 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
@@ -291,7 +291,7 @@ function adjBonus(id, x, y) {
   }
   return s;
 }
-const boosts = (receiver, giver) => !!(BUILDINGS[receiver].adj && BUILDINGS[receiver].adj.building && BUILDINGS[receiver].adj.building[giver]);
+const boosts = (receiver, giver) => (giver === 'tavern' && hasOwn(TRADES, receiver)) || !!(BUILDINGS[receiver].adj && BUILDINGS[receiver].adj.building && BUILDINGS[receiver].adj.building[giver]);
 function givesTo(id, x, y) { // how many neighbours would be boosted by placing `id` here
   let c = 0;
   for (const [nx, ny] of neighbors(x, y)) { const t = state.run.tiles[nx + ',' + ny]; if (t && t.kind === 'building' && boosts(t.id, id)) c++; }
@@ -324,7 +324,7 @@ const upkeep = pop => pop * foodPerPop(pop);
 // The snapshot the town would have with one more level of a kind (used to preview what an upgrade does).
 function afterKindUpgrade(id, opts) { const lv = state.run.levels, keep = lv[id]; lv[id] = kindLevel(id) + 1; const c = compute(opts); lv[id] = keep; return c; }
 // Base food income if the town held `pop` villagers (used to preview what more housing would do).
-function foodRateAt(pop) { const keep = state.run.pop; state.run.pop = pop; const c = compute(); state.run.pop = keep; return c.base.food + c.foodSold; } // what the farms leave after upkeep, before the Markets sell any
+function foodRateAt(pop) { const keep = state.run.pop; state.run.pop = pop; const c = compute(); state.run.pop = keep; return c.base.food + c.foodUsed; } // what the farms leave after upkeep, before the trades eat any
 // Largest population between lo and hi whose upkeep still fits in `budget` food per second.
 function sustainablePop(lo, hi, budget) {
   if (upkeep(hi) <= budget) return hi;
@@ -344,13 +344,14 @@ const canPrestige = () => hallLevel() >= PRESTIGE_HALL && pendingCrowns() >= CRO
 // ───────────────────────── Simulation ─────────────────────────
 // Returns the derived snapshot. `base` is what the city makes on its own; `rates` is what it is making
 // right now, i.e. base less the starvation penalty.
-// Trades (see data.js, TRADES): a Market sells the town's spare food and a Blacksmith works iron into gold. Each has a
-// volume (what it takes in at full supply: its kind's level, the realm bonus and staffing; never adjacency or
-// research) and a price per unit (adjacency and research). Markets sell only from the food surplus, and only while
-// the store holds MARKET_RESERVE_SECONDS of upkeep; forges take only a share of the iron income, never the stock.
-//   fill = min(1, food sold / food wanted)          Market gold = full rate × (MARKET_BASE + (1 - MARKET_BASE) × fill)
-//   run  = min(1, SMITH_SHARE × iron made / iron wanted)   Blacksmith gold = full rate × run
-// opts.stocked: settle the Markets as if the store held its reserve (what a purchase would do once it has filled).
+// Trades (see data.js, TRADES): Markets, Blacksmiths and Guildhalls share the town's spare food. Each has a need
+// (what it eats at full supply: its kind's level, the realm bonus and staffing, less any Tavern beside it; never
+// adjacency or research) and the gold it makes at full supply (adjacency and research raise that). From rates only:
+//   supply = min(1, spare food / food all trades need)     fed = TRADE_FLOOR + (1 - TRADE_FLOOR) × supply
+//   run    = min(1, SMITH_SHARE × iron made / iron wanted)
+//   Market gold = full rate × fed       Blacksmith gold = full rate × fed × run
+// A Guildhall eats like the others but makes no gold: its boost to its neighbours does not depend on supply.
+// The trades take only spare income, never the store, so the store never falls because of them.
 // opts.staff: staffing to use instead of the town's own (a preview that assumes housing keeps up).
 function compute(opts) {
   opts = opts || {};
@@ -372,40 +373,52 @@ function compute(opts) {
   const base = { gold: 0, food: HALL_FORAGE * hallLevel(), wood: 0, stone: 0, iron: 0 }; // the hall's own folk forage
   const rates = Object.assign({}, base), trades = [];
   for (const k in tiles) {
-    const t = run.tiles[k], def = BUILDINGS[t.id]; if (!def.out) continue;
+    const t = run.tiles[k], def = BUILDINGS[t.id], trade = TRADES[t.id];
+    if (trade) { // settled below, once the town's spare food and iron are known
+      const [x, y] = xy(k); let tavern = 0;
+      for (const [nx, ny] of neighbors(x, y)) { const n = run.tiles[nx + ',' + ny]; if (n && n.kind === 'building' && n.id === 'tavern') tavern += TAVERN_SAVING * Math.sqrt(kindLevel('tavern')); }
+      const gold = def.out ? def.out.gold : 0, crew = mult * (def.work ? staff : 1);
+      // Food need grows by TRADE_NEED_GROWTH per kind level while the gold triples, so each level is cheaper in food per
+      // gold than the last but still wants more Farms; iron need grows with the gold.
+      const m = def.out ? tiles[k].levelMult * (1 + tiles[k].adj) * researchMult(t.id) * crew : 0;
+      tiles[k].full = gold * m; tiles[k].tavern = tavern ? 1 - 1 / (1 + tavern) : 0;
+      tiles[k].need = trade.food * (gold || 1) * Math.pow(TRADE_NEED_GROWTH, kindLevel(t.id) - 1) * crew / (1 + tavern);
+      trades.push({ k, id: t.id, m, live: m * (def.work && run.starving ? STARVE_PENALTY : 1), food: tiles[k].need, iron: (trade.iron || 0) * gold * tiles[k].levelMult * crew });
+      continue;
+    }
+    if (!def.out) continue;
     const m = tiles[k].levelMult * (1 + tiles[k].adj) * researchMult(t.id) * mult * (def.work ? staff : 1) * (def.out.food ? foodMult : 1);
     const live = tiles[k].mult = m * (def.work && run.starving && !def.out.food ? STARVE_PENALTY : 1);
-    if (TRADES[t.id]) { // settled below, once the town's food and iron are known
-      tiles[k].full = def.out.gold * m; trades.push({ k, id: t.id, m, live, wants: def.out.gold * tiles[k].levelMult * mult * (def.work ? staff : 1) * TRADES[t.id].per });
-      continue; }
     for (const r in def.out) { base[r] += def.out[r] * m; rates[r] += def.out[r] * live; tiles[k].out[r] = def.out[r] * m; }
   }
   const eaten = upkeep(run.pop), foodMade = base.food, ironMade = base.iron;
-  // Food: Markets take what is left after upkeep, once the store holds its reserve, so they never starve the town.
-  const surplus = Math.max(0, foodMade - eaten), stocked = opts.stocked || run.res.food > eaten * MARKET_RESERVE_SECONDS;
+  // Food: the trades share what is left after upkeep, so they never starve the town or touch the store.
+  const surplus = Math.max(0, foodMade - eaten);
   let foodWanted = 0, ironWanted = 0;
-  for (const o of trades) if (o.id === 'market') foodWanted += o.wants; else ironWanted += o.wants;
-  const foodSold = stocked ? Math.min(surplus, foodWanted) : 0;
-  const fill = foodWanted > 0 ? foodSold / foodWanted : 0;
+  for (const o of trades) { foodWanted += o.food; ironWanted += o.iron; }
+  const supply = foodWanted > 0 ? Math.min(1, surplus / foodWanted) : 0, foodUsed = foodWanted * supply;
+  const fed = TRADE_FLOOR + (1 - TRADE_FLOOR) * supply;
   // Iron: forges take at most SMITH_SHARE of the iron made, never the stock, so the stock never falls because of them.
   const smithRun = ironWanted > 0 ? Math.min(1, SMITH_SHARE * Math.max(0, ironMade) / ironWanted) : 0;
   let ironUsed = 0, ironUsedLive = 0;
   for (const o of trades) {
-    const share = o.id === 'market' ? MARKET_BASE + (1 - MARKET_BASE) * fill : smithRun, def = BUILDINGS[o.id];
+    const def = BUILDINGS[o.id]; tiles[o.k].supply = supply;
+    if (!def.out) continue; // a Guildhall: it eats, and boosts its neighbours through adjacency
+    const share = fed * (o.id === 'smith' ? smithRun : 1);
     base.gold += def.out.gold * o.m * share; rates.gold += def.out.gold * o.live * share;
-    tiles[o.k].mult = o.live * share; tiles[o.k].out.gold = def.out.gold * o.m * share; tiles[o.k].supply = o.id === 'market' ? fill : smithRun;
-    if (o.id === 'smith') { ironUsed += o.wants * smithRun; ironUsedLive += o.wants * smithRun * (o.live / o.m || 0); }
+    tiles[o.k].mult = o.live * share; tiles[o.k].out.gold = def.out.gold * o.m * share;
+    if (o.id === 'smith') { tiles[o.k].run = smithRun; ironUsed += o.iron * smithRun; ironUsedLive += o.iron * smithRun * (o.live / o.m || 0); }
   }
-  // Starving towns sell no food (there is no surplus) and their mines and forges slow alike, so the live run is the same.
-  base.food -= eaten + foodSold; rates.food -= eaten + foodSold;
+  // Starving towns have no spare food, and their mines and forges slow alike, so the live run is the same.
+  base.food -= eaten + foodUsed; rates.food -= eaten + foodUsed;
   base.iron -= ironUsed; rates.iron -= ironUsedLive;
-  return { cap, rawCap, need, staff, mult, base, rates, eaten, tiles, foodMade, surplus, foodWanted, foodSold, fill, stocked, ironMade, ironWanted, ironUsed, smithRun };
+  return { cap, rawCap, need, staff, mult, base, rates, eaten, tiles, foodMade, surplus, foodWanted, foodUsed, supply, fed, ironMade, ironWanted, ironUsed, smithRun };
 }
 // The snapshot the town would have with one more building of a kind on plot `key` (by default a plot with no
-// neighbours, so no adjacency), staffed as now and with the food store at its reserve. For previews only.
+// neighbours, so no adjacency), staffed as now. For previews only.
 function afterBuild(id, key) {
   key = key || '-9,-9'; const tiles = state.run.tiles, had = hasOwn(tiles, key), keep = tiles[key], staff = calc ? calc.staff : undefined;
-  tiles[key] = { kind: 'building', id }; const c = compute({ stocked: true, staff });
+  tiles[key] = { kind: 'building', id }; const c = compute({ staff });
   if (had) tiles[key] = keep; else delete tiles[key];
   return c;
 }
@@ -420,7 +433,7 @@ function stepCity(dt) {
   // Population follows food as well as housing, so a hungry town recovers on its own:
   // villagers leave while it starves (down to what the farms can feed), and new ones only move in
   // while the food income, or a healthy stockpile, can carry them.
-  const produced = calc.foodMade; // food made per second before upkeep (and before the Markets sell any)
+  const produced = calc.foodMade; // food made per second before upkeep (and before the trades eat any)
   if (run.starving) {
     const floor = sustainablePop(Math.min(run.pop, START_POP), run.pop, produced);
     run.pop = Math.max(floor, run.pop - Math.max(0.2, run.pop * STARVE_LOSS) * dt);
@@ -605,8 +618,8 @@ function upgradeLegacySave(o) {
     run: { seed: o.seed, res: o.res, pop: o.pop, exp: o.exp, tiles, research: o.research, starving: o.starving, gold: o.runGold } };
 }
 
-const TRADE_KINDS = ['market', 'smith', 'guild'];
-const JOBS_NOTE = 'The trades have changed. Markets now sell spare food, and Blacksmiths work the iron your Mines make. Guildhalls no longer make gold: they boost the Markets and Blacksmiths beside them, so it may pay to move a Guildhall or add Farms.';
+const TRADE_KINDS = Object.keys(TRADES);
+const EAT_NOTE = 'The trades now eat. Markets, Blacksmiths and Guildhalls share the food your town does not eat, and slow down when there is too little, so Farms and Mills matter again. Taverns no longer make gold or boost Cottages: trades beside a Tavern need less food, so it may pay to move one. Your food store is untouched.';
 // Returns { state, notes }. Throws if the data is not a save at all (or is from a newer version).
 function sanitizeSave(raw, now) {
   if (!isObj(raw)) throw new Error('not a save');
@@ -668,7 +681,9 @@ function sanitizeSave(raw, now) {
   if (v < 4) for (const id in seen) run.levels[id] = seen[id];
   if (v < 4 && mixed) notes.push('Upgrades now apply to every building of a kind. Where your buildings of one kind had different levels, all of them are now at the level of the lowest.');
   // Version 5 gave the trades their jobs: a town that already has one is told once why its gold income changed.
-  if (v < 5 && Object.keys(run.tiles).some(k => TRADE_KINDS.includes(run.tiles[k].id))) notes.push(JOBS_NOTE);
+  // Version 5 gave the trades their jobs and version 6 made them eat spare food, with the Tavern feeding them: a town
+  // that already has one is told once why its income changed (one note, the latest rules, covers both).
+  if (v < 6 && Object.keys(run.tiles).some(k => TRADE_KINDS.includes(run.tiles[k].id) || run.tiles[k].id === 'tavern')) notes.push(EAT_NOTE);
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;
