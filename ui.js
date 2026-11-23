@@ -103,8 +103,8 @@ function kindUpgradeText(id, fx) {
     parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
   else if (TRADES[id] && fx.starved) parts.push('gold ' + fmtRate(fx.gold)); // short of food, the trades' true gain, which can be a loss
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
-  if (TRADES[id] && !(id === 'guild' && guildsIdle())) parts.push('food ×' + TRADE_NEED_GROWTH);
   else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
+  if (TRADES[id] && !(id === 'guild' && guildsIdle())) parts.push('food ×' + TRADE_NEED_GROWTH);
   if (fx.housing > 0) parts.push('+' + fmt(fx.housing) + ' housing');
   if (fx.jobs > 0) parts.push('needs ' + fmt(fx.jobs) + ' more ' + sprite('pop', 'villagers'));
   return parts.map((p, i) => `<span class="part">${p}${i < parts.length - 1 ? ' ·' : ''}</span>`).join(' '); // the line breaks after a "·", never inside a part

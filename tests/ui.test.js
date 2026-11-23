@@ -668,7 +668,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
         return { eff: T(btn.querySelector('.eff')), cut: cut(btn), stat: T(document.querySelector('#inspector .bstats')), cant: btn.classList.contains('cant'),
           jobWhole: !phone || getComputedStyle(job).display === 'none' || job.scrollWidth <= job.clientWidth + 1, inView: br.right <= innerWidth && br.left >= 0 && (!phone || br.bottom <= document.getElementById('tabs').getBoundingClientRect().top + 1),
           docW: document.documentElement.scrollWidth }; };
+      put('8,8', 'lumber'); calc = compute(); run.pop = calc.cap; calc = compute();
       const out = { market: look('4,4'), smith: look('4,2'), guild: look('4,3'), lone: look('2,6') };
+      out.lumber = look('8,8').eff;
       delete run.tiles['4,3']; calc = compute(); out.idle = look('2,6');
       document.querySelector((phone ? '#buildbar' : '#inspector') + ' [data-act="upkind"]').click(); out.idle.bought = kindLevel('guild');
       return out; });
@@ -677,6 +679,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       `${w}x${h}: the Market, Blacksmith and Guildhall Upgrade buttons and job lines show every line whole, no "…", the villagers needed included ` + JSON.stringify(all.map(k => [k, got[k].eff, got[k].cut])));
     ok(/^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.market.eff) && /^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.smith.eff) && /^boost \+100% → \+141%/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
       `${w}x${h}: a Guildhall beside a trade advertises its boost ` + JSON.stringify([got.guild.eff, got.guild.stat]));
+    ok(/^output ×3( · needs \d+ more)?$/.test(got.lumber), `${w}x${h}: a Lumber Camp upgrade says output ×3 and no rates ` + JSON.stringify(got.lumber));
     ok(/^boost \+100% → \+141%/.test(got.lone.eff) && /Boosting nothing: build Markets or Blacksmiths beside it/.test(got.lone.stat),
       `${w}x${h}: a Guildhall beside nothing, while another touches a Market: the upgrade keeps its boost figure, the panel says this one boosts nothing ` + JSON.stringify([got.lone.eff, got.lone.stat]));
     ok(/^no effect yet: no Guildhall is beside a Market or Blacksmith/.test(got.idle.eff) && !/boost/.test(got.idle.eff) && /Boosting nothing/.test(got.idle.stat) && !got.idle.cant && got.idle.bought === 2,
