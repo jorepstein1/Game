@@ -72,7 +72,7 @@ const SMITH_SHARE = 0.6;         // the most of the town's iron income all forge
 // food: per second at level 1 and full staff, per gold of the kind's level-1 rate (Market, Blacksmith) or for the building
 // (Guildhall); it grows TRADE_NEED_GROWTH times per kind level, and a forge eats only for the iron it works.
 // iron: the same for iron; with SMITH_SHARE it ties the forges to the Mines.
-const TRADES = { market: { food: 25 }, smith: { food: 1, iron: 0.11 }, guild: { food: 20 } }; // a forge already pays in iron, so it eats less per gold
+const TRADES = { market: { food: 27 }, smith: { food: 1, iron: 0.11 }, guild: { food: 20 } }; // a forge already pays in iron, so it eats less per gold
 // Upgrades are by kind: one upgrade raises every building of that kind, standing or still to be built. Prices
 // follow one rule (sim.js, "Prices"). A kind with n standing at level L has a worth
 //   worth(n, L) = cost × W(n) × U(L)
@@ -132,7 +132,7 @@ const BUILDINGS = {
     desc: 'Feeds the trades: Markets, Blacksmiths and Guildhalls beside it need less food.' },
   mine: { name: 'Mine', icon: '🕳️', hall: 3, cost: { gold: 200000, wood: 80000, stone: 40000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { iron: 0.8 },
     adj: { terrain: { hill: 0.5 } }, desc: 'Digs iron for halls and Blacksmiths. Wants hills nearby.' },
-  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 18 },
+  smith: { name: 'Blacksmith', icon: '⚒️', hall: 3, cost: { gold: 4e5, stone: 1.2e5, iron: 4000 }, work: 4, growth: 2, upgradeGrowth: 4, out: { gold: 19 },
     adj: { building: { mine: 0.3, guild: 1 } }, desc: 'Turns iron into gold, the best rate there is. Likes a Mine beside it.' },
   church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
     desc: '+5% to all production per level, while fully staffed.' },

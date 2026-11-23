@@ -106,7 +106,7 @@ function kindUpgradeText(id, fx) {
   if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
   else if (TRADES[id] && fx.starved && !(id === 'guild' && guildsIdle())) parts.push('gold ' + fmtRate(fx.gold)); // short of food: the trades' true gain, which can be a loss
   else if (id === 'tavern') { const L = kindLevel(id);
-    parts.push(tavernsIdle() ? 'no effect yet: no Tavern is beside a trade' : 'food saving ' + tavernCut(L) + ' → ' + tavernCut(L + 1)); }
+    parts.push(tavernsIdle() ? 'no effect yet: no Tavern is beside a trade' : 'food saving ' + tavernCut(L) + ' → ' + tavernCut(L + 1) + (fx.gold > 0.05 ? ' · gold ' + fmtRate(fx.gold) : '')); }
   else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); // the Guildhall
     parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
