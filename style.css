@@ -89,6 +89,8 @@ aside { flex: 1 1 0; min-width: 300px; max-width: 520px; display: flex; flex-dir
 }
 .tile .lv { right: 1px; bottom: 1px; background: var(--red); color: #fff; }
 .tile .pv { left: 50%; top: 50%; transform: translate(-50%, -50%); background: #fffd; color: var(--good); }
+.tile .fd { position: absolute; right: 1px; bottom: 0; font-size: 11px; font-weight: 700; line-height: 1; white-space: nowrap; color: var(--good); text-shadow: 0 0 2px #fff; pointer-events: none; }
+.nw { white-space: nowrap; }
 .tile .bn { position: absolute; left: 2px; top: 1px; font-size: 10px; font-family: system-ui, sans-serif; font-weight: 700; color: #1d4d1d; text-shadow: 0 0 2px #fff; white-space: nowrap; letter-spacing: -.3px; }
 
 #strip { display: flex; }

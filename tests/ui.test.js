@@ -318,11 +318,11 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
   const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, notes: document.getElementById('modalbox').textContent }));
-  ok(mig.v === 5 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /Markets now sell spare food/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
+  ok(mig.v === 6 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /The trades now eat/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !/Away/.test(mig.notes), 'a 30s reload gap is credited without an away summary (' + mig.clock + 's)');
   await page.evaluate(() => closeModal());
   const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
-  ok(stored.v === 5 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  ok(stored.v === 6 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
   // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy
@@ -409,7 +409,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await settle(p3); await p3.tap('.tile[data-id="6,5"]'); await settle(p3);
   up = await reach('#buildbar [data-act="upkind"]'); const dem = await reach('#buildbar [data-act="demolish"]');
   const info = await p3.evaluate(() => document.getElementById('bbinfo').textContent.replace(/\s+/g, ' ').trim());
-  ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /output ×3/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
+  ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
   await p3.tap('#buildbar [data-act="upkind"]'); await settle(p3);
   ok(await p3.evaluate(() => kindLevel('smith')) === 5, 'tapping it in the bar upgrades the Blacksmiths');
   await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage' }; state.run.levels.cottage = 2; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
@@ -627,24 +627,25 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const got = await pg.evaluate(() => {
       const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.exp = 1; run.tiles[HALL_KEY].level = 4; run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
       const put = (k, id) => { run.tiles[k] = { kind: 'building', id }; };
-      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage');
+      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage'); put('5,2', 'tavern');
       calc = compute(); run.pop = calc.cap; ui.mapN = 0; calc = compute();
       const out = {}, docW = () => document.documentElement.scrollWidth;
-      for (const id of ['market', 'smith', 'guild', 'farm']) { const k = Object.keys(run.tiles).find(k => run.tiles[k].id === id); ui.sel = { tile: k }; render();
+      for (const id of ['market', 'smith', 'guild', 'farm', 'tavern']) { const k = Object.keys(run.tiles).find(k => run.tiles[k].id === id); ui.sel = { tile: k }; render();
         const ins = document.getElementById('inspector'), job = ins.querySelector('.job'), r = job && job.getBoundingClientRect(), ir = ins.getBoundingClientRect();
         out[id] = { text: ins.innerText.replace(/\s+/g, ' '), job: job ? job.textContent : '', jobFits: !!r && r.right <= ir.right + 1 && r.left >= ir.left - 1, docW: docW() }; }
       ui.sel = { tile: HALL_KEY }; render(); out.hall = document.getElementById('inspector').innerText.replace(/\s+/g, ' ');
-      ui.sel = {}; ui.tab = 'build'; ui.sheet = true; render(); out.cards = ['farm', 'market', 'smith', 'guild'].map(id => document.querySelector(`#panel .card[data-id="${id}"] .muted`).textContent);
+      ui.sel = {}; ui.tab = 'build'; ui.sheet = true; render(); out.cards = ['farm', 'market', 'smith', 'guild', 'tavern'].map(id => document.querySelector(`#panel .card[data-id="${id}"] .muted`).textContent);
       out.cardsFit = [...document.querySelectorAll('#panel .card')].every(c => c.scrollWidth <= c.clientWidth + 1); out.docW = docW();
-      out.tips = [...document.querySelectorAll('#res .chip')].map(c => c.title).filter(t => /Markets sell|Forges use/.test(t));
+      out.tips = [...document.querySelectorAll('#res .chip')].map(c => c.title).filter(t => /Trades eat|Forges use/.test(t));
       return out; });
     const W = w;
-    ok(/Sells spare food/.test(got.market.job) && /Supplied: \d+%/.test(got.market.text) && /Running at \d+%/.test(got.smith.text) && /Boosting 1 Market and 1 Blacksmith by \+100%/.test(got.guild.text) && /Feeds the town/.test(got.farm.job),
-      `${W}px: each building panel states its job; the Market its supply, the Blacksmith its run, the Guildhall what it boosts ` + JSON.stringify([got.market.text, got.smith.text, got.guild.text]));
-    ok(['market', 'smith', 'guild', 'farm'].every(id => got[id].jobFits && got[id].docW <= W) && got.cardsFit && got.docW <= W, `${W}px: the job lines and build cards fit, no sideways scroll`);
-    ok(got.tips.length === 2 && /Markets sell [\d.]+ food\/s \(\d+% supplied\)/.test(got.tips[0]) && /Forges use [\d.]+ iron\/s \(running at \d+%\)/.test(got.tips[1]) && /Iron income: \+[\d.]+\/s/.test(got.hall),
-      `${W}px: the food and iron chips say what the Markets sell and the forges use; the hall panel gives the iron income when the next hall needs iron ` + JSON.stringify([got.tips, got.hall]));
-    ok(/Makes no gold; boosts/.test(got.cards[3]) && /best rate/.test(got.cards[2]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
+    ok(/Turns spare food into gold/.test(got.market.job) && ['market', 'smith', 'guild'].every(id => /Fed: \d+%/.test(got[id].text)) && /Running at \d+%/.test(got.smith.text) && /Boosting 1 Market and 1 Blacksmith by \+100%/.test(got.guild.text) && /Feeds the town/.test(got.farm.job)
+      && /Feeding <?b?>?1 Blacksmith/.test(got.tavern.text) && /33% less food/.test(got.tavern.text) && /33% less food \(Tavern\)/.test(got.smith.text) && !/Tavern\)/.test(got.market.text) && /Feeds the trades/.test(got.tavern.job),
+      `${W}px: each building panel states its job; the trades how well they are fed, the Blacksmith its run, the Guildhall what it boosts, the Tavern what it feeds ` + JSON.stringify([got.market.text, got.smith.text, got.guild.text, got.tavern.text]));
+    ok(['market', 'smith', 'guild', 'farm', 'tavern'].every(id => got[id].jobFits && got[id].docW <= W) && got.cardsFit && got.docW <= W, `${W}px: the job lines and build cards fit, no sideways scroll`);
+    ok(got.tips.length === 2 && /Trades eat [\d.]+ of [\d.]+ spare food\/s \(\d+% fed\)/.test(got.tips[0]) && /Forges use [\d.]+ iron\/s \(running at \d+%\)/.test(got.tips[1]) && /Iron income: \+[\d.]+\/s/.test(got.hall),
+      `${W}px: the food and iron chips say what the trades eat and the forges use; the hall panel gives the iron income when the next hall needs iron ` + JSON.stringify([got.tips, got.hall]));
+    ok(/Eats food and boosts the Markets/.test(got.cards[3]) && /best rate/.test(got.cards[2]) && /need less food/.test(got.cards[4]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
     ok(e3.length === 0, `${W}px trades: no console errors ` + JSON.stringify(e3));
     await cx.close();
   }
@@ -667,16 +668,19 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
         return { eff: T(btn.querySelector('.eff')), cut: cut(btn), stat: T(document.querySelector('#inspector .bstats')), cant: btn.classList.contains('cant'),
           jobWhole: !phone || getComputedStyle(job).display === 'none' || job.scrollWidth <= job.clientWidth + 1, inView: br.right <= innerWidth && br.left >= 0 && (!phone || br.bottom <= document.getElementById('tabs').getBoundingClientRect().top + 1),
           docW: document.documentElement.scrollWidth }; };
+      put('8,8', 'lumber'); calc = compute(); run.pop = calc.cap; calc = compute();
       const out = { market: look('4,4'), smith: look('4,2'), guild: look('4,3'), lone: look('2,6') };
+      out.lumber = look('8,8').eff;
       delete run.tiles['4,3']; calc = compute(); out.idle = look('2,6');
       document.querySelector((phone ? '#buildbar' : '#inspector') + ' [data-act="upkind"]').click(); out.idle.bought = kindLevel('guild');
       return out; });
     const all = ['market', 'smith', 'guild', 'lone', 'idle'];
     ok(all.every(k => !got[k].cut.length && got[k].jobWhole && got[k].inView && got[k].docW <= w) && all.every(k => /needs \d+ more/.test(got[k].eff)),
       `${w}x${h}: the Market, Blacksmith and Guildhall Upgrade buttons and job lines show every line whole, no "…", the villagers needed included ` + JSON.stringify(all.map(k => [k, got[k].eff, got[k].cut])));
-    ok(/^output ×3/.test(got.market.eff) && /^output ×3/.test(got.smith.eff) && /^boost \+100% → \+141%/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
+    ok(/^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.market.eff) && /^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.smith.eff) && /^(boost \+100% → \+141%|gold [+-][\d.]+\/s) · food ×2/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
       `${w}x${h}: a Guildhall beside a trade advertises its boost ` + JSON.stringify([got.guild.eff, got.guild.stat]));
-    ok(/^boost \+100% → \+141%/.test(got.lone.eff) && /Boosting nothing: build Markets or Blacksmiths beside it/.test(got.lone.stat),
+    ok(/^output ×3( · needs \d+ more)?$/.test(got.lumber), `${w}x${h}: a Lumber Camp upgrade says output ×3 and no rates ` + JSON.stringify(got.lumber));
+    ok(/^(boost \+100% → \+141%|gold [+-][\d.]+\/s) · food ×2/.test(got.lone.eff) && /Boosting nothing: build Markets or Blacksmiths beside it/.test(got.lone.stat),
       `${w}x${h}: a Guildhall beside nothing, while another touches a Market: the upgrade keeps its boost figure, the panel says this one boosts nothing ` + JSON.stringify([got.lone.eff, got.lone.stat]));
     ok(/^no effect yet: no Guildhall is beside a Market or Blacksmith/.test(got.idle.eff) && !/boost/.test(got.idle.eff) && /Boosting nothing/.test(got.idle.stat) && !got.idle.cant && got.idle.bought === 2,
       `${w}x${h}: when no Guildhall touches a trade, the upgrade says it has no effect yet, and can still be bought ` + JSON.stringify(got.idle));
@@ -692,18 +696,18 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- a save from before the trades had jobs: the welcome back says once what changed; a fresh game never does
   { const cx = await br.newContext({ viewport: { width: 360, height: 740 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, reducedMotion: 'reduce' }), pg = await cx.newPage(), e5 = []; watch(pg, e5);
     await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
-    const freshNote = await pg.evaluate(() => /Markets now sell/.test(document.body.innerText + document.getElementById('modalbox').textContent));
+    const freshNote = await pg.evaluate(() => /The trades now eat/.test(document.body.innerText + document.getElementById('modalbox').textContent));
     await pg.evaluate(() => { const s = JSON.parse(serialize()); s.v = 4; s.last = Date.now() - 3 * 3600 * 1000; s.run.tiles[HALL_KEY].level = 4; s.run.exp = 1;
       for (const [k, id] of [['5,4', 'cottage'], ['4,5', 'farm'], ['6,5', 'guild'], ['5,6', 'market']]) { const [x, y] = k.split(',').map(Number); s.run.terrain[x][y] = 'plain'; s.run.tiles[k] = { kind: 'building', id }; }
       ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); });
     const load = async () => { await pg.reload(); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
       return pg.evaluate(() => { const m = document.getElementById('modalbox'), r = m.getBoundingClientRect(); return { open: !document.getElementById('modal').hidden, text: m.innerText.replace(/\s+/g, ' '), notes: m.querySelectorAll('.loadnote').length, toasts: document.getElementById('toasts').textContent, fits: r.top >= 0 && r.bottom <= innerHeight, v: state.v, stored: JSON.parse(localStorage.getItem(SAVE_KEY)).v }; }); };
     const first = await load(); await shot(pg, 'oldsave-welcome-360x740.png');
-    ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 1 && /The trades have changed\. Markets now sell spare food, and Blacksmiths work the iron your Mines make\. Guildhalls no longer make gold: they boost the Markets and Blacksmiths beside them, so it may pay to move a Guildhall or add Farms\./.test(first.text)
-      && !/Markets now sell/.test(first.toasts) && first.fits && first.v === 5 && first.stored === 5, 'first load of a version-4 save: the welcome back explains the new jobs in one note, and the save is rewritten as version 5 ' + JSON.stringify(first));
+    ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 1 && /The trades now eat\. Markets, Blacksmiths and Guildhalls share the food your town does not eat/.test(first.text) && /trades beside a Tavern need less food/.test(first.text)
+      && !/trades now eat/.test(first.toasts) && first.fits && first.v === 6 && first.stored === 6, 'first load of a version-4 save: the welcome back explains the new rules in one note, and the save is rewritten as version 6 ' + JSON.stringify(first));
     await pg.evaluate(() => { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); s.last = Date.now() - 3 * 3600 * 1000; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); ui.paused = true; });
     const second = await load();
-    ok(second.open && /Away 3 h/.test(second.text) && !second.notes && !/Markets now sell/.test(second.text + second.toasts), 'the next load shows the usual welcome back without the note ' + JSON.stringify(second.text));
+    ok(second.open && /Away 3 h/.test(second.text) && !second.notes && !/trades now eat/.test(second.text + second.toasts), 'the next load shows the usual welcome back without the note ' + JSON.stringify(second.text));
     ok(!freshNote, 'a fresh game never shows it');
     ok(e5.length === 0, 'old save note: no console errors ' + JSON.stringify(e5));
     await cx.close(); }

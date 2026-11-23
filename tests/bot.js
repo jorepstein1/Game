@@ -89,7 +89,7 @@ function play(seed, opts) {
       { const lv = sim.hallLevel(), key = 'hall' + (lv + 1) + 'affordable'; // when a hall past the Palace can first be paid for (at a check-in)
         if (out.prestiges.length === 0 && lv >= 5 && goal && !out.marks[key] && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks[key] = { min: +(now / 60).toFixed(1) }; }
       let c = candidates();
-      const net = C.foodMade - C.eaten; // the food balance before the Markets sell any: what feeds the town
+      const net = C.foodMade - C.eaten; // the food balance before the trades eat any: what feeds the town
       const hungry = net < 0.1 * C.eaten && !(net > 0 && run().res.food > C.eaten * 600);
       const cramped = C.cap < C.need * 1.05 + 3;
       // Food-bound: the farms could not feed the town if every home were full. Then food comes first, if any is affordable.
@@ -121,17 +121,17 @@ function play(seed, opts) {
         let L = 'gold', eta = 0;
         for (const r in hcost) if (res[r] < hcost[r]) { const w = C.base[r] > 0 ? (hcost[r] - res[r]) / C.base[r] : Infinity; if (w >= eta) { eta = w; L = r; } }
         // What a purchase adds per second of material r: the town's own rules run with the purchase made (on the plot
-        // the bot would pick), staffed as now and with the food store at its reserve, so the gold a Farm brings through
-        // the Markets, the iron a Blacksmith takes from the hall and a Guildhall's neighbours all count. Food is counted
-        // before the Markets sell it (what feeds the town).
-        const S0 = sim.compute({ stocked: true, staff: C.staff }), seenIf = new Map();
+        // the bot would pick), staffed as now, so the gold a Farm brings through
+        // the trades, the iron a Blacksmith takes from the hall and a Guildhall's neighbours all count. Food is counted
+        // before the trades eat it (what feeds the town).
+        const S0 = sim.compute({ staff: C.staff }), seenIf = new Map();
         const whatIf = a => {
           if (seenIf.has(a)) return seenIf.get(a);
           const R = run(); let after = null;
-          if (a.k === 'build') { const key = bestPlot(a.id, plots()); if (key) { R.tiles[key] = { kind: 'building', id: a.id }; after = sim.compute({ stocked: true, staff: C.staff }); delete R.tiles[key]; } }
-          else if (a.k === 'up') { R.levels[a.id]++; after = sim.compute({ stocked: true, staff: C.staff }); R.levels[a.id]--; }
-          else if (a.k === 'research' && a.mult) { R.research[a.id] = 1; after = sim.compute({ stocked: true, staff: C.staff }); delete R.research[a.id]; }
-          else if (a.k === 'rep' && (a.id === 'prod' || a.id === 'food')) { const l = R.repeatables[a.id] || 0; R.repeatables[a.id] = l + 1; after = sim.compute({ stocked: true, staff: C.staff }); if (l) R.repeatables[a.id] = l; else delete R.repeatables[a.id]; }
+          if (a.k === 'build') { const key = bestPlot(a.id, plots()); if (key) { R.tiles[key] = { kind: 'building', id: a.id }; after = sim.compute({ staff: C.staff }); delete R.tiles[key]; } }
+          else if (a.k === 'up') { R.levels[a.id]++; after = sim.compute({ staff: C.staff }); R.levels[a.id]--; }
+          else if (a.k === 'research' && a.mult) { R.research[a.id] = 1; after = sim.compute({ staff: C.staff }); delete R.research[a.id]; }
+          else if (a.k === 'rep' && (a.id === 'prod' || a.id === 'food')) { const l = R.repeatables[a.id] || 0; R.repeatables[a.id] = l + 1; after = sim.compute({ staff: C.staff }); if (l) R.repeatables[a.id] = l; else delete R.repeatables[a.id]; }
           seenIf.set(a, after); return after; };
         const gain = (a, r) => { const after = whatIf(a); if (!after) return 0; return r === 'food' ? after.foodMade - S0.foodMade : after.base[r] - S0.base[r]; };
         // A sensible player takes the best value, not the cheapest: the purchase that pays for itself soonest in what
@@ -206,15 +206,16 @@ function play(seed, opts) {
       farms: lv(t => t.id === 'farm' || t.id === 'mill'), cottages: lv(t => t.id === 'cottage'), other: lv(t => t.kind === 'building' && !['farm', 'mill', 'cottage'].includes(t.id)),
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
       stone: sim.fmt(C.base.stone) + '/s', iron: sim.fmt(C.base.iron) + '/s', stock: Object.keys(run().res).map(r => r + ' ' + sim.fmt(run().res[r])).join(', '), plots: plots().length }; };
-  // The jobs of the buildings (targets B to E): gold by kind, how well the Markets are supplied and the forges run,
+  // The jobs of the buildings (targets B to E): gold by kind, how well the trades are fed and the forges run,
   // the food store against upkeep, iron made, used and held, and how many trades each Guildhall touches.
   const econ = () => { sim.setState(sim.state); const C = sim.calc, R = run(), by = {}; let tot = 0;
     for (const k in C.tiles) { const g = (C.tiles[k].out && C.tiles[k].out.gold) || 0; by[R.tiles[k].id] = (by[R.tiles[k].id] || 0) + g; tot += g; }
     const shares = {}; for (const id in by) if (by[id] > 0) shares[id] = by[id] / tot;
-    const guilds = Object.keys(R.tiles).filter(k => R.tiles[k].id === 'guild').map(k => { const [x, y] = k.split(',').map(Number);
-      return sim.neighbors(x, y).filter(([a, b]) => { const n = R.tiles[a + ',' + b]; return n && (n.id === 'market' || n.id === 'smith'); }).length; });
-    return { shares, gold: C.base.gold, fill: C.fill, run: C.smithRun, markets: sim.count('market'), smiths: sim.count('smith'), store: C.eaten > 0 ? R.res.food / C.eaten : 0, foodMade: C.foodMade, eaten: C.eaten,
-      sold: C.foodSold, wanted: C.foodWanted, ironMade: C.ironMade, ironUsed: C.ironUsed, ironStock: R.res.iron, guilds }; };
+    const touching = (id, ids) => Object.keys(R.tiles).filter(k => R.tiles[k].id === id).map(k => { const [x, y] = k.split(',').map(Number);
+      return sim.neighbors(x, y).filter(([a, b]) => { const n = R.tiles[a + ',' + b]; return n && ids.includes(n.id); }).length; });
+    const guilds = touching('guild', ['market', 'smith']), taverns = touching('tavern', ['market', 'smith', 'guild']);
+    return { shares, gold: C.base.gold, fill: C.supply, run: C.smithRun, trades: sim.count('market') + sim.count('smith') + sim.count('guild'), markets: sim.count('market'), smiths: sim.count('smith'), taverns, store: C.eaten > 0 ? R.res.food / C.eaten : 0, foodMade: C.foodMade, eaten: C.eaten,
+      sold: C.foodUsed, wanted: C.foodWanted, ironMade: C.ironMade, ironUsed: C.ironUsed, ironStock: R.res.iron, guilds }; };
   let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
   // A new hall level, noted the moment it is raised (the town as it stands then, before the rest of that check-in's purchases).
   function noteHall() {
@@ -266,7 +267,7 @@ function play(seed, opts) {
       visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.names = out.names.slice(nm0); visit.abdicated = out.prestiges.length > n0;
       visit.builds = out.kinds.build - k0.build; visit.ups = out.kinds.up - k0.up; visit.other = out.kinds.other - k0.other;
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
-      { const e = econ(); visit.fill = e.fill; visit.run = e.run; visit.markets = e.markets; visit.smiths = e.smiths; visit.store = e.store; visit.ironMade = e.ironMade; visit.ironUsed = e.ironUsed; visit.ironStock = e.ironStock; }
+      { const e = econ(); visit.fill = e.fill; visit.run = e.run; visit.markets = e.markets; visit.trades = e.trades; visit.smiths = e.smiths; visit.store = e.store; visit.ironMade = e.ironMade; visit.ironUsed = e.ironUsed; visit.ironStock = e.ironStock; }
       visit.waits = {}; if (sim.nextHallOpen()) { const hc = sim.upgradeCost(run().tiles[sim.HALL_KEY]); // hours the next hall still waits for each material at today's income
         for (const k in hc) { const need = hc[k] - run().res[k]; visit.waits[k] = need <= 0 ? 0 : sim.calc.base[k] > 0 ? need / sim.calc.base[k] / 3600 : Infinity; } }
       out.visits.push(visit); out.peakGold = Math.max(out.peakGold, visit.goldRate);
@@ -296,7 +297,7 @@ function summary(seed, opts) {
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
     opening: r.opening, felt: r.felt, buildingsAt: Object.fromEntries(['Manor', 'Keep', 'Castle', 'Palace'].filter(n => r.marks[n]).map(n => [n, r.marks[n].buildings])), palaceKinds: r.marks.Palace ? r.marks.Palace.kindsBuilt : null, expansions: [1, 2, 3].map(i => r.marks['exp' + i] ? r.marks['exp' + i].min / 60 : null), palaceLevels: r.marks.Palace ? r.marks.Palace.levels : null,
     econPalace: r.marks.Palace ? r.marks.Palace.econ : null, econ20: r.marks.crowns20 ? r.marks.crowns20.econ : null, foodBuys: r.foodBuys,
-    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving, fill: v.fill, run: v.run, markets: v.markets, smiths: v.smiths, store: v.store, ironMade: v.ironMade, ironUsed: v.ironUsed, ironStock: v.ironStock, waits: v.waits })) };
+    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving, fill: v.fill, run: v.run, markets: v.markets, trades: v.trades, smiths: v.smiths, store: v.store, ironMade: v.ironMade, ironUsed: v.ironUsed, ironStock: v.ironStock, waits: v.waits })) };
 }
 // Runs a list of { seed, opts } in parallel child processes; resolves to their summaries in the same order.
 function runAll(todo, jobs) {
@@ -349,11 +350,11 @@ if (require.main === module) {
       console.log(`  each build/upgrade after the opening: gain to its material median ${Math.round(100 * q(felt.map(f => f.gain), 0.5))}%, 10th pct ${Math.round(100 * q(felt.map(f => f.gain), 0.1))}%; payback median ${q(felt.map(f => f.payback), 0.5).toFixed(1)}h, 10th pct ${q(felt.map(f => f.payback), 0.1).toFixed(1)}h, 90th ${q(felt.map(f => f.payback), 0.9).toFixed(1)}h; under 10%: ${felt.filter(f => f.gain < 0.095).map(f => f.id + (f.k === 'up' ? '^' : '')).join(' ')}`); }
     if (LOG) for (const v of r.visits.filter(v => v.reign === 0)) console.log(`    ${String(v.hour).padStart(6)}h  away ${v.away}h  ${String(v.bought).padStart(2)} bought (${v.builds}b ${v.ups}u ${v.other}o)  hall ${v.hallAfter}  gold ${fmt(v.goldRate)}/s  Crowns ${v.pending}${v.starving ? '  STARVING' : ''}  ${v.names.join(', ')}`);
     const sh = e => e ? Object.entries(e.shares).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + Math.round(100 * v) + '%').join(' ') : '-';
-    if (r.econPalace) { const e = r.econPalace; console.log(`  gold by kind at the Palace: ${sh(e)}; Markets ${e.markets} at ${Math.round(100 * e.fill)}% supplied, Smiths ${e.smiths} running at ${Math.round(100 * e.run)}%; food store ${Math.round(e.store)}s of upkeep; iron made ${fmt(e.ironMade)}/s, forges use ${fmt(e.ironUsed)}/s, stock ${fmt(e.ironStock)}; Guildhalls touch ${e.guilds.join(', ') || '-'} trades`); }
-    if (r.econ20) console.log(`  gold by kind at 20 Crowns on offer: ${sh(r.econ20)}; Markets ${Math.round(100 * r.econ20.fill)}%, Smiths ${Math.round(100 * r.econ20.run)}%; Guildhalls touch ${r.econ20.guilds.join(', ') || '-'}`);
-    { const mid = r.visits.filter(v => v.reign === 0 && v.markets > 0 && (r.palace === null || v.hour <= r.palace + 0.1)), sm = r.visits.filter(v => v.reign === 0 && v.smiths > 0), avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+    if (r.econPalace) { const e = r.econPalace; console.log(`  gold by kind at the Palace: ${sh(e)}; trades ${Math.round(100 * e.fill)}% fed (Markets ${e.markets}, Smiths ${e.smiths}), Smiths running at ${Math.round(100 * e.run)}%; food store ${Math.round(e.store)}s of upkeep; iron made ${fmt(e.ironMade)}/s, forges use ${fmt(e.ironUsed)}/s, stock ${fmt(e.ironStock)}; Guildhalls touch ${e.guilds.join(', ') || '-'} trades, Taverns ${e.taverns.join(', ') || '-'}`); }
+    if (r.econ20) console.log(`  gold by kind at 20 Crowns on offer: ${sh(r.econ20)}; trades ${Math.round(100 * r.econ20.fill)}% fed, Smiths ${Math.round(100 * r.econ20.run)}%; Guildhalls touch ${r.econ20.guilds.join(', ') || '-'}, Taverns ${r.econ20.taverns.join(', ') || '-'}`);
+    { const mid = r.visits.filter(v => v.reign === 0 && v.trades > 0 && (r.palace === null || v.hour <= r.palace + 0.1)), sm = r.visits.filter(v => v.reign === 0 && v.smiths > 0), avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
       const iw = r.visits.filter(v => v.reign === 0 && v.waits && v.waits.iron > 0 && v.waits.iron >= Math.max(...Object.values(v.waits).map(x => x === null ? Infinity : x)));
-      console.log(`  Markets supplied (check-ins with a Market, to the Palace): mean ${mid.length ? Math.round(100 * avg(mid.map(v => v.fill))) + '%' : '-'}, range ${mid.length ? Math.round(100 * Math.min(...mid.map(v => v.fill))) + '-' + Math.round(100 * Math.max(...mid.map(v => v.fill))) + '%' : '-'}; forges below full run at ${sm.filter(v => v.run < 0.999).length} of ${sm.length} check-ins; hall waiting longest on iron at ${iw.length} check-ins; food things bought for gold ${r.foodBuys.gold}, for hunger ${r.foodBuys.hunger}`); }
+      console.log(`  Trades fed (check-ins with a trade, to the Palace): mean ${mid.length ? Math.round(100 * avg(mid.map(v => v.fill))) + '%' : '-'}, range ${mid.length ? Math.round(100 * Math.min(...mid.map(v => v.fill))) + '-' + Math.round(100 * Math.max(...mid.map(v => v.fill))) + '%' : '-'}; forges below full run at ${sm.filter(v => v.run < 0.999).length} of ${sm.length} check-ins; hall waiting longest on iron at ${iw.length} check-ins; food things bought for gold ${r.foodBuys.gold}, for hunger ${r.foodBuys.hunger}`); }
     if (r.reigns.length) console.log('  reigns (hours, hall level, Crowns): ' + r.reigns.map(x => `${x.hours.toFixed(1)} L${x.hall} +${x.crowns}`).join(', '));
     console.log(`  after ${HOURS}h: ${r.crowns} Crowns held, ${r.pending} on offer, ${fmt(r.goldRate)} gold/s; starving ${r.starvedHours.toFixed(1)}h\n`);
   }
