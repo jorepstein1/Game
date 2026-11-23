@@ -89,7 +89,7 @@ function play(seed, opts) {
       { const lv = sim.hallLevel(), key = 'hall' + (lv + 1) + 'affordable'; // when a hall past the Palace can first be paid for (at a check-in)
         if (out.prestiges.length === 0 && lv >= 5 && goal && !out.marks[key] && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks[key] = { min: +(now / 60).toFixed(1) }; }
       let c = candidates();
-      const net = C.foodMade - C.eaten; // the food balance before the Markets sell any: what feeds the town
+      const net = C.foodMade - C.eaten; // the food balance before the trades eat any: what feeds the town
       const hungry = net < 0.1 * C.eaten && !(net > 0 && run().res.food > C.eaten * 600);
       const cramped = C.cap < C.need * 1.05 + 3;
       // Food-bound: the farms could not feed the town if every home were full. Then food comes first, if any is affordable.
@@ -206,7 +206,7 @@ function play(seed, opts) {
       farms: lv(t => t.id === 'farm' || t.id === 'mill'), cottages: lv(t => t.id === 'cottage'), other: lv(t => t.kind === 'building' && !['farm', 'mill', 'cottage'].includes(t.id)),
       pending: sim.pendingCrowns(), repeatables: JSON.stringify(run().repeatables),
       stone: sim.fmt(C.base.stone) + '/s', iron: sim.fmt(C.base.iron) + '/s', stock: Object.keys(run().res).map(r => r + ' ' + sim.fmt(run().res[r])).join(', '), plots: plots().length }; };
-  // The jobs of the buildings (targets B to E): gold by kind, how well the Markets are supplied and the forges run,
+  // The jobs of the buildings (targets B to E): gold by kind, how well the trades are fed and the forges run,
   // the food store against upkeep, iron made, used and held, and how many trades each Guildhall touches.
   const econ = () => { sim.setState(sim.state); const C = sim.calc, R = run(), by = {}; let tot = 0;
     for (const k in C.tiles) { const g = (C.tiles[k].out && C.tiles[k].out.gold) || 0; by[R.tiles[k].id] = (by[R.tiles[k].id] || 0) + g; tot += g; }

@@ -409,7 +409,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await settle(p3); await p3.tap('.tile[data-id="6,5"]'); await settle(p3);
   up = await reach('#buildbar [data-act="upkind"]'); const dem = await reach('#buildbar [data-act="demolish"]');
   const info = await p3.evaluate(() => document.getElementById('bbinfo').textContent.replace(/\s+/g, ' ').trim());
-  ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /output ×3/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
+  ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
   await p3.tap('#buildbar [data-act="upkind"]'); await settle(p3);
   ok(await p3.evaluate(() => kindLevel('smith')) === 5, 'tapping it in the bar upgrades the Blacksmiths');
   await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage' }; state.run.levels.cottage = 2; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
@@ -645,7 +645,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ok(['market', 'smith', 'guild', 'farm', 'tavern'].every(id => got[id].jobFits && got[id].docW <= W) && got.cardsFit && got.docW <= W, `${W}px: the job lines and build cards fit, no sideways scroll`);
     ok(got.tips.length === 2 && /Trades eat [\d.]+ of [\d.]+ spare food\/s \(\d+% fed\)/.test(got.tips[0]) && /Forges use [\d.]+ iron\/s \(running at \d+%\)/.test(got.tips[1]) && /Iron income: \+[\d.]+\/s/.test(got.hall),
       `${W}px: the food and iron chips say what the trades eat and the forges use; the hall panel gives the iron income when the next hall needs iron ` + JSON.stringify([got.tips, got.hall]));
-    ok(/Makes no gold; boosts/.test(got.cards[3]) && /best rate/.test(got.cards[2]) && /need less food/.test(got.cards[4]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
+    ok(/Eats food and boosts the Markets/.test(got.cards[3]) && /best rate/.test(got.cards[2]) && /need less food/.test(got.cards[4]), `${W}px: build cards state the job ` + JSON.stringify(got.cards));
     ok(e3.length === 0, `${W}px trades: no console errors ` + JSON.stringify(e3));
     await cx.close();
   }
@@ -675,7 +675,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const all = ['market', 'smith', 'guild', 'lone', 'idle'];
     ok(all.every(k => !got[k].cut.length && got[k].jobWhole && got[k].inView && got[k].docW <= w) && all.every(k => /needs \d+ more/.test(got[k].eff)),
       `${w}x${h}: the Market, Blacksmith and Guildhall Upgrade buttons and job lines show every line whole, no "…", the villagers needed included ` + JSON.stringify(all.map(k => [k, got[k].eff, got[k].cut])));
-    ok(/^output ×3/.test(got.market.eff) && /^output ×3/.test(got.smith.eff) && /^boost \+100% → \+141%/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
+    ok(/^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.market.eff) && /^(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(got.smith.eff) && /^boost \+100% → \+141%/.test(got.guild.eff) && /Boosting 1 Market and 1 Blacksmith/.test(got.guild.stat),
       `${w}x${h}: a Guildhall beside a trade advertises its boost ` + JSON.stringify([got.guild.eff, got.guild.stat]));
     ok(/^boost \+100% → \+141%/.test(got.lone.eff) && /Boosting nothing: build Markets or Blacksmiths beside it/.test(got.lone.stat),
       `${w}x${h}: a Guildhall beside nothing, while another touches a Market: the upgrade keeps its boost figure, the panel says this one boosts nothing ` + JSON.stringify([got.lone.eff, got.lone.stat]));

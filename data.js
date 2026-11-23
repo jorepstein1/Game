@@ -69,7 +69,8 @@ const TRADE_NEED_GROWTH = 2;      // a trade's food need per kind level (its gol
 const TRADE_FLOOR = 0.1;         // share of its full rate a trade earns with no spare food
 const TAVERN_SAVING = 0.5;       // a Tavern beside a trade divides its food need by 1 + this × √(Tavern level): a third less at level 1, half at 4
 const SMITH_SHARE = 0.6;         // the most of the town's iron income all forges together may use
-// food: per second at full supply, per gold of the kind's level-1 rate (Market, Blacksmith) or per kind level (Guildhall).
+// food: per second at level 1 and full staff, per gold of the kind's level-1 rate (Market, Blacksmith) or for the building
+// (Guildhall); it grows TRADE_NEED_GROWTH times per kind level, and a forge eats only for the iron it works.
 // iron: the same for iron; with SMITH_SHARE it ties the forges to the Mines.
 const TRADES = { market: { food: 25 }, smith: { food: 1, iron: 0.11 }, guild: { food: 20 } }; // a forge already pays in iron, so it eats less per gold
 // Upgrades are by kind: one upgrade raises every building of that kind, standing or still to be built. Prices
@@ -84,7 +85,7 @@ const TRADES = { market: { food: 25 }, smith: { food: 1, iron: 0.11 }, guild: { 
 // REFUND_SHARE of what building that copy again would cost, so building and demolishing always loses money.
 // g, late, u (upgradeGrowth) and lift are set per kind in BUILDINGS below; for example the first Lumber Camp
 // upgrade costs 20 gold × 10 × 18 - 20 = 3.58K gold, the first Farm upgrade 10 gold × (8 - 1) = 70 gold.
-const LINEAR_UPGRADE_GROWTH = 6; // u for the Cottage, which gains a flat amount per level (the Farm, also flat, uses 8: its food sells, so its levels are dearer)
+const LINEAR_UPGRADE_GROWTH = 6; // u for the Cottage, which gains a flat amount per level (the Farm, also flat, uses 8: its food feeds the trades, so its levels are dearer)
 const OUT_GROWTH = 3;            // output multiplier per kind level (buildings that are not linear)
 const MAX_LEVEL = 60;            // keeps every cost, refund and rate a finite number (level 60 costs about 1e155)
 const REFUND_SHARE = 0.75;       // share of the last copy's price returned on demolition
@@ -136,7 +137,7 @@ const BUILDINGS = {
   church: { name: 'Church', icon: '⛪', hall: 3, cost: { gold: 5e5, wood: 1e5, iron: 1e4 }, growth: 2, upgradeGrowth: 4, work: 2, glob: 0.05,
     desc: '+5% to all production per level, while fully staffed.' },
   guild: { name: 'Guildhall', icon: '🏦', hall: 4, cost: { gold: 6e5, wood: 1.5e5, iron: 1e4 }, work: 5, growth: 2, upgradeGrowth: 4,
-    desc: 'Makes no gold; boosts the Markets and Blacksmiths beside it.' },
+    desc: 'Eats food and boosts the Markets and Blacksmiths beside it.' },
 };
 const BUILD_ORDER = ['cottage', 'lumber', 'farm', 'quarry', 'market', 'mill', 'tavern', 'mine', 'smith', 'church', 'guild'];
 

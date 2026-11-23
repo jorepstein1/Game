@@ -680,6 +680,27 @@ test('the trades never starve a town: random towns, long absences, food income n
   }
 });
 
+test('an empty store with the trades short of food is not starving: the town grows to its housing (rounding regression)', sim => {
+  for (let n = 0; n < 10; n++) {
+    const free = field(sim), run = sim.state.run; run.tiles[sim.HALL_KEY].level = 2; run.res = { gold: 0, food: 0, wood: 0, stone: 0, iron: 0 };
+    const farms = 8 + (n % 5); for (let i = 0; i < farms; i++) run.tiles[free[i]] = { kind: 'building', id: 'farm' };
+    run.tiles[free[20]] = { kind: 'building', id: 'market' }; for (let i = 0; i < 7; i++) run.tiles[free[30 + i]] = { kind: 'building', id: 'cottage' };
+    run.levels.cottage = 1 + (n % 3); sim.setState(sim.state); run.pop = 5 + n; sim.setState(sim.state);
+    for (let i = 0; i < 3600; i++) { sim.stepCity(1); assert.ok(!run.starving, 'town ' + n + ' starving at step ' + i + ': food ' + sim.calc.rates.food); }
+    assert.ok(sim.calc.foodMade < sim.calc.eaten || Math.abs(sim.calc.base.food) < 1e-9 || sim.calc.supply === 1, 'income is exactly nil while the trades are short');
+    assert.ok(run.pop >= Math.min(sim.calc.cap, sim.sustainablePop(1, sim.calc.cap, sim.calc.foodMade)) - 1, 'town ' + n + ' grew: ' + run.pop + ' of ' + sim.calc.cap);
+  }
+});
+
+test('a Blacksmith eats only for the iron it works: an idle forge costs the other trades nothing', sim => {
+  trades(sim, [['0,0', 'market'], ['2,0', 'farm'], ['4,0', 'farm']]);
+  const g0 = sim.calc.base.gold, after = sim.afterBuild('smith');
+  assert.strictEqual(after.smithRun, 0); near(after.base.gold, g0, 1e-9, 'a Blacksmith with no Mine changes no gold'); near(after.foodWanted, sim.calc.foodWanted, 1e-9, 'and eats nothing');
+  sim.state.run.tiles['6,0'] = { kind: 'building', id: 'smith' }; sim.state.run.tiles['8,0'] = { kind: 'building', id: 'mine' }; restaff(sim);
+  const c = sim.calc; assert.ok(c.smithRun > 0 && c.smithRun < 1);
+  near(c.tiles['6,0'].need, sim.TRADES.smith.food * sim.BUILDINGS.smith.out.gold * c.mult * c.smithRun, 1e-9, 'need × run');
+});
+
 test('the trades earn the same in a town left open as in one away for the same time (no rest bonus)', sim => {
   const make = () => { trades(sim, [['0,0', 'market'], ['2,0', 'farm'], ['4,0', 'farm'], ['0,2', 'smith'], ['2,2', 'mine'], ['1,1', 'tavern'], ['4,2', 'guild']], 0);
     sim.state.run.away = 0; sim.state.run.gold = 0; sim.setState(sim.state); };

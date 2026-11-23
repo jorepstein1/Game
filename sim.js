@@ -393,13 +393,15 @@ function compute(opts) {
   }
   const eaten = upkeep(run.pop), foodMade = base.food, ironMade = base.iron;
   // Food: the trades share what is left after upkeep, so they never starve the town or touch the store.
-  const surplus = Math.max(0, foodMade - eaten);
+  // Iron first: forges take at most SMITH_SHARE of the iron made, never the stock, so the stock never falls because of
+  // them. A forge eats only for the iron it works, so an idle one costs the other trades nothing.
   let foodWanted = 0, ironWanted = 0;
-  for (const o of trades) { foodWanted += o.food; ironWanted += o.iron; }
-  const supply = foodWanted > 0 ? Math.min(1, surplus / foodWanted) : 0, foodUsed = foodWanted * supply;
-  const fed = TRADE_FLOOR + (1 - TRADE_FLOOR) * supply;
-  // Iron: forges take at most SMITH_SHARE of the iron made, never the stock, so the stock never falls because of them.
+  for (const o of trades) ironWanted += o.iron;
   const smithRun = ironWanted > 0 ? Math.min(1, SMITH_SHARE * Math.max(0, ironMade) / ironWanted) : 0;
+  for (const o of trades) { if (o.id === 'smith') { o.food *= smithRun; tiles[o.k].need = o.food; } foodWanted += o.food; }
+  // Taken as a min, not as wanted × ratio, so that trades eating all the spare food leave the income at exactly 0.
+  const net = foodMade - eaten, surplus = Math.max(0, net), foodUsed = Math.min(surplus, foodWanted);
+  const supply = foodWanted > 0 ? foodUsed / foodWanted : 0, fed = TRADE_FLOOR + (1 - TRADE_FLOOR) * supply;
   let ironUsed = 0, ironUsedLive = 0;
   for (const o of trades) {
     const def = BUILDINGS[o.id]; tiles[o.k].supply = supply;
@@ -410,7 +412,7 @@ function compute(opts) {
     if (o.id === 'smith') { tiles[o.k].run = smithRun; ironUsed += o.iron * smithRun; ironUsedLive += o.iron * smithRun * (o.live / o.m || 0); }
   }
   // Starving towns have no spare food, and their mines and forges slow alike, so the live run is the same.
-  base.food -= eaten + foodUsed; rates.food -= eaten + foodUsed;
+  base.food = rates.food = net - foodUsed; // the trades never push it below what the villagers leave
   base.iron -= ironUsed; rates.iron -= ironUsedLive;
   return { cap, rawCap, need, staff, mult, base, rates, eaten, tiles, foodMade, surplus, foodWanted, foodUsed, supply, fed, ironMade, ironWanted, ironUsed, smithRun };
 }
@@ -429,7 +431,7 @@ function stepCity(dt) {
   calc = compute();
   for (const r in calc.rates) run.res[r] = Math.max(0, run.res[r] + calc.rates[r] * dt);
   earnGold(Math.max(0, calc.rates.gold * dt));
-  run.starving = run.res.food <= 0 && calc.rates.food < 0;
+  run.starving = run.res.food <= 0 && calc.foodMade < calc.eaten; // only the villagers' own upkeep can starve a town, never the trades
   // Population follows food as well as housing, so a hungry town recovers on its own:
   // villagers leave while it starves (down to what the farms can feed), and new ones only move in
   // while the food income, or a healthy stockpile, can carry them.
