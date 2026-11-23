@@ -68,7 +68,7 @@ const costHTML = (cost, plain) => '<span class="cost">' + Object.keys(cost).map(
 const tileAt = key => state.run.tiles[key];
 // What a purchase would add each second at today's multipliers, for its card: "+4.0 gold/s".
 // A trade's card also says what it uses up: "uses 1.2 iron/s".
-const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0), us = Object.keys(adds).filter(r => adds[r] < 0 && r !== 'gold');
+const addsHTML = adds => { const ks = Object.keys(adds).filter(r => adds[r] > 0), us = Object.keys(adds).filter(r => adds[r] < -1e-9); // a trade that would leave the others hungrier can cost gold
   return (ks.length ? '<span class="adds">adds ' + ks.map(r => `<b>${fmtRate(adds[r])}</b> ${RESOURCES[r].icon}`).join(' ') + '</span>' : '')
     + (us.length ? '<span class="uses">uses ' + us.map(r => `${fmtRate(-adds[r]).slice(1)} ${RESOURCES[r].icon}`).join(' ') + '</span>' : ''); };
 // The staffing the town would have with `work` more jobs to fill: a new workplace thins every other one when housing is short.
@@ -80,10 +80,17 @@ const anyTrade = () => count('market') + count('smith') + count('guild') > 0;
 function diffAdds(after) { const before = compute({ staff: calc.staff }), a = {};
   for (const r in before.base) { const d = after.base[r] - before.base[r]; if (Math.abs(d) > 1e-9) a[r] = d; } return a; }
 function buildAdds(id) { const d = BUILDINGS[id], a = {}, L = kindLevel(id), st = d.work ? staffAfter(d.work * L) : 1;
+  if (id === 'tavern') return anyTrade() ? tavernBest() : a;
   if (TRADES[id] || (TRADE_LINKED.includes(id) && anyTrade())) { const o = diffAdds(afterBuild(id)); for (const r in o) o[r] *= st; return o; }
   if (d.glob) for (const r in calc.base) { if (calc.base[r] > 0) a[r] = calc.base[r] * d.glob * L; }
   else for (const r in d.out || {}) a[r] = d.out[r] * levelMultAt(id, L) * calc.mult * researchMult(id) * (d.out.food ? repBonus('food') : 1) * st;
   return a; }
+// A Tavern does something only beside trades: its card shows what it would add on the best open plot beside one.
+function tavernBest() { let best = {}; const r = mapRadius(), run = state.run;
+  for (let x = MAP_MID - r; x <= MAP_MID + r; x++) for (let y = MAP_MID - r; y <= MAP_MID + r; y++) {
+    const k = x + ',' + y; if (run.tiles[k] || run.terrain[x][y] !== 'plain' || !givesTo('tavern', x, y)) continue;
+    const o = diffAdds(afterBuild('tavern', k)); if ((o.gold || 0) > (best.gold || 0)) best = o; }
+  return best; }
 // Names of a kind in the plural, for "Upgrade all Farms", "Quarries", "Churches".
 const plural = id => { const n = BUILDINGS[id].name; return /y$/.test(n) ? n.slice(0, -1) + 'ies' : /(ch|sh|s|x)$/.test(n) ? n + 'es' : n + 's'; };
 const tileLevel = t => t.kind === 'hall' ? t.level : kindLevel(t.id);
@@ -97,11 +104,11 @@ function kindUpgradeEffect(id) {
 function kindUpgradeText(id, fx) {
   const d = BUILDINGS[id], parts = [];
   if (d.glob) parts.push('all production ' + pct(d.glob * count(id)));
+  else if (TRADES[id] && fx.starved && !(id === 'guild' && guildsIdle())) parts.push('gold ' + fmtRate(fx.gold)); // short of food: the trades' true gain, which can be a loss
   else if (id === 'tavern') { const L = kindLevel(id);
     parts.push(tavernsIdle() ? 'no effect yet: no Tavern is beside a trade' : 'food saving ' + tavernCut(L) + ' → ' + tavernCut(L + 1)); }
   else if (!d.out) { const b = BUILDINGS.market.adj.building[id] || 0, L = kindLevel(id); // the Guildhall
     parts.push(guildsIdle() ? 'no effect yet: no Guildhall is beside a Market or Blacksmith' : 'boost ' + pct(b * Math.sqrt(L)) + ' → ' + pct(b * Math.sqrt(L + 1))); }
-  else if (TRADES[id] && fx.starved) parts.push('gold ' + fmtRate(fx.gold)); // short of food, the trades' true gain, which can be a loss
   else if (!d.linear) parts.push('output ×' + OUT_GROWTH);
   else for (const r in fx.adds) parts.push(fmtRate(fx.adds[r]) + ' ' + RESOURCES[r].icon);
   if (TRADES[id] && !(id === 'guild' && guildsIdle())) parts.push('food ×' + TRADE_NEED_GROWTH);
@@ -248,7 +255,7 @@ function renderMap() {
     } else if (tr === 'plain' && ui.sel.build) {
       cls += ' can';
       const a = adjBonus(ui.sel.build, x, y), gv = givesTo(ui.sel.build, x, y), fedBy = !!TRADES[ui.sel.build] && neighbors(x, y).some(([p, q]) => { const n = run.tiles[p + ',' + q]; return n && n.kind === 'building' && n.id === 'tavern'; });
-      if (a > 0) inner = `<span class="pv">${pct(a)}</span>`; else if (gv) inner = `<span class="pv">▲${gv}</span>`; else if (fedBy) inner = `<span class="pv">−${sprite('food', 'needs less food: a Tavern is beside it')}</span>`;
+      if (a > 0) inner = `<span class="pv">${pct(a)}</span>`; else if (gv) inner = `<span class="pv">▲${gv}</span>`; if (fedBy) inner += `<span class="fd">▼${sprite('food', 'needs less food: a Tavern is beside it')}</span>`;
     }
     if (ui.sel.tile === k) cls += ' sel';
     if (ui.popKey === k) cls += ' pop';
@@ -313,8 +320,8 @@ function renderInspector() {
       if (d.house) h += `<p class="stat">${sprite('cottage')} Houses <b>${fmt(kind.housing(t))}</b></p>`;
       if (d.out) h += '<p class="stat">Making ' + Object.keys(d.out).map(r => `<b>${fmtRate(d.out[r] * info.mult)} ${RESOURCES[r].icon}</b>`).join(' ') + '</p>';
       if (d.glob) h += `<p class="stat">All production <b>${pct(d.glob * kindLevel(t.id) * calc.staff)}</b></p>`;
-      if (TRADES[t.id]) h += `<p class="stat">Fed: <b>${pctOf(info.supply)}</b>${info.tavern ? ` · ${pctOf(info.tavern)} less food (Tavern)` : ''}<span class="wide"> · ${tradeLine()}. ${tradeNote()}</span></p>`;
-      if (t.id === 'smith') h += `<p class="stat">Running at <b>${pctOf(info.run)}</b><span class="wide"> · ${forgeLine()}.${calc.smithRun < 0.995 ? ' More Mines would run them harder.' : ''}</span></p>`;
+      if (TRADES[t.id]) h += `<p class="stat">Fed: <b>${pctOf(info.supply)}</b>${info.tavern ? ` · <span class="nw">${pctOf(info.tavern)} less food (Tavern)</span>` : ''}<span class="wide"> · ${tradeLine()}. ${tradeNote()}</span></p>`;
+      if (t.id === 'smith') h += `<p class="stat"><span class="nw">Running at <b>${pctOf(info.run)}</b></span><span class="wide"> · ${forgeLine()}.${calc.smithRun < 0.995 ? ' More Mines would run them harder.' : ''}</span></p>`;
       if (t.id === 'tavern') h += `<p class="stat">${tavernLine(k)}</p>`;
       if (t.id === 'guild') h += `<p class="stat">${guildLine(k)}</p>`;
       if (d.adj) h += `<p class="stat">Adjacency<span class="wide"> bonus</span>: <b>${pct(info.adj)}</b></p>`;
