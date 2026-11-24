@@ -30,7 +30,8 @@
 // once:N = the first time only; cycle:N:M = at N Crowns until minute M, then build up; pct:P = when the Crown
 // multiplier would rise by P percent. Taps (option taps): hand collections per second while the game is open.
 //
-// It reports, per check-in, how many purchases it made (builds, kind upgrades, other), and the payback time of
+// It reports, per check-in, how many purchases it made (builds, kind upgrades, other, and how many of them were
+// charters: research above the Village Hall, which the purchases-per-check-in targets leave out), and the payback time of
 // what it bought: the time the town needs to earn the price divided by the share of gold income the purchase adds, as the
 // spend-weighted median per hall level.
 const { loadSim } = require('./harness');
@@ -52,7 +53,7 @@ function play(seed, opts) {
   const s = sim.newState(0); s.run = sim.newRun(seed, opts && opts.crowns); // with Crowns held, the head start a new kingdom gets
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], foodBuys: { hunger: 0, gold: 0 }, buys: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], foodBuys: { hunger: 0, gold: 0 }, buys: 0, charters: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -184,7 +185,8 @@ function play(seed, opts) {
       out.kinds[pick.k === 'build' ? 'build' : pick.k === 'up' ? 'up' : 'other']++;
       out.names.push((pick.k === 'build' ? B[pick.id].name : pick.k === 'up' ? B[pick.id].name + ' L' + (sim.kindLevel(pick.id) + 1) : pick.k === 'hall' ? sim.hallName(sim.hallLevel() + 1) : pick.k === 'research' ? 'research ' + pick.id : pick.k === 'rep' ? pick.id + ' ' + (sim.repLevel(pick.id) + 1) : pick.k === 'expand' ? 'expansion ' + (run().exp + 1) : pick.k));
       if (pick.k === 'research' || pick.k === 'expand' || pick.k === 'hall' || (pick.k === 'build' && sim.count(pick.id) === 0)) out.fresh++;
-      out.buys++; const what = pick.k === 'build' ? pick.id : pick.k === 'research' ? 'research' : pick.k === 'hall' ? 'hall' + (sim.hallLevel() + 1) : null;
+      out.buys++; if (pick.k === 'research' && sim.RESEARCH.find(r => r.id === pick.id).hall >= 2) out.charters++; // a charter: research above the Village Hall
+      const what = pick.k === 'build' ? pick.id : pick.k === 'research' ? 'research' : pick.k === 'hall' ? 'hall' + (sim.hallLevel() + 1) : null;
       if (what && !seen[what]) { seen[what] = 1; out.firsts.push({ what, t: now < 3600 ? Math.round(now) + 's' : (now / 3600).toFixed(1) + 'h' }); }
       // Payback: the time the town needs to earn the price, divided by the share of gold income the purchase adds.
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
@@ -262,9 +264,9 @@ function play(seed, opts) {
         for (const k in hc) { const n = r.gains[k] ? hc[k] / r.gains[k] : Infinity; if (n > visit.hallShare) { visit.hallShare = n; visit.limit = k; } } }
       if (run().starving) out.starve += r.credited;
       buying = !opts.buyEvery || i % opts.buyEvery === opts.buyEvery - 1; // with five check-ins a day and buyEvery 5: the one after the night
-      const b0 = out.buys, n0 = out.prestiges.length, f0 = out.fresh, k0 = Object.assign({}, out.kinds), nm0 = out.names.length; liveUntil(t + VISIT * 60);
+      const b0 = out.buys, c0 = out.charters, n0 = out.prestiges.length, f0 = out.fresh, k0 = Object.assign({}, out.kinds), nm0 = out.names.length; liveUntil(t + VISIT * 60);
       if (out.prestiges.length > n0) { buying = true; liveUntil(runStart + SESSION * 60); } // having abdicated, the player stays to found the new town, as at the very start
-      visit.bought = out.buys - b0; visit.fresh = out.fresh - f0; visit.names = out.names.slice(nm0); visit.abdicated = out.prestiges.length > n0;
+      visit.bought = out.buys - b0; visit.charters = out.charters - c0; visit.fresh = out.fresh - f0; visit.names = out.names.slice(nm0); visit.abdicated = out.prestiges.length > n0;
       visit.builds = out.kinds.build - k0.build; visit.ups = out.kinds.up - k0.up; visit.other = out.kinds.other - k0.other;
       sim.setState(sim.state); visit.goldRate = sim.calc.base.gold; visit.rates = Object.assign({}, sim.calc.base); visit.runGold = run().gold; visit.pending = sim.pendingCrowns(); visit.crowns = sim.state.meta.crowns; visit.hallAfter = sim.hallLevel();
       { const e = econ(); visit.fill = e.fill; visit.run = e.run; visit.markets = e.markets; visit.trades = e.trades; visit.smiths = e.smiths; visit.store = e.store; visit.ironMade = e.ironMade; visit.ironUsed = e.ironUsed; visit.ironStock = e.ironStock; }
@@ -297,7 +299,7 @@ function summary(seed, opts) {
     payback: [1, 2, 3, 4, 5].map(h => payback(r, h)), firsts: r.firsts,
     opening: r.opening, felt: r.felt, buildingsAt: Object.fromEntries(['Manor', 'Keep', 'Castle', 'Palace'].filter(n => r.marks[n]).map(n => [n, r.marks[n].buildings])), palaceKinds: r.marks.Palace ? r.marks.Palace.kindsBuilt : null, expansions: [1, 2, 3].map(i => r.marks['exp' + i] ? r.marks['exp' + i].min / 60 : null), palaceLevels: r.marks.Palace ? r.marks.Palace.levels : null,
     econPalace: r.marks.Palace ? r.marks.Palace.econ : null, econ20: r.marks.crowns20 ? r.marks.crowns20.econ : null, foodBuys: r.foodBuys,
-    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving, fill: v.fill, run: v.run, markets: v.markets, trades: v.trades, smiths: v.smiths, store: v.store, ironMade: v.ironMade, ironUsed: v.ironUsed, ironStock: v.ironStock, waits: v.waits })) };
+    visits: r.visits.map(v => ({ hour: v.hour, away: v.away, credited: v.credited, hall: v.hall, hallAfter: v.hallAfter, reign: v.reign, bought: v.bought, charters: v.charters, builds: v.builds, ups: v.ups, other: v.other, names: v.names, abdicated: v.abdicated, hallShare: v.hallShare, limit: v.limit, goldRate: v.goldRate, rates: v.rates, runGold: v.runGold, pending: v.pending, starving: v.starving, fill: v.fill, run: v.run, markets: v.markets, trades: v.trades, smiths: v.smiths, store: v.store, ironMade: v.ironMade, ironUsed: v.ironUsed, ironStock: v.ironStock, waits: v.waits })) };
 }
 // Runs a list of { seed, opts } in parallel child processes; resolves to their summaries in the same order.
 function runAll(todo, jobs) {
