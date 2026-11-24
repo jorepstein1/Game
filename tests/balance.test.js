@@ -7,6 +7,8 @@
 //     and the size of the town when the Palace is raised (counted at that moment, before the rest of the check-in), nobody starving;
 //   - a week abdicating at 20 Crowns at two, five and 49 check-ins a day and with the game never closed: what
 //     checking in more often (or never leaving) is worth;
+//   - two weeks at five check-ins a day abdicating at 20 Crowns: how long later reigns last (they may buy more per
+//     check-in as Crowns raise income, but must not become very fast);
 //   - a player who taps whenever the button shows, and one who buys at one check-in a day only and rests through the others;
 //   - reigns started with 30 and with 75 Crowns held (the Royal and the Imperial Palace open): when that hall is
 //     affordable against 20 Crowns on offer.
@@ -16,9 +18,12 @@
 const assert = require('assert');
 const { runAll, median } = require('./bot');
 const MAPS = [11, 22, 33, 44, 55, 66];
+const LATER_REIGN_HOURS = 24; // a later reign (or its last hall) in under a day would be too fast: Jordan, 24 Nov 2026 (target)
+const LATER_REIGN_FLOOR = 16;  // under this a reign fails the run (the pacing doc's floor)
 const jobs = [];
 for (const seed of MAPS) jobs.push({ kind: 'first', seed, opts: { hours: 72, checkins: 5 } });
 for (const checkins of [2, 5, 49, 0]) for (const seed of MAPS) jobs.push({ kind: 'week', seed, checkins, opts: { hours: 168, checkins, policy: 'crowns:20', tick: checkins ? 0.5 : 5 } });
+for (const seed of MAPS) jobs.push({ kind: 'fortnight', seed, opts: { hours: 336, checkins: 5, policy: 'crowns:20' } }); // later reigns: do they keep shrinking as Crowns pile up?
 for (const seed of [11, 33]) jobs.push({ kind: 'onebuy', seed, opts: { hours: 168, checkins: 5, policy: 'crowns:20', buyEvery: 5 } });
 for (const seed of MAPS) for (const taps of [0, 3]) jobs.push({ kind: 'taps', seed, taps, opts: { hours: 24, checkins: 5, taps } });
 for (const seed of [11, 33]) jobs.push({ kind: 'simple', seed, opts: { hours: 72, checkins: 5, buyer: 'simple' } });
@@ -112,16 +117,28 @@ runAll(jobs).then(out => {
   check('two check-ins a day end the week with at least 75% of the Crowns of five a day (mean of six maps)', () => assert.ok(wk(2) >= 0.75 * five, `${Math.round(100 * wk(2) / five)}%`));
   check('49 check-ins a day end the week with at most 115% of the Crowns of five a day', () => assert.ok(wk(49) <= 1.15 * five, `${Math.round(100 * wk(49) / five)}%`));
   check('a game that is never closed ends the week with at most 105% of the Crowns of five a day', () => assert.ok(wk(0) <= 1.05 * five, `${Math.round(100 * wk(0) / five)}%`));
-  // Purchases per check-in in later reigns: the week at five check-ins a day, reigns 2 to 5, every map pooled, check-ins
-  // with an abdication left out and charters not counted. Crowns raise income while prices stay put, so a later reign buys more.
-  { const per = [1, 2, 3, 4].map(reign => week(5).flatMap(r => r.visits.filter(v => v.reign === reign && !v.abdicated)).map(counted));
-    console.log('     purchases per check-in by reign, a week at five a day abdicating at 20 Crowns, charters not counted: ' +
-      [bought].concat(per).map((b, i) => `reign ${i + 1} ${b.length ? 'median ' + median(b) + ', most ' + Math.max(...b) + ' (' + b.length + ' check-ins)' : 'not reached'}`).join('; ') + ' (reign 1 from the first-reign runs)');
-    const reached = per.map((b, i) => [i + 2, b]).filter(([, b]) => b.length), line = f => reached.map(([n, b]) => `reign ${n}: ${f(b)}`).join(', ');
-    gap('target: later reigns (2 to 5) keep a check-in to a few purchases (median at most 5 in every reign, charters not counted)', () =>
-      assert.ok(reached.length && reached.every(([, b]) => median(b) <= 5), 'median ' + line(median)));
-    gap('target: no check-in in a later reign (2 to 5) has more than 8 purchases (charters not counted)', () =>
-      assert.ok(reached.length && reached.every(([, b]) => Math.max(...b) <= 8), 'most ' + line(b => Math.max(...b) + ' (over 8: ' + b.filter(x => x > 8).length + ' of ' + b.length + ')'))); }
+  // Later reigns: a check-in may buy more as Crowns raise income (purchases per check-in are printed, not held to a
+  // target), but a reign must not become very fast. Two weeks at five check-ins a day abdicating at 20 Crowns, every
+  // completed reign after the first, every map; and the last hall of a reign begun with 30 (75) Crowns held.
+  { const two = rows.filter(r => r.kind === 'fortnight');
+    const per = [0, 1, 2, 3, 4, 5, 6].map(reign => two.flatMap(r => r.visits.filter(v => v.reign === reign && !v.abdicated)).map(counted)).filter(b => b.length);
+    console.log('     purchases per check-in by reign, two weeks at five a day abdicating at 20 Crowns, charters not counted (information): ' +
+      per.map((b, i) => `reign ${i + 1} median ${median(b)}, most ${Math.max(...b)} (${b.length} check-ins)`).join('; '));
+    // A reign is measured from the abdication that starts it to the one that ends it; the reign still running at 336 h is left out.
+    console.log('     completed reigns (h, abdication to abdication), two weeks at five a day abdicating at 20 Crowns, per map: ' + two.map(r => `${r.seed}: ${r.reigns.length} reigns ${r.reigns.map(x => x.hours.toFixed(0)).join('/')}`).join('; ') + `; Crowns held at 336h ${two.map(r => r.crowns).join(', ')}`);
+    const later = two.map(r => ({ seed: r.seed, hours: r.reigns.slice(1).map(x => x.hours) })), list = () => later.map(r => r.seed + ': ' + (r.hours.map(h => h.toFixed(1)).join('/') || 'none')).join(', ');
+    check(`no completed reign after the first is shorter than ${LATER_REIGN_FLOOR} hours (two weeks, five a day, abdicating at 20 Crowns)`, () =>
+      assert.ok(later.every(r => r.hours.length >= 3 && r.hours.every(h => h >= LATER_REIGN_FLOOR)), 'later reigns per map (at least three must complete): ' + list()));
+    gap(`target: a later reign is not very fast: every completed reign after the first lasts at least ${LATER_REIGN_HOURS} hours`, () =>
+      assert.ok(later.every(r => r.hours.every(h => h >= LATER_REIGN_HOURS)), 'later reigns per map: ' + list()));
+    // Reign lengths come in steps of a check-in (about 4 hours), so one reign against the one before is noise: compare the
+    // mean of the last three completed reigns with the mean of reigns 2 to 4.
+    gap('target: later reigns stop shrinking: the last three completed reigns average at least 80% of reigns 2 to 4', () => {
+      const avg = a => a.reduce((x, y) => x + y, 0) / a.length, trend = later.filter(r => r.hours.length >= 6).map(r => ({ seed: r.seed, early: avg(r.hours.slice(0, 3)), late: avg(r.hours.slice(-3)) }));
+      assert.ok(trend.length === later.length && trend.every(x => x.late >= 0.8 * x.early), trend.map(x => `${x.seed}: ${x.late.toFixed(1)}h against ${x.early.toFixed(1)}h (${Math.round(100 * x.late / x.early)}%)`).join(', ') + (trend.length < later.length ? '; some maps completed fewer than 7 reigns' : '')); });
+    for (const [kind, name, key] of [['royal', 'Royal Palace', 'royalAffordable'], ['imperial', 'Imperial Palace', 'imperialAffordable']]) { const rs = rows.filter(r => r.kind === kind);
+      gap(`target: the ${name}, the last hall of its reign, is not affordable in under ${LATER_REIGN_HOURS} hours, on every map`, () =>
+        assert.ok(rs.every(r => r[key] !== null && r[key] >= LATER_REIGN_HOURS), 'hours to affordable per map: ' + rs.map(r => r.seed + ': ' + hrs([r[key]])).join(', '))); } }
   check('nobody starves in a week at any frequency', () => { const bad = rows.filter(r => r.kind === 'week' && (r.starvedHours > 0.25 || r.lostPop >= 1)); assert.ok(!bad.length, bad.map(r => `map ${r.seed} at ${r.checkins} a day: ${r.starvedHours.toFixed(1)}h`).join('; ')); });
 
   // ── Nothing rewards keeping the game open or holding purchases back ──
