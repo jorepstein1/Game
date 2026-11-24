@@ -635,7 +635,7 @@ const CITY_ACTIONS = {
   },
   research(id) { say(buyResearch(id)); },
   charter(id) { say(buyResearch(id)); },
-  dismissTrader() { dismissTrader(); },
+  dismissTrader() { say(dismissTrader()); },
   rep(id) { buyRepeatable(id); },
   expand() { say(expand()); },
   clear(k) { say(clearLand(k)); },

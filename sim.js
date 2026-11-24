@@ -575,7 +575,7 @@ function goldShare(id) { const c = compute(); let mine = 0, all = 0;
 function dismissTrader() {
   const tr = state.run.trader; if (!tr.offers.length) return fail();
   tr.offers = []; tr.catchUp = null; traderTick(0);
-  return { ok: true };
+  return { ok: true, icon: 'research', msg: traderOffers().length ? 'The trader moves on. Another is waiting with new charters.' : 'The trader moves on.' };
 }
 // Seconds until the next visit arrives (null while the queue is full or before the Keep).
 const traderNext = () => { const tr = state.run.trader; return !tr.started || traderWaiting() >= 1 + TRADER_BANK ? null : TRADER_HOURS * 3600 - tr.wait; };
