@@ -3,7 +3,7 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
@@ -24,6 +24,7 @@ function newRun(seed, crowns) {
   const run = { seed, gen: TERRAIN_GEN, terrain: genTerrain(seed), res: Object.assign({}, START_RES), pop: START_POP, exp: 0, tiles: {},
     levels: newLevels(), // every building of a kind works at its kind's level
     research: {}, repeatables: {}, cleared: 0, starving: false,
+    trader: newTrader(), // the charter trader: see "The charter trader" below
     clock: 0,       // seconds of simulated time this run; only moves when the city is stepped
     away: 0,        // seconds of time away credited since the last purchase (the rested bonus counts from there)
     gold: 0,        // gold earned this run
@@ -32,6 +33,10 @@ function newRun(seed, crowns) {
   if (crowns > 0) for (const r in HEAD_START) run.res[r] += HEAD_START[r];
   return run;
 }
+// started: the trader has come this reign (from the Keep). wait: real seconds towards the next visit. queued: visits
+// waiting behind the open one. visit: visits opened this reign (with the seed, it draws the offers). offers: the open
+// visit's charters (empty: none open). catchUp: the offer kept for the trade that is behind (or null). bought: charters bought from the trader this reign.
+function newTrader() { return { started: false, wait: 0, queued: 0, visit: 0, offers: [], catchUp: null, bought: 0 }; }
 function newLevels() { const o = {}; for (const id of BUILD_ORDER) o[id] = 1; return o; }
 function newState(now) { return { v: SAVE_VERSION, last: now || 0, meta: newMeta(now), run: newRun() }; }
 function startNewGame(now) { state = newState(now); calc = compute(); }
@@ -466,6 +471,7 @@ function creditAway(sec) {
   run0.away += credited;
   const before = Object.assign({}, state.run.res);
   advance(credited + rested);
+  traderTick(sec); // real time away, uncapped: the trader keeps coming (and waiting) however long the absence
   const gains = {};
   for (const r in RESOURCES) if (state.run.res[r] - before[r] >= 1) gains[r] = state.run.res[r] - before[r];
   return { away: sec, credited, rested, capped: sec > credited, capHours, gains };
@@ -490,7 +496,7 @@ function upgrade(key) {
   const lock = hallLocked();
   if (lock) return fail(`A${aHall(lock.level).slice(1)} needs ${lock.need} Crowns held. You hold ${fmt(state.meta.crowns)}.`);
   if (!pay(upgradeCost(t))) return fail();
-  t.level++;
+  t.level++; traderTick(0); // raising the Keep brings the trader at once
   return { ok: true, icon: 'crown', msg: `Your seat is now ${aHall(t.level)}!` };
 }
 // One upgrade raises every building of a kind, standing or yet to be built.
@@ -510,12 +516,69 @@ function demolish(key) {
   delete state.run.tiles[key]; grant(refund);
   return { ok: true, refund };
 }
+// Village Hall research is bought here at any time. A charter only from the trader, while it is on offer (buyCharter).
 function buyResearch(id) {
   const r = RESEARCH.find(r => r.id === id);
-  if (!r || hasResearch(id) || r.hall > hallLevel() || !pay(r.cost)) return fail();
+  if (!r || hasResearch(id) || r.hall > hallLevel() || (isCharter(r) && !traderOffers().includes(id)) || !pay(r.cost)) return fail();
   state.run.research[id] = 1;
-  return { ok: true, icon: 'research', msg: 'Researched ' + r.name };
+  if (isCharter(r)) { const tr = state.run.trader; tr.offers = []; tr.catchUp = null; tr.bought++; traderTick(0); } // one purchase ends the visit; the next waiting one opens
+  return { ok: true, icon: 'research', msg: (isCharter(r) ? 'Bought the charter for ' : 'Researched ') + r.name };
 }
+// ───────────────────────── The charter trader ─────────────────────────
+// See TRADER_HOURS in data.js. The timer runs on real time: creditAway passes the whole time away, uncapped and
+// without the rested bonus, and the live game passes each step. It pauses only while the queue is full.
+const isCharter = r => r.hall > 1;
+const CHARTERS = RESEARCH.filter(isCharter);
+const traderOffers = () => state.run.trader.offers;
+const traderWaiting = () => (state.run.trader.offers.length ? 1 : 0) + state.run.trader.queued; // visits open or queued
+// Charters the trader may offer: not owned, allowed by the hall, and of use to the town (a building of a kind it
+// multiplies stands; one with only an effect, such as Royal Surveyors, always qualifies).
+const charterUsable = r => !r.mult || Object.keys(r.mult).some(id => count(id) > 0);
+const charterPool = () => CHARTERS.filter(r => !hasResearch(r.id) && r.hall <= hallLevel() && charterUsable(r));
+function traderTick(sec) {
+  const tr = state.run.trader, span = TRADER_HOURS * 3600;
+  if (!tr.started) { if (hallLevel() < TRADER_HALL) return; tr.started = true; tr.wait = 0; tr.queued++; }
+  else if (sec > 0) {
+    tr.wait += sec;
+    // One more visit per TRADER_HOURS, up to the open one and TRADER_BANK behind it. Full, the timer waits for the player.
+    while (tr.wait >= span && traderWaiting() < 1 + TRADER_BANK) { tr.wait -= span; tr.queued++; }
+    if (traderWaiting() >= 1 + TRADER_BANK) tr.wait = 0;
+  }
+  if (!tr.offers.length && tr.queued > 0) { // open the next visit, if there is anything to offer (else it stays queued)
+    let pool = charterPool(); if (!pool.length) return;
+    const rnd = mulberry((state.run.seed ^ Math.imul(tr.visit + 1, 0x9E3779B1)) | 0), take = list => { const r = list[(rnd() * list.length) | 0]; pool = pool.filter(x => x !== r); tr.offers.push(r.id); return r; };
+    // One slot is kept for the trade that is behind (traderLagging): a charter for it or its supply chain, if there is one.
+    const lag = traderLagging(), help = lag ? pool.filter(r => r.mult && Object.keys(r.mult).some(id => TRADER_CHAINS[lag].includes(id))) : [];
+    tr.catchUp = help.length ? take(help).id : null;
+    while (tr.offers.length < TRADER_OFFERS && pool.length) {
+      // Never three charters for the same kind of building: the last slot avoids a kind the other two share.
+      const offered = tr.offers.map(id => RESEARCH.find(r => r.id === id)), shared = id => offered.every(o => o.mult && o.mult[id]);
+      const fresh = tr.offers.length === TRADER_OFFERS - 1 ? pool.filter(r => !r.mult || !Object.keys(r.mult).some(shared)) : pool;
+      take(fresh.length ? fresh : pool);
+    }
+    tr.visit++; tr.queued--;
+  }
+}
+// The gold-making trade the town has standing (Market or Blacksmith) with the smaller share of the gold, or null with neither.
+const TRADER_CHAINS = { market: ['market', 'farm', 'mill'], smith: ['smith', 'mine'] };
+function traderLagging() {
+  const c = compute(), gold = { market: 0, smith: 0 };
+  for (const k in c.tiles) { const id = state.run.tiles[k].id; if (hasOwn(gold, id)) gold[id] += (c.tiles[k].out && c.tiles[k].out.gold) || 0; }
+  const standing = Object.keys(gold).filter(id => count(id) > 0);
+  return standing.length ? standing.sort((a, b) => gold[a] - gold[b])[0] : null;
+}
+// The lagging trade's share of all the gold the town makes (0 to 1), for the bot and the interface.
+function goldShare(id) { const c = compute(); let mine = 0, all = 0;
+  for (const k in c.tiles) { const g = (c.tiles[k].out && c.tiles[k].out.gold) || 0; all += g; if (state.run.tiles[k].id === id) mine += g; }
+  return all > 0 ? mine / all : 0; }
+// Send the trader away without buying: the charters go back in the pack and the next waiting visit opens.
+function dismissTrader() {
+  const tr = state.run.trader; if (!tr.offers.length) return fail();
+  tr.offers = []; tr.catchUp = null; traderTick(0);
+  return { ok: true };
+}
+// Seconds until the next visit arrives (null while the queue is full or before the Keep).
+const traderNext = () => { const tr = state.run.trader; return !tr.started || traderWaiting() >= 1 + TRADER_BANK ? null : TRADER_HOURS * 3600 - tr.wait; };
 function buyRepeatable(id) {
   const r = repeatable(id);
   if (!r || r.hall > hallLevel() || repLevel(id) >= MAX_REPEATABLE || !pay(repCost(r))) return fail();
@@ -621,6 +684,7 @@ function upgradeLegacySave(o) {
 }
 
 const TRADE_KINDS = Object.keys(TRADES);
+const TRADER_NOTE = `Research above the Village Hall is now sold as charters by a travelling trader, who comes once you hold a Keep and then every ${TRADER_HOURS} hours with ${TRADER_OFFERS} to choose from. You buy one per visit, and visits wait for you. Everything you already know is kept.`;
 const EAT_NOTE = 'The trades now eat. Markets, Blacksmiths and Guildhalls share the food your town does not eat, and slow down when there is too little, so Farms and Mills matter again. Taverns no longer make gold or boost Cottages: trades beside a Tavern need less food, so it may pay to move one. Your food store is untouched.';
 // Returns { state, notes }. Throws if the data is not a save at all (or is from a newer version).
 function sanitizeSave(raw, now) {
@@ -689,6 +753,15 @@ function sanitizeSave(raw, now) {
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;
+  // The trader (version 7). An older town at a Keep or above has one visit waiting; research it already knows is kept.
+  const tr = isObj(r.trader) ? r.trader : {}, T = run.trader;
+  if (v >= 7) {
+    T.started = tr.started === true; T.wait = num(tr.wait, 0, 0, TRADER_HOURS * 3600); T.visit = int(tr.visit, 0, 0, 1e9); T.bought = int(tr.bought, 0, 0, 1e6);
+    for (const id of Array.isArray(tr.offers) ? tr.offers : []) if (T.offers.length < TRADER_OFFERS && CHARTERS.some(c => c.id === id) && !run.research[id] && !T.offers.includes(id)) T.offers.push(id);
+    T.queued = int(tr.queued, 0, 0, TRADER_BANK + (T.offers.length ? 0 : 1));
+    T.catchUp = T.offers.includes(tr.catchUp) ? tr.catchUp : null;
+  } else if (run.tiles[HALL_KEY].level >= TRADER_HALL) { T.started = true; T.queued = 1; }
+  if (v < 7 && (run.tiles[HALL_KEY].level >= 2 || CHARTERS.some(c => run.research[c.id]))) notes.push(TRADER_NOTE);
   const reps = isObj(r.repeatables) ? r.repeatables : {};
   for (const item of REPEATABLES) { const l = int(reps[item.id], 0, 0, MAX_REPEATABLE); if (l) run.repeatables[item.id] = l; }
   run.pop = num(r.pop, START_POP, 0, 1e12); // clamped to housing by the first step
@@ -699,7 +772,7 @@ function adoptSave(raw, now) {
   const prev = state, prevCalc = calc;
   try {
     const out = sanitizeSave(raw, now);
-    state = out.state; calc = compute();
+    state = out.state; calc = compute(); traderTick(0); // a migrated town's waiting visit opens
     if (state.run.pop > calc.cap) { state.run.pop = calc.cap; calc = compute(); }
     return out.notes;
   } catch (e) { state = prev; calc = prevCalc; throw e; }

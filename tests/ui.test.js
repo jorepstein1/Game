@@ -318,11 +318,11 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
   const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, notes: document.getElementById('modalbox').textContent }));
-  ok(mig.v === 6 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /The trades now eat/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
+  ok(mig.v === 7 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /The trades now eat/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !/Away/.test(mig.notes), 'a 30s reload gap is credited without an away summary (' + mig.clock + 's)');
   await page.evaluate(() => closeModal());
   const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
-  ok(stored.v === 6 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  ok(stored.v === 7 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
   // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy
@@ -703,13 +703,37 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const load = async () => { await pg.reload(); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
       return pg.evaluate(() => { const m = document.getElementById('modalbox'), r = m.getBoundingClientRect(); return { open: !document.getElementById('modal').hidden, text: m.innerText.replace(/\s+/g, ' '), notes: m.querySelectorAll('.loadnote').length, toasts: document.getElementById('toasts').textContent, fits: r.top >= 0 && r.bottom <= innerHeight, v: state.v, stored: JSON.parse(localStorage.getItem(SAVE_KEY)).v }; }); };
     const first = await load(); await shot(pg, 'oldsave-welcome-360x740.png');
-    ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 1 && /The trades now eat\. Markets, Blacksmiths and Guildhalls share the food your town does not eat/.test(first.text) && /trades beside a Tavern need less food/.test(first.text)
-      && !/trades now eat/.test(first.toasts) && first.fits && first.v === 6 && first.stored === 6, 'first load of a version-4 save: the welcome back explains the new rules in one note, and the save is rewritten as version 6 ' + JSON.stringify(first));
+    ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 2 && /travelling trader/.test(first.text) && /The trades now eat\. Markets, Blacksmiths and Guildhalls share the food your town does not eat/.test(first.text) && /trades beside a Tavern need less food/.test(first.text)
+      && !/trades now eat/.test(first.toasts) && first.fits && first.v === 7 && first.stored === 7, 'first load of a version-4 save: the welcome back explains the new rules in one note (and the trader in another), and the save is rewritten as version 7 ' + JSON.stringify(first));
     await pg.evaluate(() => { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); s.last = Date.now() - 3 * 3600 * 1000; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); ui.paused = true; });
     const second = await load();
     ok(second.open && /Away 3 h/.test(second.text) && !second.notes && !/trades now eat/.test(second.text + second.toasts), 'the next load shows the usual welcome back without the note ' + JSON.stringify(second.text));
     ok(!freshNote, 'a fresh game never shows it');
     ok(e5.length === 0, 'old save note: no console errors ' + JSON.stringify(e5));
+    await cx.close(); }
+
+  // --- the charter trader: a card at the top of the Research tab, one purchase closes the visit, Send away, the tab's dot; it fits each width
+  for (const [w, h] of [[360, 740], [390, 844], [1280, 800]]) {
+    const cx = await br.newContext({ viewport: { width: w, height: h }, hasTouch: w < 800, isMobile: w < 800, reducedMotion: 'reduce' }), pg = await cx.newPage(), e6 = []; watch(pg, e6);
+    await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(pg);
+    const before = await pg.evaluate(() => { state.run.tiles[HALL_KEY].level = 2; ui.tab = 'research'; ui.sheet = true; render();
+      return { text: document.getElementById('panel').innerText.replace(/\s+/g, ' '), cards: [...document.querySelectorAll('#panel [data-act="research"]')].map(b => b.dataset.id) }; });
+    ok(/travelling trader sells charters/.test(before.text) && before.cards.every(id => ['axes', 'rotation', 'tithes', 'chisels', 'steward'].includes(id)), `${w}px: before the Keep the tab says where charters come from and sells only Village Hall research ` + JSON.stringify(before));
+    const got = await pg.evaluate(() => {
+      const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
+      for (const [k, id] of [['4,4', 'cottage'], ['6,6', 'farm'], ['4,6', 'lumber'], ['6,4', 'quarry'], ['5,4', 'market']]) run.tiles[k] = { kind: 'building', id };
+      upgrade(HALL_KEY); traderTick(12 * 3600); render();
+      const cards = [...document.querySelectorAll('#panel [data-act="charter"]')], dot = !!document.querySelector('#tabs [data-id="research"] .dot');
+      return { offers: traderOffers().slice(), cards: cards.map(b => b.dataset.id), dot, fits: cards.every(c => c.scrollWidth <= c.clientWidth + 1) && document.documentElement.scrollWidth <= innerWidth,
+        text: document.querySelector('#panel .trader').innerText.replace(/\s+/g, ' ') }; });
+    ok(got.cards.length === 3 && got.cards.join() === got.offers.join() && got.dot && got.fits && /1 more visit waiting/.test(got.text) && /Next visit in about/.test(got.text), `${w}px: the Keep brings the trader: three charter cards, the tab's dot, the queue and the next visit, and it fits ` + JSON.stringify(got));
+    await pg.click(`#panel [data-act="charter"][data-id="${got.offers[0]}"]`);
+    const after = await pg.evaluate(() => ({ owned: Object.keys(state.run.research), offers: traderOffers().slice(), cards: document.querySelectorAll('#panel [data-act="charter"]').length }));
+    ok(after.owned.includes(got.offers[0]) && after.offers.length === 3 && !after.offers.includes(got.offers[0]) && after.cards === 3, `${w}px: buying one closes the visit and the waiting one opens ` + JSON.stringify(after));
+    await pg.click('#panel [data-act="dismissTrader"]');
+    const gone = await pg.evaluate(() => ({ offers: traderOffers().length, dot: !!document.querySelector('#tabs [data-id="research"] .dot'), text: document.querySelector('#panel .trader').innerText.replace(/\s+/g, ' ') }));
+    ok(gone.offers === 0 && /The trader has gone\. Next visit in about/.test(gone.text), `${w}px: Send away empties the card and says when the trader is back ` + JSON.stringify(gone));
+    ok(e6.length === 0, `${w}px trader: no console errors ` + JSON.stringify(e6));
     await cx.close(); }
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);

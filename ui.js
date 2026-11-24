@@ -358,10 +358,23 @@ function offerNote(n) {
   return `Good offer (+${gain}% production): a fine time to start over.`;
 }
 
+// The trader's visit, at the top of the Research tab: the charters on offer (buy one), Send away, and when the next comes.
+function traderHTML() {
+  const tr = state.run.trader, next = traderNext(), more = traderWaiting() - (tr.offers.length ? 1 : 0);
+  if (!tr.started) return `<p class="muted trader">${sprite('research')} A travelling trader sells charters, research that multiplies whole trades, once you raise ${aHall(TRADER_HALL)}. The trader comes every ${TRADER_HOURS} hours with ${TRADER_OFFERS} to choose from.</p><hr>`;
+  const when = next === null ? '' : `Next visit in about <b>${fmtDuration(next)}</b>.`;
+  const queue = more > 0 ? `${more} more visit${more > 1 ? 's' : ''} waiting after this one. ` : '';
+  if (!tr.offers.length) return `<div class="trader"><h3>${sprite('research')} The travelling trader</h3><p class="muted">${tr.queued ? 'The trader has nothing your town can use yet: build what a charter multiplies.' : 'The trader has gone.'} ${when}</p></div><hr>`;
+  let h = `<div class="trader"><h3>${sprite('research')} The travelling trader is here</h3><p class="muted">Buy one charter; the rest go back in the pack, and the trader waits for as long as you like. ${queue}${next === null ? 'No more visits come until you buy or send the trader away.' : when}</p>`;
+  for (const id of tr.offers) { const r = RESEARCH.find(x => x.id === id);
+    h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="charter" data-id="${r.id}">
+      <div class="ic">${sprite('research')}</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`; }
+  return h + `<div class="row"><button class="btn alt" data-act="dismissTrader">Send the trader away</button></div></div><hr>`;
+}
 const TABS = { build: 'Build', research: 'Research', decrees: 'Decrees', realm: 'Realm' };
 const tabLabel = t => sprite(t) + ' ' + TABS[t];
 function renderTabs() {
-  const dots = { decrees: decreeDone(), research: RESEARCH.some(r => !hasResearch(r.id) && r.hall <= hallLevel() && canAfford(r.cost)),
+  const dots = { decrees: decreeDone(), research: traderOffers().length > 0 || RESEARCH.some(r => !isCharter(r) && !hasResearch(r.id) && r.hall <= hallLevel() && canAfford(r.cost)),
     realm: canPrestige() && pendingCrowns() >= CROWN_GOAL };
   patch($('tabs'), Object.keys(TABS).map(t =>
     `<button class="${t === ui.tab ? 'on' : ''}" data-act="tab" data-id="${t}">${tabLabel(t)}${dots[t] ? '<i class="dot"></i>' : ''}</button>`).join(''));
@@ -388,11 +401,11 @@ function renderPanel() {
       h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
     else h += '<hr><p class="muted">Your borders are as wide as they go. Tap forest, hills or water to clear it for more room.</p>';
   } else if (ui.tab === 'research') {
-    const avail = RESEARCH.filter(r => !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));
+    const avail = RESEARCH.filter(r => !isCharter(r) && !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));
+    h += traderHTML();
     for (const r of avail) h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="research" data-id="${r.id}">
       <div class="ic">${sprite('research')}</div><div class="bd"><div class="nm">${r.name}</div><div class="muted">${r.desc}</div>${costHTML(r.cost)}${addsHTML(researchAdds(r))}</div></button>`;
-    if (!avail.length) h += '<p class="muted">Your scholars have nothing new to offer for now.</p>';
-    if (RESEARCH.some(r => r.hall > hall)) h += `<p class="muted">More to discover once you raise ${aHall(hall + 1)}.</p>`;
+    if (!avail.length && !traderOffers().length) h += '<p class="muted">Your scholars have nothing new to offer for now.</p>';
     const reps = REPEATABLES.filter(r => r.hall <= hall);
     if (reps.length) h += '<hr><h3>Repeatable upgrades</h3><p class="muted">Each level costs more than the last. Levels reset when you found a new kingdom.</p>';
     for (const r of reps) { const c = repCost(r);
@@ -555,6 +568,7 @@ function catchUp(sec, notes) {
   openModal(`<h2 id="modaltitle">Welcome back</h2>${away ? `<p class="awayline">Away ${fmtHours(r.away)}.${r.capped ? ` Up to ${r.capHours} h counts${r.capHours < 24 ? ' (24 h with Stewardship)' : ''}.` : ''}${r.rested >= 60 ? ` ${sprite('rest')} Rested: counted as <b>${fmtHours(r.credited + r.rested)}</b>.` : ''}</p>` : ''}
     ${notesHTML(notes)}
     ${away && abdicateLine() ? `<p class="stat">${abdicateLine()}</p>` : ''}
+    ${away && traderOffers().length ? `<p class="stat">${sprite('research')} The travelling trader is waiting with charters${traderWaiting() > 1 ? ` (${traderWaiting()} visits)` : ''}. See the Research tab.</p>` : ''}
     ${away && nextHallOpen() ? `<p class="stat">${hallWait() === 0 ? `${hallTier(hallLevel() + 1).icon} You can now raise ${aHall(hallLevel() + 1).replace(/ (.*)/, ' <b>$1</b>')}.` : isFinite(hallWait()) ? `${hallTier(hallLevel() + 1).icon} ${hallName(hallLevel() + 1)} in about <b>${fmtDuration(hallWait())}</b> at this rate.` : ''}</p>` : ''}
     ${away ? gains || '<p class="muted">Sadly the stores did not grow. Check on your food supply.</p>' : ''}<div class="row"><button class="btn" data-act="close">Continue</button></div>`);
 }
@@ -620,6 +634,8 @@ const CITY_ACTIONS = {
     else go();
   },
   research(id) { say(buyResearch(id)); },
+  charter(id) { say(buyResearch(id)); },
+  dismissTrader() { dismissTrader(); },
   rep(id) { buyRepeatable(id); },
   expand() { say(expand()); },
   clear(k) { say(clearLand(k)); },
@@ -724,7 +740,7 @@ function simTick() {
   const now = Date.now(), dt = Math.max(0, (now - lastTick) / 1000); lastTick = now;
   if (ui.paused) return;
   if (dt > OFFLINE_REPORT_SECONDS) { catchUp(dt); render(); } // the tab was asleep: same capped path as a page load
-  else advance(dt);
+  else { advance(dt); traderTick(dt); } // the trader's timer runs on real time, open or closed
   if (state.run.starving && !ui.warnedStarve) { toast('Your villagers are starving! Work slows to half — build more farms.', 'food'); ui.warnedStarve = true; }
   if (!state.run.starving) ui.warnedStarve = false;
 }
