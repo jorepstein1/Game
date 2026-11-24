@@ -215,7 +215,8 @@ function play(seed, opts) {
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
       if (pick.k === 'expand' && out.prestiges.length === 0) out.marks['exp' + (run().exp + 1)] = { min: +(now / 60).toFixed(1) };
-      pick.go(); bought++; if (pick.k === 'clearGuild') { bought++; out.buys++; out.kinds.build++; } sim.setState(sim.state); // clearing and building: two purchases if (pick.k === 'hall') noteHall();
+      pick.go(); bought++; if (pick.k === 'clearGuild') { bought++; out.buys++; out.kinds.build++; } sim.setState(sim.state); // clearing and building: two purchases
+      if (pick.k === 'hall') noteHall();
       const dg = sim.calc.base.gold - g0;
       if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
         const mk = B[pick.id].glob ? 'gold' : Object.keys(B[pick.id].out || { gold: 0 })[0], before = mk === 'food' ? C.base.food + C.eaten : C.base[mk], after = mk === 'food' ? sim.calc.base.food + sim.calc.eaten : sim.calc.base[mk];

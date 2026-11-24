@@ -364,7 +364,7 @@ function traderHTML() {
   if (!tr.started) return `<p class="muted trader">${sprite('research')} A travelling trader sells charters, research that multiplies whole trades, once you raise ${aHall(TRADER_HALL)}. The trader comes every ${TRADER_HOURS} hours with ${TRADER_OFFERS} to choose from.</p><hr>`;
   const when = next === null ? '' : `Next visit in about <b>${fmtDuration(next)}</b>.`;
   const queue = more > 0 ? `${more} more visit${more > 1 ? 's' : ''} waiting after this one. ` : '';
-  if (!tr.offers.length) return `<div class="trader"><h3>${sprite('research')} The travelling trader</h3><p class="muted">${tr.queued ? 'The trader has nothing your town can use yet: build what a charter multiplies.' : 'The trader has gone.'} ${when}</p></div><hr>`;
+  if (!tr.offers.length) return `<div class="trader"><h3>${sprite('research')} The travelling trader</h3><p class="muted">${CHARTERS.every(r => hasResearch(r.id)) ? 'You hold every charter the trader sells.' : tr.queued ? 'The trader has nothing your town can use yet: build what a charter multiplies.' : 'The trader has gone.'} ${when}</p></div><hr>`;
   let h = `<div class="trader"><h3>${sprite('research')} The travelling trader is here</h3><p class="muted">Buy one charter; the rest go back in the pack, and the trader waits for as long as you like. ${queue}${next === null ? 'No more visits come until you buy or send the trader away.' : when}</p>`;
   for (const id of tr.offers) { const r = RESEARCH.find(x => x.id === id);
     h += `<button class="card${canAfford(r.cost) ? '' : ' cant'}" data-act="charter" data-id="${r.id}">
