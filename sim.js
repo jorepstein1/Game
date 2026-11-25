@@ -188,20 +188,21 @@ function lonelyWater(g) {
 function frontierRing(g, seed) {
   const rnd = mulberry((seed ^ 0x2545F491) | 0), R = MAP_RADIUS[MAP_RADIUS.length - 1], T = ['forest', 'hill', 'water'];
   const ring = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (ringOf(x, y) === R) ring.push([x, y]);
+  const terrainTiles = () => ring.filter(([x, y]) => g[x][y] !== 'plain').length;
   for (const [x, y] of ring) g[x][y] = 'plain';
   for (const [x, y] of ring) { // the inward neighbour (corners have none)
     const a = x === 0 ? 1 : x === MAP_SIZE - 1 ? x - 1 : x, b = y === 0 ? 1 : y === MAP_SIZE - 1 ? y - 1 : y;
-    if ((a === x) !== (b === y) && T.includes(g[a][b]) && rnd() < FRONTIER_RUN) g[x][y] = g[a][b]; }
+    if ((a === x) !== (b === y) && T.includes(g[a][b]) && rnd() < FRONTIER_RUN && terrainTiles() < FRONTIER_MAX) g[x][y] = g[a][b]; }
   const isRing = (a, b) => onMap(a, b) && ringOf(a, b) === R, stuck = [];
   const gained = () => { const s0 = siteCounts(g, R - 1), s1 = siteCounts(g, R), o = {};
     for (const t of T) o[t] = { triple: s1.triple[t] - s0.triple[t], double: s1.double[t] - s0.double[t] }; return o; };
   for (let fix = 0; fix < 80; fix++) {
     const lone = lonelyWater(g).filter(([x, y]) => isRing(x, y));
     if (lone.length) { const [x, y] = lone[0], opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => isRing(a, b) && g[a][b] === 'plain');
-      if (opts.length) { const [a, b] = opts[(rnd() * opts.length) | 0]; g[a][b] = 'water'; } else g[x][y] = 'plain';
+      if (opts.length && terrainTiles() < FRONTIER_MAX) { const [a, b] = opts[(rnd() * opts.length) | 0]; g[a][b] = 'water'; } else g[x][y] = 'plain';
       continue; }
     const gain = gained(), want = T.map(t => [t, 3]).filter(([t]) => gain[t].triple < FRONTIER_TRIPLES).concat(T.map(t => [t, 2]).filter(([t]) => gain[t].double < FRONTIER_DOUBLES)).filter(w => !stuck.includes(w.join()));
-    if (!want.length || ring.filter(([x, y]) => g[x][y] !== 'plain').length >= FRONTIER_MAX) break;
+    if (!want.length || terrainTiles() >= FRONTIER_MAX) break;
     const [t, k] = want[0];
     // The cheapest plot to make a new k-site of t: an open plot on the old edge or in the ring, by turning ring tiles beside it.
     let best = null, bestCost = Infinity;
@@ -210,7 +211,7 @@ function frontierRing(g, seed) {
       const have = sameAround(g, x, y, R, t);
       if (have >= k || (ringOf(x, y) < R && sameAround(g, x, y, R - 1, t) >= k)) continue;
       const open = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => isRing(a, b) && g[a][b] === 'plain'), need = k - have;
-      if (open.length < need) continue;
+      if (open.length < need || terrainTiles() + need > FRONTIER_MAX) continue; // the cap holds after the fix, too
       for (let i = open.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [open[i], open[j]] = [open[j], open[i]]; }
       const use = open.slice(0, need);
       const wet = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && (g[a + dx][b + dy] === 'water' || use.some(([p, q]) => p === a + dx && q === b + dy)));
@@ -784,7 +785,7 @@ function sanitizeSave(raw, now) {
   run.terrain = gridOk ? (old ? frontierRing(embedInner(grid), run.seed) : grid.map(col => col.slice()))
     : run.gen === 1 ? frontierRing(embedInner(genTerrainLegacy(run.seed)), run.seed) : genTerrain(run.seed); // a missing grid (version 1) is regrown from the seed by the generator that made it
   run.terrain[MAP_MID][MAP_MID] = 'plain';
-  run.exp = int(r.exp, 0, 0, EXPAND_COST.length);
+  run.exp = int(r.exp, 0, 0, old ? EXPAND_COST.length - 1 : EXPAND_COST.length); // a save from before the Frontier cannot hold it
   run.cleared = int(r.cleared, 0, 0, MAP_SIZE * MAP_SIZE);
   const res = isObj(r.res) ? r.res : {};
   for (const k in RESOURCES) run.res[k] = num(res[k], run.res[k], 0, BIG);

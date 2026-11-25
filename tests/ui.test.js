@@ -282,10 +282,10 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
     return { xss: window.__xss, img: document.querySelectorAll('#app img, #app script, #toasts img').length + [...document.querySelectorAll('#app svg, #toasts svg')].filter(v => !(v.children.length === 1 && v.firstElementChild.localName === 'use' && /^#sp-\w+$/.test(v.firstElementChild.getAttribute('href')) && [...v.attributes].every(a => !/^on/i.test(a.name)))).length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['6,5'], farmLv: kindLevel('farm'), decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
-  ok(!ev.xss && ev.img === 0 && ev.exp === 4 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 7 && ev.tiles.join(' ') === '1,1 6,5 6,6' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 169 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 7 && ev.tiles.join(' ') === '1,1 6,5 6,6' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
-  ok(await page.evaluate(() => state.run.exp === 4 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
+  ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
   await page.evaluate(() => closeModal());
 
   // --- H1: a long loop gap goes through the capped offline path
@@ -330,7 +330,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     await page.evaluate(raw => { ui.paused = true; localStorage.setItem(SAVE_KEY, raw); }, raw);
     await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
     const r = await page.evaluate(() => ({ hall: hallLevel(), tiles: document.querySelectorAll('.tile').length, backup: localStorage.getItem(BACKUP_KEY), exp: state.run.exp }));
-    ok(r.hall === 1 && r.tiles >= 25 && errs.length === 0 && (name === 'legacy exp:9' ? r.exp === 4 && r.tiles === 169 : r.backup === raw), name + ': game still playable ' + JSON.stringify({ tiles: r.tiles, exp: r.exp, backedUp: r.backup === raw }));
+    ok(r.hall === 1 && r.tiles >= 25 && errs.length === 0 && (name === 'legacy exp:9' ? r.exp === 3 && r.tiles === 121 : r.backup === raw), name + ': game still playable ' + JSON.stringify({ tiles: r.tiles, exp: r.exp, backedUp: r.backup === raw }));
   }
   // --- failed writes are reported, "Saved." only on success
   await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('quota'); }; ui.tab = 'realm'; render(); document.getElementById('toasts').innerHTML = ''; document.querySelector('#panel [data-act="save"]').click(); });

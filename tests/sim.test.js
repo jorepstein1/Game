@@ -232,7 +232,7 @@ test('sanitizeSave coerces and clamps every field', sim => {
   assert.strictEqual(s.last, 1000);
   assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, 'coffers', 'an unknown decree: the old chain counts as finished, the newer decrees are open');
   assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, upgrades: 0, started: 1000 });
-  assert.strictEqual(s.run.exp, 4); assert.strictEqual(s.run.cleared, 169); assert.strictEqual(s.run.starving, false);
+  assert.strictEqual(s.run.exp, 3, 'an old save holds at most the three expansions it had'); assert.strictEqual(s.run.cleared, 169); assert.strictEqual(s.run.starving, false);
   assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
   assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['1,1', '6,5', '6,6']);
   assert.strictEqual(s.run.tiles['6,6'].level, sim.HALL_MAX, 'a hall above the last is the last'); assert.strictEqual(s.run.tiles['6,6'].kind, 'hall');
@@ -715,7 +715,7 @@ test('the Frontier ring: per terrain two more double sites, a triple where the o
   for (let seed = 1; seed <= N; seed++) {
     const g = sim.genTerrain(seed), s5 = sim.siteCounts(g, 5), s6 = sim.siteCounts(g, 6); let open = 0, gainTri = 0;
     for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (sim.ringOf(x, y) === 6 && g[x][y] === 'plain') open++;
-    plots.push(open);
+    plots.push(open); assert.ok(48 - open <= sim.FRONTIER_MAX, 'seed ' + seed + ': at most FRONTIER_MAX terrain tiles in the ring, ' + (48 - open));
     for (const t of T) { if (s6.double[t] - s5.double[t] < sim.FRONTIER_DOUBLES) short.push(seed + ' ' + t); if (s6.triple[t] > s5.triple[t]) { tri[t]++; gainTri++; } }
     assert.ok(gainTri >= 1, 'seed ' + seed + ': the Frontier adds a triple site');
     assert.deepStrictEqual(plain(sim.lonelyWater(g)), [], 'seed ' + seed + ': no lone water');
@@ -753,6 +753,7 @@ test('version-7 saves: the 11×11 map moves out by one, every building and its b
   for (const k in before) { assert.strictEqual(s.run.tiles[k].id, before[k].id); if (before[k].adj !== null) near(sim.calc.tiles[k].adj, before[k].adj, 1e-9, k + ' keeps its bonus:'); }
   for (const r in rates) near(sim.calc.base[r], rates[r], Math.abs(rates[r]) * 1e-9, r + ' income unchanged:');
   assert.strictEqual(notes.filter(n => /Frontier/.test(n)).length, 0, 'not told about the Frontier before its third expansion');
+  const four = JSON.parse(JSON.stringify(old)); four.run.exp = 4; assert.strictEqual(sim.sanitizeSave(four, 1000).state.run.exp, 3, 'a save from before the Frontier cannot claim it');
   const three = JSON.parse(JSON.stringify(old)); three.run.exp = 3; assert.strictEqual(sim.sanitizeSave(three, 1000).notes.filter(n => /Frontier/.test(n)).length, 1, 'told once with every border bought');
   assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'saved again, nothing more to say');
 });

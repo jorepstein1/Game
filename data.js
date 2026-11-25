@@ -51,11 +51,12 @@ const BIOME_START_OPEN = 12;      // ...and at least this many open plots
 const BIOME_ALL_DOUBLE = 3;      // within this radius (the first expansion) every terrain has a double site: no map starves stone or food
 const BIOME_DOUBLES = 3, BIOME_TRIPLES = 1; // each expansion adds at least this many plots with 2+ / 3+ neighbours of one terrain
 // The Frontier (the outer ring of the 13×13 map) is drawn after the rest, so the 11×11 map for a seed is the same as
-// before it existed. Good sites are what a late town runs short of, so the ring promises more of them: per terrain,
-// FRONTIER_DOUBLES more double sites (triples included) than the old edge had, and FRONTIER_TRIPLES more triple sites
-// wherever the map allows one (a triple in the ring needs that terrain on the old edge beside it). Terrain on the old
-// edge runs on into the ring with FRONTIER_RUN chance per tile, and the repair stops at FRONTIER_MAX terrain tiles of
-// the ring's 48, so it stays mostly open plots.
+// before it existed. Good sites are what a late town runs short of, so the ring is repaired for more of them: per
+// terrain it aims for FRONTIER_DOUBLES more double sites (triples included) than the old edge had, and FRONTIER_TRIPLES
+// more triple sites where the map allows one (a triple in the ring needs that terrain on the old edge beside it).
+// Terrain on the old edge runs on into the ring with FRONTIER_RUN chance per tile. The ring never holds more than
+// FRONTIER_MAX terrain tiles (of its 48), so it stays mostly open plots; with that cap some maps fall a
+// double site short, mostly of water (about 2% of maps; tests/sim.test.js holds it to 1% of the terrain checks).
 const FRONTIER_TRIPLES = 1, FRONTIER_DOUBLES = 2;
 const FRONTIER_RUN = 0.3;
 const FRONTIER_MAX = 20;

@@ -639,7 +639,7 @@ const CITY_ACTIONS = {
   charter(id) { say(buyResearch(id)); },
   dismissTrader() { say(dismissTrader()); },
   rep(id) { buyRepeatable(id); },
-  expand() { say(expand()); },
+  expand() { const r = expand(); say(r); if (r.ok) ui.sheet = false; }, // close the sheet on a phone so the new land shows
   clear(k) { say(clearLand(k)); },
   claim(id) { say(claimDecree(id || undefined)); },
   pursue(id) { pursueDecree(id); },
