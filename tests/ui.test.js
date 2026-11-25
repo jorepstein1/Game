@@ -56,7 +56,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // --- late game state: 11x11 map, all resources, crowns
   await page.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; state.meta.crowns = 12;
     run.res = { gold: 123456789, food: 2345678, wood: 98765432, stone: 7654321, iron: 345678 }; run.pop = 1234;
-    for (let i = 0; i < 9; i++) for (let j = 0; j < 3; j++) if (run.terrain[i][j] === 'plain') run.tiles[i + ',' + j] = { kind: 'building', id: ['cottage', 'smith', 'lumber', 'quarry', 'mine', 'farm'][(i + j) % 6] };
+    for (let i = 1; i < 10; i++) for (let j = 1; j < 4; j++) if (run.terrain[i][j] === 'plain') run.tiles[i + ',' + j] = { kind: 'building', id: ['cottage', 'smith', 'lumber', 'quarry', 'mine', 'farm'][(i + j - 2) % 6] };
     for (const id of ['cottage', 'smith', 'lumber', 'quarry', 'mine', 'farm']) run.levels[id] = 12;
     ui.sel = {}; render(); scrollTo(0, 0); });
   await settle(page);
@@ -177,7 +177,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   const guide = await page.evaluate(() => { const keep = JSON.stringify(state), said = el => { const c = el.cloneNode(true); c.querySelectorAll('svg[aria-label]').forEach(v => v.replaceWith('[' + v.getAttribute('aria-label') + ']')); return c.textContent; };
     startNewGame(Date.now()); state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; ui.tab = 'build'; ui.sel = {}; render();
     const firstCard = document.querySelector('#panel .card').dataset.id, noRoutine = !document.querySelector('#panel .card.routine'), hint = document.querySelector('#panel .card.hallhint'), isHint = !!(document.querySelector('#panel .card[data-id="quarry"]').compareDocumentPosition(hint) & 4), none = hint.textContent.replace(/\s+/g, ' ');
-    for (const [k, id] of [['4,5', 'cottage'], ['6,5', 'quarry'], ['5,4', 'lumber']]) { state.run.terrain[+k[0]][+k[2]] = 'plain'; state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; build(k, id); }
+    for (const [k, id] of [['5,6', 'cottage'], ['7,6', 'quarry'], ['6,5', 'lumber']]) { state.run.terrain[+k[0]][+k[2]] = 'plain'; state.run.res = { gold: 500, food: 100, wood: 500, stone: 0, iron: 0 }; build(k, id); }
     state.run.pop = 5; calc = compute(); render();
     const hint2 = document.querySelector('#panel .card.hallhint').textContent.replace(/\s+/g, ' '), farm = said(document.querySelector('#panel .card[data-id="farm"] .adds')), cot = said(document.querySelector('#panel .card[data-id="cottage"] .adds'));
     document.querySelector('#panel .card.hallhint').click(); const sel = ui.sel.tile;
@@ -195,7 +195,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     state.run.tiles[HALL_KEY].level = 1; state.run.gold = 0; ui.tab = 'build'; render();
     const out = { near, isHint, firstCard, noRoutine, later, none, hint2, farm, cot, res, sel, titles, claimable, pinned, goal, after };
     adoptSave(JSON.parse(keep), Date.now()); ui.tab = 'build'; ui.sel = {}; render(); return out; });
-  ok(guide.isHint && guide.firstCard === 'cottage' && guide.noRoutine && guide.later && /bring it closer/.test(guide.none) && /Next: Manor/.test(guide.none) && /2\.50K/.test(guide.none) && /Not all of this is being produced/.test(guide.none) && /At this rate: Manor in about \d/.test(guide.hint2) && guide.sel === '5,5',
+  ok(guide.isHint && guide.firstCard === 'cottage' && guide.noRoutine && guide.later && /bring it closer/.test(guide.none) && /Next: Manor/.test(guide.none) && /2\.50K/.test(guide.none) && /Not all of this is being produced/.test(guide.none) && /At this rate: Manor in about \d/.test(guide.hint2) && guide.sel === '6,6',
     'a new game opens Build on the Cottage, with no Routine card and the next hall (price, and how long at this rate) below the buildings; once the first decrees are done the hall leads the tab; tapping it selects the hall ' + JSON.stringify([guide.none, guide.hint2]));
   ok(guide.near.wait > 60 && guide.near.wait < 12 * 3600 && /delays the Manor by about|brings the Manor about/.test(guide.near.cottage || '') && guide.near.lumber === null && !/Manor/.test(guide.near.lumberCloser + guide.near.quarry),
     'with the Manor within reach a Cottage card says what buying it does to the wait; workplaces the town could not staff make no such claim ' + JSON.stringify([guide.near.cottage, guide.near.lumber, guide.near.quarry]));
@@ -232,7 +232,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(dafter.gone && dinfo.refund.gold === Math.floor(dinfo.spent.gold * 0.75) && dinfo.refund.gold > 1e8 && dafter.gold - dinfo.gold >= dinfo.refund.gold * 0.999 && dafter.again === dinfo.spent.gold && dafter.level === 12, 'confirmed demolish refunds three quarters of what another one costs (' + dinfo.refund.gold + ' gold of ' + dinfo.spent.gold + '), and the kind stays at level 12');
 
   // --- clearing terrain
-  const ck = await page.evaluate(() => { for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] !== 'plain') return x + ',' + y; });
+  const ck = await page.evaluate(() => { for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (unlocked(x, y) && state.run.terrain[x][y] !== 'plain') return x + ',' + y; });
   await page.evaluate(k => { ui.sel = { tile: k }; render(); document.querySelector('#inspector [data-act="clear"]').click(); }, ck);
   ok(await page.evaluate(k => { const [x, y] = xy(k); return state.run.terrain[x][y] === 'plain' && state.run.cleared === 1 && clearCost().gold === 1000; }, ck), 'terrain can be cleared for gold; next clearing costs double');
 
@@ -281,8 +281,8 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       research: { axes: 1, '<img onerror=window.__xss=1 src=x>': 1 }, repeatables: { prod: '<img>', food: 1e9 }, buffUntil: 1e99, clock: 5 } };
   await page.evaluate(e => { ui.tab = 'realm'; render(); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = encodeSave(JSON.stringify(e)); document.querySelector('#modal [data-act="doimport"]').click(); }, evil);
   const ev = await page.evaluate(() => { for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; render(); } ui.sel = { tile: HALL_KEY }; render();
-    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app script, #toasts img').length + [...document.querySelectorAll('#app svg, #toasts svg')].filter(v => !(v.children.length === 1 && v.firstElementChild.localName === 'use' && /^#sp-\w+$/.test(v.firstElementChild.getAttribute('href')) && [...v.attributes].every(a => !/^on/i.test(a.name)))).length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['5,4'], farmLv: kindLevel('farm'), decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
-  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 7 && ev.tiles.join(' ') === '0,0 5,4 5,5' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
+    return { xss: window.__xss, img: document.querySelectorAll('#app img, #app script, #toasts img').length + [...document.querySelectorAll('#app svg, #toasts svg')].filter(v => !(v.children.length === 1 && v.firstElementChild.localName === 'use' && /^#sp-\w+$/.test(v.firstElementChild.getAttribute('href')) && [...v.attributes].every(a => !/^on/i.test(a.name)))).length, exp: state.run.exp, crowns: state.meta.crowns, gold: state.run.res.gold, wood: state.run.res.wood, hall: hallLevel(), tiles: Object.keys(state.run.tiles).sort(), farm: state.run.tiles['6,5'], farmLv: kindLevel('farm'), decree: state.meta.decree, rep: state.run.repeatables, tilesShown: document.querySelectorAll('.tile').length, buff: state.run.buffUntil, ok: isFinite(calc.rates.gold) }; });
+  ok(!ev.xss && ev.img === 0 && ev.exp === 3 && ev.crowns === 0 && ev.gold === 20 && ev.hall === 7 && ev.tiles.join(' ') === '1,1 6,5 6,6' && ev.farm.level === undefined && ev.farmLv === 1 && ev.decree === 'coffers' && ev.tilesShown === 121 && ev.buff === undefined && ev.ok && ev.rep.food === 500 && !ev.rep.prod,
     'hostile import is coerced/clamped, renders, runs no script ' + JSON.stringify(ev));
   await page.evaluate(() => { document.querySelector('#panel [data-act="import"]') || (ui.tab = 'realm', render()); document.querySelector('#panel [data-act="import"]').click(); document.getElementById('imp').value = 'not a save'; document.querySelector('#modal [data-act="doimport"]').click(); });
   ok(await page.evaluate(() => state.run.exp === 3 && !document.getElementById('modal').hidden), 'unreadable import is rejected and the current game is kept');
@@ -317,12 +317,12 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
       stats: { clicks: 10, totalGold: 1.02e7, merchants: 2, prestiges: 1, built: 40, started: Date.now() - 1e7 } };
     ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(old)); });
   await page.reload(); await page.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
-  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = genTerrainLegacy(12345); for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, notes: document.getElementById('modalbox').textContent }));
-  ok(mig.v === 7 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /The trades now eat/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
+  const mig = await page.evaluate(() => ({ v: state.v, decree: state.meta.decree, crowns: state.meta.crowns, bonus: state.meta.bonusCrowns, pend: pendingCrowns(), cap: calc.cap, tiles: Object.keys(state.run.tiles).length, pop: state.run.pop, clock: Math.round(state.run.clock), fest: state.run.buffUntil !== undefined, terrain: (() => { const g = frontierRing(embedInner(genTerrainLegacy(12345)), 12345); for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (!state.run.tiles[x + ',' + y] && g[x][y] !== state.run.terrain[x][y]) return false; return true; })(), modal: !document.getElementById('modal').hidden, notes: document.getElementById('modalbox').textContent }));
+  ok(mig.v === 8 && mig.decree === 'coffers' && mig.crowns === 19 && mig.bonus === 0 && mig.pend >= 0 && mig.tiles === 4 && mig.terrain && !mig.fest && mig.modal && /1 building in this save was not recognised/.test(mig.notes) && /predates the rebalance/.test(mig.notes) && /The trades now eat/.test(mig.notes), 'v1 save migrated, and what changed is said in the welcome-back dialog ' + JSON.stringify(mig));
   ok(mig.clock >= 29 && mig.clock <= 33 && !/Away/.test(mig.notes), 'a 30s reload gap is credited without an away summary (' + mig.clock + 's)');
   await page.evaluate(() => closeModal());
-  const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 11, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
-  ok(stored.v === 7 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
+  const stored = await page.evaluate(() => { save(); const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return { v: s.v, grid: Array.isArray(s.run.terrain) && s.run.terrain.length === 13, decree: s.meta.decree, keys: Object.keys(s).sort().join() }; });
+  ok(stored.v === 8 && stored.grid && stored.decree === 'coffers' && stored.keys === 'last,meta,run,v', 'new saves carry a version, the terrain grid and the decree id ' + JSON.stringify(stored));
   ok(errs.length === 0, 'mobile: no console errors ' + JSON.stringify(errs));
 
   // --- corrupt / hostile stored saves fall back to a fresh game and keep a copy
@@ -405,20 +405,20 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   ok(await p3.evaluate(() => hallLevel()) === 2, 'tapping it upgrades the hall');
   await p3.tap('#buildbar [data-act="deselect"]'); await settle(p3);
   ok(await p3.evaluate(() => !ui.sel.tile && !!document.querySelector('#bbrow .bb[data-act="pick"]')), 'Close returns the bar to the build list');
-  await p3.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 }; run.tiles['6,5'] = { kind: 'building', id: 'smith' }; run.levels.smith = 4; run.terrain[6][5] = 'plain'; ui.mapN = 0; render(); });
-  await settle(p3); await p3.tap('.tile[data-id="6,5"]'); await settle(p3);
+  await p3.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 }; run.tiles['7,6'] = { kind: 'building', id: 'smith' }; run.levels.smith = 4; run.terrain[7][6] = 'plain'; ui.mapN = 0; render(); });
+  await settle(p3); await p3.tap('.tile[data-id="7,6"]'); await settle(p3);
   up = await reach('#buildbar [data-act="upkind"]'); const dem = await reach('#buildbar [data-act="demolish"]');
   const info = await p3.evaluate(() => document.getElementById('bbinfo').textContent.replace(/\s+/g, ' ').trim());
   ok(up && up.inView && up.hit && /^Upgrade all to level 5/.test(up.text) && /(output ×3|gold [+-][\d.]+\/s) · food ×2/.test(up.text) && /Blacksmith level 4 · 1 standing/.test(info) && dem && dem.inView && dem.hit && await p3.evaluate(() => scrollY) === 0, 'tap a Blacksmith on the 11x11 map: Upgrade all and Demolish are on screen in the bar ' + JSON.stringify({ up, dem, info }));
   await p3.tap('#buildbar [data-act="upkind"]'); await settle(p3);
   ok(await p3.evaluate(() => kindLevel('smith')) === 5, 'tapping it in the bar upgrades the Blacksmiths');
-  await p3.evaluate(() => { state.run.tiles['6,6'] = { kind: 'building', id: 'cottage' }; state.run.levels.cottage = 2; state.run.terrain[6][6] = 'plain'; ui.sel = { tile: '6,6' }; render(); });
+  await p3.evaluate(() => { state.run.tiles['7,7'] = { kind: 'building', id: 'cottage' }; state.run.levels.cottage = 2; state.run.terrain[7][7] = 'plain'; ui.sel = { tile: '7,7' }; render(); });
   up = await reach('#buildbar [data-act="upkind"]');
   const fits = await p3.evaluate(() => { const b = document.querySelector('#bbrow [data-act="upkind"]'), r = b.getBoundingClientRect(); return { right: r.right <= innerWidth, kids: [...b.children].every(c => c.getBoundingClientRect().right <= r.right + 1 && c.getBoundingClientRect().bottom <= r.bottom + 1) }; });
   ok(up && up.inView && /^Upgrade all to level 3/.test(up.text) && /\+5 housing/.test(up.text) && fits.right && fits.kids, 'a Cottage upgrade says what the level adds, inside its button: "' + (up && up.text) + '" ' + JSON.stringify(fits));
   await shot(p3, 'shot-390x664-tile.png');
   // a double tap on Close must not fall through to the build button that takes its place
-  const dbl = await p3.evaluate(() => { ui.sel = { tile: '6,6' }; render();
+  const dbl = await p3.evaluate(() => { ui.sel = { tile: '7,7' }; render();
     const c = document.querySelector('#buildbar [data-act="deselect"]'), r = c.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
     c.click(); const under = document.elementFromPoint(x, y).closest('[data-act]'); under.click();
     return { x, y, act: under.dataset.act, id: under.dataset.id, tile: ui.sel.tile, build: ui.sel.build }; });
@@ -429,10 +429,10 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   // M1: with the next hall within reach, the phone's Upgrade button says what the purchase does to the wait
   await fresh(p3);
   const barHint = await p3.evaluate(() => { const run = state.run; run.tiles[HALL_KEY].level = 2;
-    for (const [k, id, lv] of [['4,5', 'cottage', 4], ['6,5', 'cottage', 4], ['5,4', 'lumber', 2], ['5,6', 'farm', 4], ['4,4', 'quarry', 2], ['6,6', 'market', 1]]) { run.terrain[+k[0]][+k[2]] = 'plain'; run.tiles[k] = { kind: 'building', id }; run.levels[id] = lv; }
+    for (const [k, id, lv] of [['5,6', 'cottage', 4], ['7,6', 'cottage', 4], ['6,5', 'lumber', 2], ['6,7', 'farm', 4], ['5,5', 'quarry', 2], ['7,7', 'market', 1]]) { run.terrain[+k[0]][+k[2]] = 'plain'; run.tiles[k] = { kind: 'building', id }; run.levels[id] = lv; }
     run.pop = 30; run.res.food = 1e5; calc = compute(); const c = upgradeCost(run.tiles[HALL_KEY]);
     for (const r in c) run.res[r] = c[r] - calc.base[r] * 3600; run.res.gold = c.gold - calc.base.gold * 1800; calc = compute();
-    ui.sel = { tile: '5,6' }; ui.sheet = false; render();
+    ui.sel = { tile: '6,7' }; ui.sheet = false; render();
     const b = document.querySelector('#buildbar .bb.act.wide'), h = b && b.querySelector('.delay, .adds'), r = h && h.getBoundingClientRect(), br = b && b.getBoundingClientRect(), bar = document.getElementById('buildbar').getBoundingClientRect();
     return { staff: calc.staff, wait: hallWait(), text: h && h.textContent, shown: !!h && r.height > 8 && r.width > 40 && r.top >= br.top - 1 && r.bottom <= bar.bottom + 1 && r.right <= innerWidth && getComputedStyle(h).display !== 'none', inRow: getComputedStyle(document.querySelector('#inspector .row') || document.body).display, docH: document.documentElement.scrollHeight, vh: innerHeight }; });
   ok(barHint.staff >= 1 && barHint.wait > 60 && barHint.wait < 12 * 3600 && /(delays the Keep by about|brings the Keep about)/.test(barHint.text || '') && barHint.shown && barHint.docH <= barHint.vh + 1,
@@ -444,12 +444,12 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   for (const id of ['smith', 'guild']) {
     await fresh(p3);
     const longest = await p3.evaluate(id => { const run = state.run; run.exp = 1; run.tiles[HALL_KEY].level = 4;
-      const put = [['4,4', 'cottage'], ['4,5', 'cottage'], ['4,6', 'cottage'], ['6,4', 'cottage'], ['5,4', 'farm'], ['6,6', 'mine'], ['6,5', id], ['5,6', 'market']];
+      const put = [['5,5', 'cottage'], ['5,6', 'cottage'], ['5,7', 'cottage'], ['7,5', 'cottage'], ['6,5', 'farm'], ['7,7', 'mine'], ['7,6', id], ['6,7', 'market']];
       for (const [k, b] of put) { const [x, y] = k.split(',').map(Number); run.terrain[x][y] = 'plain'; run.tiles[k] = { kind: 'building', id: b }; }
       Object.assign(run.levels, { cottage: 12, farm: 8, mine: 1, smith: 1, guild: 1, market: 1 }); calc = compute(); run.pop = calc.cap; run.res.food = 1e7; calc = compute();
       const c = upgradeCost(run.tiles[HALL_KEY]), kc = kindUpgradeCost(id);
       for (const r in c) run.res[r] = Math.max(0, c[r] - calc.base[r] * 3 * 3600); for (const r in kc) run.res[r] = Math.max(run.res[r], kc[r] * 1.01);
-      ui.sel = { tile: '6,5' }; ui.sheet = false; render();
+      ui.sel = { tile: '7,6' }; ui.sheet = false; render();
       const b = document.querySelector('#buildbar [data-act="upkind"]'), br = b.getBoundingClientRect(), tabs = document.getElementById('tabs').getBoundingClientRect();
       const lines = [...b.children].map(e => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim(), whole: r.top >= br.top - 0.5 && r.bottom <= br.bottom + 0.5 && (getComputedStyle(e).overflow === 'visible' || e.scrollHeight <= e.clientHeight + 1) && r.height >= parseFloat(getComputedStyle(e).fontSize) }; });
       return { mats: Object.keys(kc).length, hint: !!b.querySelector('.delay, .adds'), lines, inView: br.top >= 0 && br.bottom <= tabs.top + 1, docH: document.documentElement.scrollHeight, vh: innerHeight }; }, id);
@@ -508,9 +508,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
   }
   { // 360px wide, mid-game: the longest upgrade button (three materials, effect, hall hint) stays inside the screen
     const w360 = await p3.evaluate(() => { const run = state.run; run.exp = 2; run.tiles[HALL_KEY].level = 4; run.res = { gold: 9e12, food: 1e6, wood: 9e12, stone: 9e12, iron: 9e12 }; run.pop = 200;
-      run.terrain[4][5] = 'plain'; run.tiles['4,5'] = { kind: 'building', id: 'lumber' }; run.levels.lumber = 12; run.terrain[6][5] = 'plain'; run.tiles['6,5'] = { kind: 'building', id: 'mine' }; run.levels.mine = 9;
+      run.terrain[5][6] = 'plain'; run.tiles['5,6'] = { kind: 'building', id: 'lumber' }; run.levels.lumber = 12; run.terrain[7][6] = 'plain'; run.tiles['7,6'] = { kind: 'building', id: 'mine' }; run.levels.mine = 9;
       ui.mapN = 0; ui.sheet = false; const out = [];
-      for (const k of ['4,5', '6,5']) { ui.sel = { tile: k }; render(); const b = document.querySelector('#bbrow [data-act="upkind"]'), r = b.getBoundingClientRect(), info = document.getElementById('bbinfo').getBoundingClientRect();
+      for (const k of ['5,6', '7,6']) { ui.sel = { tile: k }; render(); const b = document.querySelector('#bbrow [data-act="upkind"]'), r = b.getBoundingClientRect(), info = document.getElementById('bbinfo').getBoundingClientRect();
         const lbl = b.querySelector('b'), bi = document.getElementById('bbinfo');
         out.push({ k, docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight, right: Math.round(r.right), kids: [...b.children].every(c => c.getBoundingClientRect().right <= r.right + 1), info: Math.round(info.right), text: b.textContent.replace(/\s+/g, ' ').slice(0, 60),
           label: lbl.textContent, labelWhole: lbl.scrollWidth <= lbl.clientWidth, title: bi.querySelector('b').textContent.trim(), infoWhole: bi.scrollWidth <= bi.clientWidth }); }
@@ -524,8 +524,8 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     for (const [w, h] of [[390, 844], [360, 640]]) {
       await p3.setViewportSize({ width: w, height: h }); await settle(p3);
       insp.push(await p3.evaluate(([w, h]) => { const run = state.run, out = [];
-        run.terrain[5][6] = 'plain'; run.tiles['5,6'] = { kind: 'building', id: 'quarry' }; run.levels.quarry = 2; run.terrain[4][4] = 'plain'; run.tiles['4,4'] = { kind: 'building', id: 'cottage' };
-        for (const k of ['4,5', '6,5', '5,6', '4,4']) { ui.sel = { tile: k }; ui.sheet = false; render(); const ins = document.getElementById('inspector'), h3 = ins.querySelector('h3'), note = ins.querySelector('.kindnote');
+        run.terrain[6][7] = 'plain'; run.tiles['6,7'] = { kind: 'building', id: 'quarry' }; run.levels.quarry = 2; run.terrain[5][5] = 'plain'; run.tiles['5,5'] = { kind: 'building', id: 'cottage' };
+        for (const k of ['5,6', '7,6', '6,7', '5,5']) { ui.sel = { tile: k }; ui.sheet = false; render(); const ins = document.getElementById('inspector'), h3 = ins.querySelector('h3'), note = ins.querySelector('.kindnote');
           out.push({ k, id: run.tiles[k].id, name: BUILDINGS[run.tiles[k].id].name, h3: h3 ? getComputedStyle(h3).display : null, note: note ? getComputedStyle(note).display : null, fits: ins.scrollHeight <= ins.clientHeight + 1, sh: ins.scrollHeight, ch: ins.clientHeight,
             title: document.querySelector('#bbinfo b').textContent.trim(), text: ins.innerText.replace(/\s+/g, ' ') }); }
         ui.sel = {}; render(); return { size: w + 'x' + h, out }; }, [w, h]));
@@ -605,7 +605,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const scan = () => { for (const u of document.querySelectorAll('use')) { const id = u.getAttribute('href'); seen.add(id); if (!document.querySelector(id)) missing.push(id); }
       const t = document.body.innerText; if (emoji.test(t)) text.push(t.match(emoji)[0]); };
     state.run.res = { gold: 1e9, food: 1e9, wood: 1e9, stone: 1e9, iron: 1e9 }; state.meta.crowns = 3; state.run.tiles[HALL_KEY].level = 5; state.run.exp = 3; ui.mapN = 0;
-    let i = 0; for (const id of BUILD_ORDER) { state.run.levels[id] = 2; for (let x = 0; x < MAP_SIZE && i >= 0; x++) for (let y = 0; y < MAP_SIZE; y++) if (state.run.terrain[x][y] === 'plain' && !state.run.tiles[x + ',' + y]) { state.run.tiles[x + ',' + y] = { kind: 'building', id }; x = MAP_SIZE; break; } }
+    let i = 0; for (const id of BUILD_ORDER) { state.run.levels[id] = 2; for (let x = 0; x < MAP_SIZE && i >= 0; x++) for (let y = 0; y < MAP_SIZE; y++) if (unlocked(x, y) && state.run.terrain[x][y] === 'plain' && !state.run.tiles[x + ',' + y]) { state.run.tiles[x + ',' + y] = { kind: 'building', id }; x = MAP_SIZE; break; } }
     calc = compute();
     for (const lv of [1, 2, 3, 4, 5, 6, 7]) { state.run.tiles[HALL_KEY].level = lv; state.meta.crowns = lv > 5 ? 80 : 3; calc = compute();
       for (const t of ['build', 'research', 'decrees', 'realm']) { ui.tab = t; ui.sel = {}; render(); scan(); }
@@ -627,7 +627,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const got = await pg.evaluate(() => {
       const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.exp = 1; run.tiles[HALL_KEY].level = 4; run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
       const put = (k, id) => { run.tiles[k] = { kind: 'building', id }; };
-      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage'); put('5,2', 'tavern');
+      put('5,5', 'market'); put('5,4', 'guild'); put('5,3', 'smith'); put('4,3', 'mine'); put('7,7', 'farm'); put('7,5', 'cottage'); put('4,5', 'cottage'); put('7,6', 'cottage'); put('6,3', 'tavern');
       calc = compute(); run.pop = calc.cap; ui.mapN = 0; calc = compute();
       const out = {}, docW = () => document.documentElement.scrollWidth;
       for (const id of ['market', 'smith', 'guild', 'farm', 'tavern']) { const k = Object.keys(run.tiles).find(k => run.tiles[k].id === id); ui.sel = { tile: k }; render();
@@ -657,7 +657,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const got = await pg.evaluate(() => {
       const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.exp = 1; run.tiles[HALL_KEY].level = 4; run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
       const put = (k, id) => { run.tiles[k] = { kind: 'building', id }; };
-      put('4,4', 'market'); put('4,3', 'guild'); put('4,2', 'smith'); put('3,2', 'mine'); put('6,6', 'farm'); put('6,4', 'cottage'); put('3,4', 'cottage'); put('6,5', 'cottage'); put('2,6', 'guild');
+      put('5,5', 'market'); put('5,4', 'guild'); put('5,3', 'smith'); put('4,3', 'mine'); put('7,7', 'farm'); put('7,5', 'cottage'); put('4,5', 'cottage'); put('7,6', 'cottage'); put('3,7', 'guild');
       calc = compute(); run.pop = calc.cap; ui.mapN = 0; calc = compute();
       const phone = innerWidth < 800, T = e => e ? e.textContent.replace(/\s+/g, ' ').trim() : '';
       // An element is cut off when it hides overflowing text (the "…" case), or sticks out of its button or the screen.
@@ -668,10 +668,10 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
         return { eff: T(btn.querySelector('.eff')), cut: cut(btn), stat: T(document.querySelector('#inspector .bstats')), cant: btn.classList.contains('cant'),
           jobWhole: !phone || getComputedStyle(job).display === 'none' || job.scrollWidth <= job.clientWidth + 1, inView: br.right <= innerWidth && br.left >= 0 && (!phone || br.bottom <= document.getElementById('tabs').getBoundingClientRect().top + 1),
           docW: document.documentElement.scrollWidth }; };
-      put('8,8', 'lumber'); calc = compute(); run.pop = calc.cap; calc = compute();
-      const out = { market: look('4,4'), smith: look('4,2'), guild: look('4,3'), lone: look('2,6') };
-      out.lumber = look('8,8').eff;
-      delete run.tiles['4,3']; calc = compute(); out.idle = look('2,6');
+      put('9,9', 'lumber'); calc = compute(); run.pop = calc.cap; calc = compute();
+      const out = { market: look('5,5'), smith: look('5,3'), guild: look('5,4'), lone: look('3,7') };
+      out.lumber = look('9,9').eff;
+      delete run.tiles['5,4']; calc = compute(); out.idle = look('3,7');
       document.querySelector((phone ? '#buildbar' : '#inspector') + ' [data-act="upkind"]').click(); out.idle.bought = kindLevel('guild');
       return out; });
     const all = ['market', 'smith', 'guild', 'lone', 'idle'];
@@ -685,9 +685,9 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ok(/^no effect yet: no Guildhall is beside a Market or Blacksmith/.test(got.idle.eff) && !/boost/.test(got.idle.eff) && /Boosting nothing/.test(got.idle.stat) && !got.idle.cant && got.idle.bought === 2,
       `${w}x${h}: when no Guildhall touches a trade, the upgrade says it has no effect yet, and can still be bought ` + JSON.stringify(got.idle));
     if (w < 800) { // the guild screenshots for the playtest folder (SHOTS=<dir>)
-      await pg.evaluate(() => { state.run.tiles['4,3'] = { kind: 'building', id: 'guild' }; state.run.levels.guild = 1; calc = compute(); ui.sel = { tile: '4,3' }; document.getElementById('toasts').innerHTML = ''; render(); }); await settle(pg); await shot(pg, `guild-${w}x${h}.png`);
-      await pg.evaluate(() => { delete state.run.tiles['4,3']; calc = compute(); ui.sel = { tile: '2,6' }; render(); }); await settle(pg); await shot(pg, `guild-idle-${w}x${h}.png`);
-      for (const [id, k] of [['market', '4,4'], ['smith', '4,2']]) { await pg.evaluate(k => { ui.sel = { tile: k }; render(); }, k); await settle(pg); await shot(pg, `${id}-${w}x${h}.png`); }
+      await pg.evaluate(() => { state.run.tiles['5,4'] = { kind: 'building', id: 'guild' }; state.run.levels.guild = 1; calc = compute(); ui.sel = { tile: '5,4' }; document.getElementById('toasts').innerHTML = ''; render(); }); await settle(pg); await shot(pg, `guild-${w}x${h}.png`);
+      await pg.evaluate(() => { delete state.run.tiles['5,4']; calc = compute(); ui.sel = { tile: '3,7' }; render(); }); await settle(pg); await shot(pg, `guild-idle-${w}x${h}.png`);
+      for (const [id, k] of [['market', '5,5'], ['smith', '5,3']]) { await pg.evaluate(k => { ui.sel = { tile: k }; render(); }, k); await settle(pg); await shot(pg, `${id}-${w}x${h}.png`); }
     }
     ok(e4.length === 0, `${w}x${h} trade buttons: no console errors ` + JSON.stringify(e4));
     await cx.close();
@@ -698,13 +698,14 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
     const freshNote = await pg.evaluate(() => /The trades now eat/.test(document.body.innerText + document.getElementById('modalbox').textContent));
     await pg.evaluate(() => { const s = JSON.parse(serialize()); s.v = 4; s.last = Date.now() - 3 * 3600 * 1000; s.run.tiles[HALL_KEY].level = 4; s.run.exp = 1;
-      for (const [k, id] of [['5,4', 'cottage'], ['4,5', 'farm'], ['6,5', 'guild'], ['5,6', 'market']]) { const [x, y] = k.split(',').map(Number); s.run.terrain[x][y] = 'plain'; s.run.tiles[k] = { kind: 'building', id }; }
+      for (const [k, id] of [['6,5', 'cottage'], ['5,6', 'farm'], ['7,6', 'guild'], ['6,7', 'market']]) { const [x, y] = k.split(',').map(Number); s.run.terrain[x][y] = 'plain'; s.run.tiles[k] = { kind: 'building', id }; }
+      s.run.terrain = s.run.terrain.slice(1, 12).map(col => col.slice(1, 12)); const t = {}; for (const k in s.run.tiles) { const [x, y] = k.split(',').map(Number); t[(x - 1) + ',' + (y - 1)] = s.run.tiles[k]; } s.run.tiles = t; // as version 4 wrote it: 11×11
       ui.paused = true; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); });
     const load = async () => { await pg.reload(); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile'));
       return pg.evaluate(() => { const m = document.getElementById('modalbox'), r = m.getBoundingClientRect(); return { open: !document.getElementById('modal').hidden, text: m.innerText.replace(/\s+/g, ' '), notes: m.querySelectorAll('.loadnote').length, toasts: document.getElementById('toasts').textContent, fits: r.top >= 0 && r.bottom <= innerHeight, v: state.v, stored: JSON.parse(localStorage.getItem(SAVE_KEY)).v }; }); };
     const first = await load(); await shot(pg, 'oldsave-welcome-360x740.png');
     ok(first.open && /^Welcome back Away 3 h\./.test(first.text) && first.notes === 2 && /travelling trader/.test(first.text) && /The trades now eat\. Markets, Blacksmiths and Guildhalls share the food your town does not eat/.test(first.text) && /trades beside a Tavern need less food/.test(first.text)
-      && !/trades now eat/.test(first.toasts) && first.fits && first.v === 7 && first.stored === 7, 'first load of a version-4 save: the welcome back explains the new rules in one note (and the trader in another), and the save is rewritten as version 7 ' + JSON.stringify(first));
+      && !/trades now eat/.test(first.toasts) && first.fits && first.v === 8 && first.stored === 8, 'first load of a version-4 save: the welcome back explains the new rules in one note (and the trader in another), and the save is rewritten as version 8 ' + JSON.stringify(first));
     await pg.evaluate(() => { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); s.last = Date.now() - 3 * 3600 * 1000; localStorage.setItem(SAVE_KEY, JSON.stringify(s)); ui.paused = true; });
     const second = await load();
     ok(second.open && /Away 3 h/.test(second.text) && !second.notes && !/trades now eat/.test(second.text + second.toasts), 'the next load shows the usual welcome back without the note ' + JSON.stringify(second.text));
@@ -721,7 +722,7 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     ok(/travelling trader sells charters/.test(before.text) && before.cards.every(id => ['axes', 'rotation', 'tithes', 'chisels', 'steward'].includes(id)), `${w}px: before the Keep the tab says where charters come from and sells only Village Hall research ` + JSON.stringify(before));
     const got = await pg.evaluate(() => {
       const run = state.run; run.terrain = run.terrain.map(c => c.map(() => 'plain')); run.res = { gold: 1e9, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
-      for (const [k, id] of [['4,4', 'cottage'], ['6,6', 'farm'], ['4,6', 'lumber'], ['6,4', 'quarry'], ['5,4', 'market']]) run.tiles[k] = { kind: 'building', id };
+      for (const [k, id] of [['5,5', 'cottage'], ['7,7', 'farm'], ['5,7', 'lumber'], ['7,5', 'quarry'], ['6,5', 'market']]) run.tiles[k] = { kind: 'building', id };
       upgrade(HALL_KEY); traderTick(12 * 3600); render();
       const cards = [...document.querySelectorAll('#panel [data-act="charter"]')], dot = !!document.querySelector('#tabs [data-id="research"] .dot');
       return { offers: traderOffers().slice(), cards: cards.map(b => b.dataset.id), dot, fits: cards.every(c => c.scrollWidth <= c.clientWidth + 1) && document.documentElement.scrollWidth <= innerWidth,
@@ -734,6 +735,22 @@ const watch = (page, errs) => { page.on('console', m => { if (m.type() === 'erro
     const gone = await pg.evaluate(() => ({ offers: traderOffers().length, dot: !!document.querySelector('#tabs [data-id="research"] .dot'), text: document.querySelector('#panel .trader').innerText.replace(/\s+/g, ' ') }));
     ok(gone.offers === 0 && /The trader has gone\. Next visit in about/.test(gone.text), `${w}px: Send away empties the card and says when the trader is back ` + JSON.stringify(gone));
     ok(e6.length === 0, `${w}px trader: no console errors ` + JSON.stringify(e6));
+    await cx.close(); }
+  // --- the Frontier: the fourth expansion's card says what the land holds; the 13×13 map fits each width (phones pan it)
+  for (const [w, h] of [[360, 740], [390, 844], [1280, 800]]) {
+    const cx = await br.newContext({ viewport: { width: w, height: h }, hasTouch: w < 800, isMobile: w < 800, reducedMotion: 'reduce' }), pg = await cx.newPage(), e7 = []; watch(pg, e7);
+    await pg.goto(URL); await pg.waitForFunction(() => typeof state === 'object' && document.querySelector('.tile')); await fresh(pg);
+    const card = await pg.evaluate(() => { const run = state.run; run.exp = 3; run.tiles[HALL_KEY].level = 5; run.res = { gold: 1e8, food: 1e7, wood: 1e9, stone: 1e9, iron: 1e6 };
+      ui.tab = 'build'; ui.sel = {}; ui.sheet = true; ui.mapN = 0; render(); const c = document.querySelector('#panel [data-act="expand"]');
+      return { text: c ? c.innerText.replace(/\s+/g, ' ') : null, fits: !!c && c.scrollWidth <= c.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth, land: landAhead() }; });
+    ok(card.text && /Claim the Frontier/.test(card.text) && /\(13×13\)/.test(card.text) && new RegExp(card.land.plots + ' open plots').test(card.text) && /triple sites? for/.test(card.text) && card.fits, `${w}px: the Frontier card says what the land holds, and fits ` + JSON.stringify(card));
+    await pg.evaluate(() => document.querySelector('#panel [data-act="expand"]').click()); await pg.evaluate(() => { ui.sheet = false; render(); }); await settle(pg);
+    const map = await pg.evaluate(() => { const t = document.querySelector('.tile').getBoundingClientRect(), sc = document.getElementById('mapscroll');
+      return { exp: state.run.exp, n: document.querySelectorAll('.tile').length, corner: !!document.querySelector('.tile[data-id="0,0"]'), w: t.width, h: t.height, pans: sc.scrollWidth > sc.clientWidth + 1, page: document.documentElement.scrollWidth <= innerWidth,
+        none: !document.querySelector('#panel [data-act="expand"]') }; });
+    ok(map.exp === 4 && map.n === 169 && map.corner && map.w >= 40 && map.h >= 40 && map.page && (w > 800 || map.pans), `${w}px: claimed, the map is 13×13 with 40px+ tiles, no page scroll, and phones pan it ` + JSON.stringify(map));
+    await shot(pg, `frontier-${w}x${h}.png`);
+    ok(e7.length === 0, `${w}px Frontier: no console errors ` + JSON.stringify(e7));
     await cx.close(); }
   await br.close();
   console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);

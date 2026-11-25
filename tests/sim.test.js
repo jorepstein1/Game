@@ -10,13 +10,17 @@ function test(name, fn) {
   catch (e) { failed++; console.log('FAIL ' + name + '\n     ' + String(e.message).split('\n').join('\n     ')); }
 }
 const plain = v => JSON.parse(JSON.stringify(v)); // objects from the vm context have foreign prototypes
+// A save as versions before 8 wrote it: the 11×11 map, and tile keys one step nearer the corner (the hall at 5,5).
+function asOld(raw, v) { raw.v = v; raw.run.terrain = raw.run.terrain.slice(1, 12).map(col => col.slice(1, 12)); const t = {};
+  for (const k in raw.run.tiles) { const [x, y] = k.split(',').map(Number); t[(x - 1) + ',' + (y - 1)] = raw.run.tiles[k]; } raw.run.tiles = t; return raw; }
+const OLD_HALL = '5,5';
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg || ''} expected ${b} ± ${tol}, got ${a}`);
 // A small working town on a known map. With `levels`, the hall and every kind standing are raised to that level.
 function town(sim, levels) {
   const s = sim.newState(0); s.run = sim.newRun(12345); sim.setState(s);
   const run = sim.state.run; run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 };
   const free = [];
-  for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (run.terrain[x][y] === 'plain' && !(x === 5 && y === 5)) free.push(x + ',' + y);
+  for (let x = 4; x <= 8; x++) for (let y = 4; y <= 8; y++) if (run.terrain[x][y] === 'plain' && !(x === 6 && y === 6)) free.push(x + ',' + y);
   for (const id of ['cottage', 'cottage', 'farm', 'lumber', 'quarry']) assert.ok(sim.build(free.shift(), id).ok, 'build ' + id);
   if (levels) for (let i = 1; i < levels; i++) { assert.ok(sim.upgrade(sim.HALL_KEY).ok); for (const id of ['cottage', 'farm', 'lumber', 'quarry']) assert.ok(sim.upgradeKind(id).ok, 'upgrade ' + id); }
   sim.setState(sim.state);
@@ -27,7 +31,7 @@ function field(sim) {
   const s = sim.newState(0); s.run = sim.newRun(12345); sim.setState(s);
   const run = sim.state.run; run.terrain = run.terrain.map(col => col.map(() => 'plain')); run.exp = sim.EXPAND_COST.length;
   run.tiles[sim.HALL_KEY].level = 5; run.res = { gold: 1e15, food: 1e15, wood: 1e15, stone: 1e15, iron: 1e15 }; // small enough that every price shows in the stock
-  const free = []; for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) if (!(x === 5 && y === 5)) free.push(x + ',' + y);
+  const free = []; for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (!(x === 6 && y === 6)) free.push(x + ',' + y);
   sim.setState(sim.state);
   return free;
 }
@@ -88,9 +92,9 @@ test('the price rule: a build costs one step of worth at the kind level, an upgr
     for (let n = 0; n < 7; n++) { assert.strictEqual(sim.buildCost(id)[c0], Math.ceil(base * step(id, n) * U(id, sim.kindLevel(id))), `${id} copy ${n + 1}`); assert.ok(sim.build(free.shift(), id).ok); if (n === 2) sim.upgradeKind(id); }
     assert.strictEqual(sim.kindUpgradeCost(id)[c0], Math.ceil(base * W(id, 7) * (U(id, 3) - U(id, 2))), id + ': an upgrade is the rise in worth of all seven');
   }
-  field(sim); assert.ok(sim.build('0,0', 'lumber').ok);
+  field(sim); assert.ok(sim.build('1,1', 'lumber').ok);
   assert.deepStrictEqual(plain(sim.kindUpgradeCost('lumber')), { gold: 3580, wood: 895 }, 'the first Lumber Camp upgrade (a lift of 10)');
-  sim.state.run.tiles['0,1'] = { kind: 'building', id: 'guild' }; sim.state.run.levels.guild = sim.MAX_LEVEL - 1;
+  sim.state.run.tiles['1,2'] = { kind: 'building', id: 'guild' }; sim.state.run.levels.guild = sim.MAX_LEVEL - 1;
   assert.ok(Object.values(sim.kindUpgradeCost('guild')).every(v => Number.isFinite(v) && v <= 1e300) && Object.values(sim.buildCost('guild')).every(Number.isFinite), 'the dearest prices are finite numbers');
 });
 
@@ -164,16 +168,16 @@ test('one kind upgrade changes the output, jobs and housing of every building of
 
 test('a save at the level cap keeps every cost, refund and stock finite', sim => {
   const s = sim.newState(0); s.run = sim.newRun(12345);
-  s.run.tiles['4,5'] = { kind: 'building', id: 'lumber' }; s.run.tiles['6,5'] = { kind: 'building', id: 'guild' };
+  s.run.tiles['5,6'] = { kind: 'building', id: 'lumber' }; s.run.tiles['7,6'] = { kind: 'building', id: 'guild' };
   s.run.levels.lumber = 1e9; s.run.levels.guild = 1e9; s.run.repeatables = { monument: 1e9 };
   const { state: clean } = sim.sanitizeSave(plain(s), 1000); sim.setState(clean);
-  for (const k of ['4,5', '6,5']) {
+  for (const k of ['5,6', '7,6']) {
     const t = sim.state.run.tiles[k]; assert.strictEqual(sim.kindLevel(t.id), sim.MAX_LEVEL);
     assert.strictEqual(sim.upgradeKind(t.id).ok, false, 'no upgrade past the cap');
     for (const c of [sim.kindUpgradeCost(t.id), sim.buildCost(t.id), sim.spentOn(t), sim.demolishRefund(t)]) for (const r in c) assert.ok(Number.isFinite(c[r]), `${t.id} ${r} is ${c[r]}`);
   }
   for (const r of sim.REPEATABLES) { const c = sim.repCost(r); for (const k in c) assert.ok(Number.isFinite(c[k]), r.id + ' cost is ' + c[k]); }
-  assert.ok(sim.demolish('4,5').ok); assert.ok(sim.demolish('6,5').ok);
+  assert.ok(sim.demolish('5,6').ok); assert.ok(sim.demolish('7,6').ok);
   for (const r in sim.state.run.res) assert.ok(Number.isFinite(sim.state.run.res[r]), r + ' is ' + sim.state.run.res[r]);
   const again = sim.sanitizeSave(JSON.parse(JSON.stringify(sim.state)), 1000).state;
   assert.strictEqual(again.run.res.gold, sim.state.run.res.gold, 'the refund survives a save and load');
@@ -228,16 +232,16 @@ test('sanitizeSave coerces and clamps every field', sim => {
   assert.strictEqual(s.last, 1000);
   assert.strictEqual(s.meta.crowns, 0); assert.strictEqual(s.meta.bonusCrowns, 0); assert.strictEqual(s.meta.decree, 'coffers', 'an unknown decree: the old chain counts as finished, the newer decrees are open');
   assert.deepStrictEqual(plain(s.meta.stats), { clicks: 0, totalGold: 0, prestiges: 0, built: 3, upgrades: 0, started: 1000 });
-  assert.strictEqual(s.run.exp, 3); assert.strictEqual(s.run.cleared, 121); assert.strictEqual(s.run.starving, false);
+  assert.strictEqual(s.run.exp, 3, 'an old save holds at most the three expansions it had'); assert.strictEqual(s.run.cleared, 169); assert.strictEqual(s.run.starving, false);
   assert.deepStrictEqual(plain(s.run.res), { gold: sim.START_RES.gold, food: 0, wood: sim.START_RES.wood, stone: 0, iron: 12.5 });
-  assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['0,0', '5,4', '5,5']);
-  assert.strictEqual(s.run.tiles['5,5'].level, sim.HALL_MAX, 'a hall above the last is the last'); assert.strictEqual(s.run.tiles['5,5'].kind, 'hall');
-  assert.deepStrictEqual(plain(s.run.tiles['5,4']), { kind: 'building', id: 'farm' }, 'a building tile keeps no level'); assert.strictEqual(s.run.levels.farm, 1, 'bad levels read as level 1');
+  assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), ['1,1', '6,5', '6,6']);
+  assert.strictEqual(s.run.tiles['6,6'].level, sim.HALL_MAX, 'a hall above the last is the last'); assert.strictEqual(s.run.tiles['6,6'].kind, 'hall');
+  assert.deepStrictEqual(plain(s.run.tiles['6,5']), { kind: 'building', id: 'farm' }, 'a building tile keeps no level'); assert.strictEqual(s.run.levels.farm, 1, 'bad levels read as level 1');
   assert.deepStrictEqual(plain(s.run.research), { axes: 1 });
   assert.deepStrictEqual(plain(s.run.repeatables), { food: sim.MAX_REPEATABLE });
   assert.strictEqual(s.run.buffUntil, undefined, 'festival timers from older saves are dropped');
-  assert.strictEqual(s.run.terrain.length, 11); assert.ok(s.run.terrain.every(col => col.length === 11 && col.every(c => c in sim.TERRAIN)));
-  assert.strictEqual(s.run.terrain[5][4], 'plain', 'buildings always stand on open plots');
+  assert.strictEqual(s.run.terrain.length, 13); assert.ok(s.run.terrain.every(col => col.length === 13 && col.every(c => c in sim.TERRAIN)));
+  assert.strictEqual(s.run.terrain[6][5], 'plain', 'buildings always stand on open plots (moved out by one from an 11×11 save)');
   assert.ok(notes.some(n => /5 buildings in this save were not recognised/.test(n)), notes.join('|'));
   assert.ok(!/[<>]/.test(JSON.stringify(s)), 'no markup survives');
   sim.setState(s); sim.advance(10);
@@ -248,7 +252,7 @@ test('sanitizeSave coerces and clamps every field', sim => {
   const got = sim.sanitizeSave(v4, 1000).state.run;
   assert.deepStrictEqual(Object.keys(got.levels), plain(sim.BUILD_ORDER));
   assert.deepStrictEqual(plain(got.levels), Object.assign(Object.fromEntries(sim.BUILD_ORDER.map(id => [id, 1])), { cottage: sim.MAX_LEVEL, quarry: 2, market: 3 }));
-  assert.deepStrictEqual(plain(got.tiles['5,4']), { kind: 'building', id: 'farm' }, 'a version-4 tile level is ignored');
+  assert.deepStrictEqual(plain(got.tiles['6,5']), { kind: 'building', id: 'farm' }, 'a version-4 tile level is ignored');
   assert.strictEqual(sim.sanitizeSave({ v: 4, meta: {}, run: { levels: 'x' } }, 1000).state.run.levels.farm, 1, 'levels that are not an object');
 });
 
@@ -272,10 +276,10 @@ test('version-1 saves migrate: tiles, decree by id, Crowns, terrain from the see
   assert.strictEqual(s.meta.decree, 'coffers', 'the decrees added since come first'); assert.ok(!s.meta.decreesDone.dynasty && s.meta.decreesDone.castle, 'index 19 of the old order (A New Dynasty) is where the old chain had got to');
   { const at = sim.DECREES.findIndex(d => d.id === 'dynasty'); assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, at).map(d => d.id).filter(id => !sim.DECREES_NEW_IN_V3.includes(id))), 'every older decree before it counts as claimed'); }
   assert.strictEqual(s.meta.crowns, 19); assert.strictEqual(s.meta.bonusCrowns, 0);
-  assert.deepStrictEqual(plain(s.run.tiles), { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'cottage' },
-    '4,5': { kind: 'building', id: 'farm' }, '6,5': { kind: 'building', id: 'smith' } });
+  assert.deepStrictEqual(plain(s.run.tiles), { '6,6': { kind: 'hall', id: 'hall', level: 4 }, '6,5': { kind: 'building', id: 'cottage' },
+    '5,6': { kind: 'building', id: 'farm' }, '7,6': { kind: 'building', id: 'smith' } });
   assert.deepStrictEqual([s.run.levels.cottage, s.run.levels.farm, s.run.levels.smith, s.run.levels.lumber], [8, 6, 3, 1], 'each kind takes its building\'s level');
-  const fresh = plain(sim.genTerrainLegacy(12345)), got = plain(s.run.terrain); // the old generator: a v1 save keeps the map it had
+  const fresh = plain(sim.frontierRing(sim.embedInner(sim.genTerrainLegacy(12345)), 12345)), got = plain(s.run.terrain); // the old generator: a v1 save keeps the map it had, set in the 13×13 map with the Frontier drawn around it
   for (const k in s.run.tiles) { const [x, y] = k.split(',').map(Number); fresh[x][y] = 'plain'; }
   assert.deepStrictEqual(got, fresh);
   assert.strictEqual(s.run.buffUntil, undefined, 'festival times are dropped');
@@ -369,7 +373,7 @@ test('Royal Surveyors halve the price of clearing land', sim => {
 
 test('adjacency from a building grows with the square root of its kind level', sim => {
   const run = sim.state.run; run.terrain = run.terrain.map(col => col.map(() => 'plain'));
-  run.tiles['4,4'] = { kind: 'building', id: 'market' }; run.tiles['4,3'] = { kind: 'building', id: 'guild' };
+  run.tiles['5,5'] = { kind: 'building', id: 'market' }; run.tiles['5,4'] = { kind: 'building', id: 'guild' };
   const g = sim.BUILDINGS.market.adj.building.guild;
   near(sim.adjBonus('market', 4, 4), g, 1e-9, 'level 1');
   run.levels.guild = 4; near(sim.adjBonus('market', 4, 4), 2 * g, 1e-9, 'level 4 gives twice level 1, not four times');
@@ -429,7 +433,7 @@ test('decrees: three are open at a time, any of them can be claimed, one is purs
 });
 
 test('version-2 saves (one decree at a time) migrate: everything before the current decree is claimed', sim => {
-  const raw = JSON.parse(sim.serialize()); raw.v = 2; delete raw.meta.decreesDone; raw.meta.decree = 'keep';
+  const raw = asOld(JSON.parse(sim.serialize()), 2); delete raw.meta.decreesDone; raw.meta.decree = 'keep';
   let s = sim.sanitizeSave(raw, 1000).state;
   assert.strictEqual(s.v, sim.SAVE_VERSION); assert.strictEqual(s.meta.decree, 'keep');
   assert.deepStrictEqual(Object.keys(s.meta.decreesDone), plain(sim.DECREES.slice(0, sim.DECREES.findIndex(d => d.id === 'keep')).map(d => d.id).filter(id => id !== 'coffers')));
@@ -497,10 +501,10 @@ test('past the Palace: two named halls that open with Crowns held, at HALL_GROWT
 
 test('saves: a hall is kept up to the last one, whatever the Crowns held, and clamped to the last above it', sim => {
   const load = (level, crowns) => { const s = sim.newState(0); s.run = sim.newRun(77); s.run.tiles[sim.HALL_KEY].level = level; s.meta.crowns = crowns; return sim.sanitizeSave(plain(s), 1000).state; };
-  assert.strictEqual(load(6, 0).run.tiles['5,5'].level, 6, 'a Royal Palace with no Crowns held is not taken away');
-  assert.strictEqual(load(7, 31).run.tiles['5,5'].level, 7, 'nor an Imperial Palace with too few');
-  for (const lv of [8, 9, 60, 1e9]) assert.strictEqual(load(lv, 500).run.tiles['5,5'].level, 7, 'level ' + lv + ' becomes the Imperial Palace');
-  assert.strictEqual(load(5, 0).run.tiles['5,5'].level, 5);
+  assert.strictEqual(load(6, 0).run.tiles['6,6'].level, 6, 'a Royal Palace with no Crowns held is not taken away');
+  assert.strictEqual(load(7, 31).run.tiles['6,6'].level, 7, 'nor an Imperial Palace with too few');
+  for (const lv of [8, 9, 60, 1e9]) assert.strictEqual(load(lv, 500).run.tiles['6,6'].level, 7, 'level ' + lv + ' becomes the Imperial Palace');
+  assert.strictEqual(load(5, 0).run.tiles['6,6'].level, 5);
   const s = load(6, 0); sim.setState(s); assert.deepStrictEqual(plain(sim.hallLocked()), { level: 7, need: 75 }); assert.strictEqual(sim.hallWait(), null);
   assert.strictEqual(s.v, sim.SAVE_VERSION);
 });
@@ -511,13 +515,13 @@ test('version-3 saves migrate: each kind takes the lowest level among its buildi
       tiles: { '5,5': { kind: 'hall', id: 'hall', level: 3 }, '5,4': { kind: 'building', id: 'farm', level: 2 }, '4,5': { kind: 'building', id: 'farm', level: 5 },
         '6,5': { kind: 'building', id: 'farm', level: 3 }, '5,6': { kind: 'building', id: 'quarry', level: 4 }, '4,4': { kind: 'building', id: 'cottage', level: 1 } } } };
   const { state: s, notes } = sim.sanitizeSave(v3, 1000);
-  assert.strictEqual(s.v, sim.SAVE_VERSION); assert.strictEqual(s.run.tiles['5,5'].level, 3, 'the hall keeps its level');
+  assert.strictEqual(s.v, sim.SAVE_VERSION); assert.strictEqual(s.run.tiles['6,6'].level, 3, 'the hall keeps its level');
   assert.deepStrictEqual(plain(s.run.levels), Object.assign(Object.fromEntries(sim.BUILD_ORDER.map(id => [id, 1])), { farm: 2, quarry: 4 }), 'farms at 2, 5 and 3 become farms at 2: nothing is upgraded for free');
-  for (const k of ['5,4', '4,5', '6,5', '5,6', '4,4']) assert.strictEqual(s.run.tiles[k].level, undefined, k + ' has no level of its own');
+  for (const k of ['6,5', '5,6', '7,6', '6,7', '5,5']) assert.strictEqual(s.run.tiles[k].level, undefined, k + ' has no level of its own');
   assert.ok(notes.some(n => /level of the lowest/.test(n)), 'farms at different levels: the player is told ' + notes.join('|'));
   const even = JSON.parse(JSON.stringify(v3)); even.run.tiles['5,4'].level = even.run.tiles['6,5'].level = 5;
   assert.strictEqual(sim.sanitizeSave(even, 1000).notes.filter(n => !/travelling trader/.test(n)).length, 0, 'nothing to say when no level changed (a Keep is told about the trader)');
-  sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['5,4'].levelMult, 2, 1e-9, 'every farm works at level 2:');
+  sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['6,5'].levelMult, 2, 1e-9, 'every farm works at level 2:');
   const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000); assert.strictEqual(JSON.stringify(back.state), sim.serialize(), 'and round-trips as the current version'); assert.strictEqual(back.notes.length, 0);
 });
 
@@ -606,15 +610,15 @@ test('trader: A Seat of Learning asks for three purchases from the trader in one
   assert.deepStrictEqual(plain(d.progress()), [3, 3]);
 });
 test('version-6 saves: research already known is kept; a town at a Keep has one visit waiting and is told once', sim => {
-  keepTown(sim); const s6 = JSON.parse(sim.serialize()); s6.v = 6; delete s6.run.trader; s6.run.research = { plough: 1, masonry: 1, axes: 1 };
+  keepTown(sim); const s6 = asOld(JSON.parse(sim.serialize()), 6); delete s6.run.trader; s6.run.research = { plough: 1, masonry: 1, axes: 1 };
   const notes = sim.adoptSave(s6, 1000), tr = sim.state.run.trader;
   assert.ok(sim.hasResearch('plough') && sim.hasResearch('masonry') && sim.hasResearch('axes'), 'known research kept');
   assert.strictEqual(notes.filter(n => /travelling trader/.test(n)).length, 1, 'told once: ' + notes.join('|'));
   assert.ok(tr.started); assert.strictEqual(sim.traderOffers().length, 3, 'a visit is waiting'); assert.ok(!sim.traderOffers().includes('plough') && !sim.traderOffers().includes('masonry'));
   assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'saved again, nothing more to say');
-  const v1 = JSON.parse(JSON.stringify(s6)); v1.run.tiles[sim.HALL_KEY].level = 1; v1.run.research = { axes: 1 };
+  const v1 = JSON.parse(JSON.stringify(s6)); v1.run.tiles[OLD_HALL].level = 1; v1.run.research = { axes: 1 };
   const o = sim.sanitizeSave(v1, 1000); assert.strictEqual(o.notes.filter(n => /travelling trader/.test(n)).length, 0, 'a Village Hall has nothing to be told'); assert.strictEqual(o.state.run.trader.started, false);
-  const v2 = JSON.parse(JSON.stringify(v1)); v2.run.tiles[sim.HALL_KEY].level = 2;
+  const v2 = JSON.parse(JSON.stringify(v1)); v2.run.tiles[OLD_HALL].level = 2;
   const o2 = sim.sanitizeSave(v2, 1000); assert.strictEqual(o2.notes.filter(n => /travelling trader/.test(n)).length, 1, 'a Manor is told (its charters left the Research tab)'); assert.strictEqual(o2.state.run.trader.started, false, 'but waits for its Keep');
 });
 
@@ -631,10 +635,11 @@ function recount(g, r) {
   return o;
 }
 
-// Every guarantee for one seed: returns the broken ones (empty when all hold), the grid and its site counts.
+// Every guarantee of the inner 11×11 map (the first three expansions) for one seed: returns the broken ones (empty when
+// all hold), that grid and its site counts. The Frontier ring around it has its own test.
 function terrainCheck(sim, seed) {
-  const R = sim.MAP_RADIUS, g = sim.genTerrain(seed), attempts = sim.terrainAttempts, c = R.map(r => recount(g, r)), why = [];
-  assert.ok(g.length === 11 && g.every(col => col.length === 11 && col.every(t => t in sim.TERRAIN)), 'the grid format is unchanged');
+  const full = sim.genTerrain(seed), attempts = sim.terrainAttempts, R = sim.MAP_RADIUS.slice(0, 4), g = full.slice(1, 12).map(col => col.slice(1, 12)), c = R.map(r => recount(g, r)), why = [];
+  assert.ok(full.length === 13 && full.every(col => col.length === 13 && col.every(t => t in sim.TERRAIN)), 'a 13×13 grid of terrain names');
   for (const [x, y] of [[5, 5], [4, 5], [6, 5], [5, 4], [5, 6]]) if (g[x][y] !== 'plain') why.push('hall or a neighbour not open');
   for (const t in sim.BIOME_START) { let n = 0; for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === t) n++; if (n < sim.BIOME_START[t]) why.push(`start area has ${n} ${t}`); }
   if (!Object.keys(c[0].k).some(k => k.endsWith('forest') && c[0].k[k] >= 2)) why.push('no double forest site at the start');
@@ -654,7 +659,7 @@ function terrainCheck(sim, seed) {
 }
 
 test('terrain comes in features with guaranteed sites, water in orthogonal groups, few redraws (seeds 1 to 300, negative and large seeds)', sim => {
-  const R = sim.MAP_RADIUS, N = 300, open = R.map(() => 0), tiles = { forest: 0, hill: 0, water: 0 }, bad = []; let most = 0;
+  const R = sim.MAP_RADIUS.slice(0, 4), N = 300, open = R.map(() => 0), tiles = { forest: 0, hill: 0, water: 0 }, bad = []; let most = 0;
   for (let seed = 1; seed <= N; seed++) {
     const { why, g, c, attempts } = terrainCheck(sim, seed); most = Math.max(most, attempts);
     R.forEach((r, i) => { open[i] += c[i].open; });
@@ -684,18 +689,75 @@ test('terrain is deterministic per seed; version-1 saves keep the old generator'
 });
 
 test('a missing grid is regrown by the generator that made the map (run.gen)', sim => {
-  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 7);
+  const run = sim.newRun(4242); assert.strictEqual(run.gen, 3, 'new maps are marked as features with the Frontier (gen 3)'); assert.strictEqual(sim.SAVE_VERSION, 8);
   const s = sim.newState(0); s.run = run; const raw = plain(s); delete raw.run.terrain;
-  let got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 2); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 2: genTerrain');
+  let got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 3); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 3: genTerrain');
+  raw.run.gen = 2; got = sim.sanitizeSave(raw, 1000).state.run; assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 2: the same inner map, and the same Frontier'); raw.run.gen = 3;
   raw.run.terrain = [['<img>']]; assert.deepStrictEqual(plain(sim.sanitizeSave(raw, 1000).state.run.terrain), plain(sim.genTerrain(4242)), 'an invalid grid too');
   for (const gen of [undefined, 1, 'x', -3]) { if (gen === undefined) delete raw.run.gen; else raw.run.gen = gen;
-    got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 1, 'gen ' + gen + ' reads as the old generator'); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrainLegacy(4242)), 'gen ' + gen + ': genTerrainLegacy'); }
-  raw.run.gen = 99; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.gen, 2, 'clamped to a known generator');
-  const back = sim.sanitizeSave(JSON.parse(JSON.stringify(s)), 1000).state; assert.strictEqual(back.run.gen, 2, 'kept through a save');
+    got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 1, 'gen ' + gen + ' reads as the old generator'); assert.deepStrictEqual(plain(got.terrain), plain(sim.frontierRing(sim.embedInner(sim.genTerrainLegacy(4242)), 4242)), 'gen ' + gen + ': genTerrainLegacy, with the Frontier'); }
+  raw.run.gen = 99; assert.strictEqual(sim.sanitizeSave(raw, 1000).state.run.gen, 3, 'clamped to a known generator');
+  const back = sim.sanitizeSave(JSON.parse(JSON.stringify(s)), 1000).state; assert.strictEqual(back.run.gen, 3, 'kept through a save');
 });
 
 // ── The trades: Markets, Blacksmiths and Guildhalls eat spare food; Blacksmiths also work iron; Taverns feed them (see data.js, TRADES) ──
 // A plain field with the given buildings at the given plots, enough people for every job, and a store of food.
+// ── The Frontier ──
+test('the Frontier: the inner 11×11 map for a seed is the map it was before the Frontier, byte for byte', sim => {
+  const inner = seed => sim.genTerrain(seed).slice(1, 12).map(col => col.slice(1, 12).map(t => t[0]).join('')).join('/');
+  assert.strictEqual(inner(12345), 'ppppppffphh/ppppfffhphp/pfpppppphhp/fpppppppwwp/ffpfppfpwpp/ppphpppwwww/pphpppfwfff/ppphfpphphh/pppppppppwh/pppppppppwp/ppppppppppp');
+  assert.strictEqual(inner(7), 'hpppphpffff/hppppphpfff/ppppfhphhpp/pfpfppwwppp/pppffppwhpp/pppfppppphp/ppppppppphh/pppphhppppp/ppppppppppp/pppppppwwwp/pppppppwpwp');
+  assert.strictEqual(sim.HALL_KEY, '6,6'); assert.deepStrictEqual(plain(sim.MAP_RADIUS), [2, 3, 4, 5, 6]);
+});
+
+test('the Frontier ring: per terrain two more double sites, a triple where the old edge allows, no lone water, mostly open plots (seeds 1 to 300)', sim => {
+  const T = ['forest', 'hill', 'water'], N = 300, short = [], tri = { forest: 0, hill: 0, water: 0 }, plots = [];
+  for (let seed = 1; seed <= N; seed++) {
+    const g = sim.genTerrain(seed), s5 = sim.siteCounts(g, 5), s6 = sim.siteCounts(g, 6); let open = 0, gainTri = 0;
+    for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (sim.ringOf(x, y) === 6 && g[x][y] === 'plain') open++;
+    plots.push(open); assert.ok(48 - open <= sim.FRONTIER_MAX, 'seed ' + seed + ': at most FRONTIER_MAX terrain tiles in the ring, ' + (48 - open));
+    for (const t of T) { if (s6.double[t] - s5.double[t] < sim.FRONTIER_DOUBLES) short.push(seed + ' ' + t); if (s6.triple[t] > s5.triple[t]) { tri[t]++; gainTri++; } }
+    assert.ok(gainTri >= 1, 'seed ' + seed + ': the Frontier adds a triple site');
+    assert.deepStrictEqual(plain(sim.lonelyWater(g)), [], 'seed ' + seed + ': no lone water');
+  }
+  assert.ok(short.length <= N * 3 * 0.01, 'two more double sites of each terrain on nearly every map: short on ' + short.join(', '));
+  assert.ok(tri.forest > N * 0.85 && tri.hill > N * 0.75 && tri.water > N * 0.35, 'a triple site of each terrain where the old edge allows one: ' + JSON.stringify(tri));
+  const avg = plots.reduce((a, b) => a + b, 0) / N;
+  assert.ok(Math.min(...plots) >= 25 && avg >= 33 && avg <= 42, `open plots in the ring of 48: ${Math.min(...plots)} to ${Math.max(...plots)}, average ${avg.toFixed(1)}`);
+});
+
+test('the Frontier: the fourth expansion, its card and its decree', sim => {
+  const run = town(sim, 3) && sim.state.run; assert.strictEqual(sim.EXPAND_COST.length, 4); assert.deepStrictEqual(plain(sim.EXPAND_COST[3]), { gold: 3e7, iron: 3e5 });
+  run.res = { gold: 1e9, food: 1e9, wood: 1e9, stone: 1e9, iron: 1e9 };
+  for (let e = 0; e < 3; e++) { const land = sim.landAhead(); assert.ok(land.plots > 0 && land.triples.length >= 1, 'expansion ' + (e + 1) + ' holds plots and a triple site: ' + JSON.stringify(land)); assert.ok(sim.expand().ok); }
+  assert.ok(!sim.unlocked(0, 6), 'the Frontier is shut until bought');
+  const land = sim.landAhead(); let open = 0; for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (sim.ringOf(x, y) === 6 && run.terrain[x][y] === 'plain') open++;
+  assert.strictEqual(land.plots, open, 'the card counts the open plots of the ring');
+  const paid = spend(sim, () => sim.expand()); assert.deepStrictEqual(paid, { gold: 3e7, iron: 3e5 }); assert.strictEqual(run.exp, 4); assert.strictEqual(sim.mapRadius(), 6);
+  assert.ok(sim.unlocked(0, 6) && sim.unlocked(12, 12)); assert.strictEqual(sim.landAhead(), null); assert.ok(!sim.expand().ok, 'no fifth expansion');
+  const k = Object.keys(run.tiles).length; const spot = [...Array(13).keys()].map(y => [0, y]).find(([x, y]) => run.terrain[x][y] === 'plain');
+  assert.ok(sim.build(spot.join(','), 'cottage').ok, 'a Frontier plot can be built on'); assert.strictEqual(Object.keys(run.tiles).length, k + 1);
+  assert.ok(sim.DECREES.find(d => d.id === 'frontier').done(), 'the decree for claiming it is met');
+});
+
+test('version-7 saves: the 11×11 map moves out by one, every building and its bonus is kept, and the Frontier is drawn around it', sim => {
+  town(sim, 3); const run = sim.state.run; run.res.gold = run.res.iron = 1e9; run.res.stone = 1e9; assert.ok(sim.expand().ok && sim.expand().ok);
+  for (const k of ['6,3', '3,6', '9,6', '6,9']) if (!run.tiles[k] && run.terrain[+k.split(',')[0]][+k.split(',')[1]] === 'plain') sim.build(k, 'lumber');
+  sim.setState(sim.state); const before = {}; for (const k in run.tiles) before[k] = { id: run.tiles[k].id, adj: sim.calc.tiles[k] ? sim.calc.tiles[k].adj : null };
+  const rates = plain(sim.calc.base), old = asOld(JSON.parse(sim.serialize()), 7), saved = old.run.terrain;
+  const { state: s, notes } = sim.sanitizeSave(old, 1000);
+  assert.strictEqual(s.v, sim.SAVE_VERSION); assert.strictEqual(s.run.terrain.length, 13);
+  for (let x = 0; x < 11; x++) for (let y = 0; y < 11; y++) assert.strictEqual(s.run.terrain[x + 1][y + 1], saved[x][y], 'the old map is kept, one step out: ' + x + ',' + y);
+  assert.deepStrictEqual(plain(s.run.terrain), plain(sim.frontierRing(sim.embedInner(saved), s.run.seed)), 'the ring is drawn from the seed');
+  sim.setState(s); assert.deepStrictEqual(Object.keys(s.run.tiles).sort(), Object.keys(before).sort(), 'every building, at the same place on the map');
+  for (const k in before) { assert.strictEqual(s.run.tiles[k].id, before[k].id); if (before[k].adj !== null) near(sim.calc.tiles[k].adj, before[k].adj, 1e-9, k + ' keeps its bonus:'); }
+  for (const r in rates) near(sim.calc.base[r], rates[r], Math.abs(rates[r]) * 1e-9, r + ' income unchanged:');
+  assert.strictEqual(notes.filter(n => /Frontier/.test(n)).length, 0, 'not told about the Frontier before its third expansion');
+  const four = JSON.parse(JSON.stringify(old)); four.run.exp = 4; assert.strictEqual(sim.sanitizeSave(four, 1000).state.run.exp, 3, 'a save from before the Frontier cannot claim it');
+  const three = JSON.parse(JSON.stringify(old)); three.run.exp = 3; assert.strictEqual(sim.sanitizeSave(three, 1000).notes.filter(n => /Frontier/.test(n)).length, 1, 'told once with every border bought');
+  assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'saved again, nothing more to say');
+});
+
 function trades(sim, layout, food) {
   const free = field(sim), run = sim.state.run; run.res.food = food === undefined ? 1e15 : food; run.res.iron = 0;
   for (const [k, id] of layout) run.tiles[k] = { kind: 'building', id };
@@ -709,8 +771,8 @@ const manyFarms = (sim, row) => { for (let i = 0; i < 40; i++) { const k = (i % 
   sim.state.run.repeatables.food = 40; return restaff(sim); }; // Granaries: food without more mouths
 
 test('trades: supply = spare food / food wanted, gold = full rate × (floor + (1 - floor) × supply), and eaten food leaves the food income', sim => {
-  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]);
-  let c = sim.calc; const k = '0,0', full = c.tiles[k].full, wanted = c.foodWanted;
+  trades(sim, [['1,1', 'market'], ['3,1', 'farm']]);
+  let c = sim.calc; const k = '1,1', full = c.tiles[k].full, wanted = c.foodWanted;
   assert.ok(wanted > 0 && c.surplus > 0 && c.surplus < wanted, 'one Farm cannot feed a Market: surplus ' + c.surplus + ' of ' + wanted);
   near(c.supply, c.surplus / wanted, 1e-9, 'supply'); near(c.foodUsed, c.surplus, 1e-9, 'all the spare food is eaten'); near(c.tiles[k].supply, c.supply, 1e-9);
   near(c.fed, sim.TRADE_FLOOR + (1 - sim.TRADE_FLOOR) * c.supply, 1e-9, 'fed'); near(c.tiles[k].out.gold, full * c.fed, 1e-9, 'Market gold');
@@ -723,23 +785,23 @@ test('trades: supply = spare food / food wanted, gold = full rate × (floor + (1
 });
 
 test('trades: need grows by TRADE_NEED_GROWTH per kind level while gold triples; adjacency and research raise gold, not need', sim => {
-  trades(sim, [['0,0', 'market'], ['1,0', 'cottage']]);
-  const w1 = sim.calc.foodWanted, g1 = sim.calc.tiles['0,0'].full; sim.state.run.levels.market = 3; restaff(sim);
-  near(sim.calc.foodWanted, w1 * sim.TRADE_NEED_GROWTH ** 2, 1e-6, 'need at level 3'); near(sim.calc.tiles['0,0'].full, g1 * sim.OUT_GROWTH ** 2, 1e-6, 'gold at level 3');
-  const w3 = sim.calc.foodWanted; sim.state.run.research.charter = 1; delete sim.state.run.tiles['1,0']; restaff(sim);
+  trades(sim, [['1,1', 'market'], ['2,1', 'cottage']]);
+  const w1 = sim.calc.foodWanted, g1 = sim.calc.tiles['1,1'].full; sim.state.run.levels.market = 3; restaff(sim);
+  near(sim.calc.foodWanted, w1 * sim.TRADE_NEED_GROWTH ** 2, 1e-6, 'need at level 3'); near(sim.calc.tiles['1,1'].full, g1 * sim.OUT_GROWTH ** 2, 1e-6, 'gold at level 3');
+  const w3 = sim.calc.foodWanted; sim.state.run.research.charter = 1; delete sim.state.run.tiles['2,1']; restaff(sim);
   near(sim.calc.foodWanted, w3, 1e-9, 'research and adjacency leave the need alone');
 });
 
 test('Taverns: a trade beside one needs 1 / (1 + TAVERN_SAVING × √level) of its food, per Tavern; the Tavern makes no gold', sim => {
   assert.ok(!sim.BUILDINGS.tavern.out, 'no output of its own'); assert.ok(!(sim.BUILDINGS.cottage.adj && sim.BUILDINGS.cottage.adj.building && sim.BUILDINGS.cottage.adj.building.tavern), 'no Cottage boost');
   for (const id of ['market', 'smith', 'guild']) {
-    trades(sim, [['4,4', id]]); const bare = sim.calc.tiles['4,4'].need;
-    sim.state.run.tiles['4,3'] = { kind: 'building', id: 'tavern' }; restaff(sim);
+    trades(sim, [['5,5', id]]); const bare = sim.calc.tiles['5,5'].need;
+    sim.state.run.tiles['5,4'] = { kind: 'building', id: 'tavern' }; restaff(sim);
     const want = L => bare / (1 + sim.TAVERN_SAVING * Math.sqrt(L));
-    near(sim.calc.tiles['4,4'].need, want(1), 1e-9, id + ': one Tavern, level 1'); near(sim.calc.tiles['4,4'].tavern, 1 - 1 / (1 + sim.TAVERN_SAVING), 1e-9, id + ': the saving shown');
-    sim.state.run.levels.tavern = 4; restaff(sim); near(sim.calc.tiles['4,4'].need, want(4), 1e-9, id + ': level 4');
-    sim.state.run.levels.tavern = 1; sim.state.run.tiles['4,5'] = { kind: 'building', id: 'tavern' }; restaff(sim);
-    near(sim.calc.tiles['4,4'].need, bare / (1 + 2 * sim.TAVERN_SAVING), 1e-9, id + ': two Taverns');
+    near(sim.calc.tiles['5,5'].need, want(1), 1e-9, id + ': one Tavern, level 1'); near(sim.calc.tiles['5,5'].tavern, 1 - 1 / (1 + sim.TAVERN_SAVING), 1e-9, id + ': the saving shown');
+    sim.state.run.levels.tavern = 4; restaff(sim); near(sim.calc.tiles['5,5'].need, want(4), 1e-9, id + ': level 4');
+    sim.state.run.levels.tavern = 1; sim.state.run.tiles['5,6'] = { kind: 'building', id: 'tavern' }; restaff(sim);
+    near(sim.calc.tiles['5,5'].need, bare / (1 + 2 * sim.TAVERN_SAVING), 1e-9, id + ': two Taverns');
     assert.ok(sim.boosts(id, 'tavern') && sim.givesTo('tavern', 4, 6) === 0, 'plot badges know the Tavern feeds ' + id);
   }
   assert.ok(!sim.boosts('cottage', 'tavern') && !sim.boosts('farm', 'tavern'), 'only trades');
@@ -774,16 +836,16 @@ test('an empty store with the trades short of food is not starving: the town gro
 });
 
 test('a Blacksmith eats only for the iron it works: an idle forge costs the other trades nothing', sim => {
-  trades(sim, [['0,0', 'market'], ['2,0', 'farm'], ['4,0', 'farm']]);
+  trades(sim, [['1,1', 'market'], ['3,1', 'farm'], ['5,1', 'farm']]);
   const g0 = sim.calc.base.gold, after = sim.afterBuild('smith');
   assert.strictEqual(after.smithRun, 0); near(after.base.gold, g0, 1e-9, 'a Blacksmith with no Mine changes no gold'); near(after.foodWanted, sim.calc.foodWanted, 1e-9, 'and eats nothing');
-  sim.state.run.tiles['6,0'] = { kind: 'building', id: 'smith' }; sim.state.run.tiles['8,0'] = { kind: 'building', id: 'mine' }; restaff(sim);
+  sim.state.run.tiles['7,1'] = { kind: 'building', id: 'smith' }; sim.state.run.tiles['9,1'] = { kind: 'building', id: 'mine' }; restaff(sim);
   const c = sim.calc; assert.ok(c.smithRun > 0 && c.smithRun < 1);
-  near(c.tiles['6,0'].need, sim.TRADES.smith.food * sim.BUILDINGS.smith.out.gold * c.mult * c.smithRun, 1e-9, 'need × run');
+  near(c.tiles['7,1'].need, sim.TRADES.smith.food * sim.BUILDINGS.smith.out.gold * c.mult * c.smithRun, 1e-9, 'need × run');
 });
 
 test('the trades earn the same in a town left open as in one away for the same time (no rest bonus)', sim => {
-  const make = () => { trades(sim, [['0,0', 'market'], ['2,0', 'farm'], ['4,0', 'farm'], ['0,2', 'smith'], ['2,2', 'mine'], ['1,1', 'tavern'], ['4,2', 'guild']], 0);
+  const make = () => { trades(sim, [['1,1', 'market'], ['3,1', 'farm'], ['5,1', 'farm'], ['1,3', 'smith'], ['3,3', 'mine'], ['2,2', 'tavern'], ['5,3', 'guild']], 0);
     sim.state.run.away = 0; sim.state.run.gold = 0; sim.setState(sim.state); };
   make(); sim.advance(3600); const open = { gold: sim.state.run.gold, food: sim.state.run.res.food };
   make(); const keep = sim.REST_AFTER_HOURS; sim.creditAway(Math.min(keep, 1) * 3600); const away = { gold: sim.state.run.gold, food: sim.state.run.res.food };
@@ -791,7 +853,7 @@ test('the trades earn the same in a town left open as in one away for the same t
 });
 
 test('population grows exactly as it would without Markets (growth reads food made before they eat)', sim => {
-  const grow = markets => { const free = trades(sim, [['0,0', 'farm'], ['2,0', 'farm'], ['4,0', 'mill'], ['6,0', 'farm']].concat(markets ? [['0,2', 'market'], ['2,2', 'market']] : []), 500);
+  const grow = markets => { const free = trades(sim, [['1,1', 'farm'], ['3,1', 'farm'], ['5,1', 'mill'], ['7,1', 'farm']].concat(markets ? [['1,3', 'market'], ['3,3', 'market']] : []), 500);
     const run = sim.state.run; for (let i = 0; i < 8; i++) run.tiles[free[40 + i]] = { kind: 'building', id: 'cottage' }; run.levels.cottage = 3; run.pop = 5; sim.setState(sim.state);
     const pops = []; for (let i = 0; i < 12; i++) { sim.advance(600); pops.push(+run.pop.toFixed(6)); } sim.creditAway(10 * 3600); pops.push(+run.pop.toFixed(6)); return { pops, starving: run.starving }; };
   const a = grow(false), b = grow(true);
@@ -799,12 +861,12 @@ test('population grows exactly as it would without Markets (growth reads food ma
 });
 
 test('Blacksmiths: run = min(1, SMITH_SHARE × iron made / iron wanted), gold = full rate × fed × run, iron income is net of the forges', sim => {
-  trades(sim, [['0,0', 'smith'], ['3,0', 'mine']]);
-  let c = sim.calc; const k = '0,0';
+  trades(sim, [['1,1', 'smith'], ['4,1', 'mine']]);
+  let c = sim.calc; const k = '1,1';
   near(c.smithRun, Math.min(1, sim.SMITH_SHARE * c.ironMade / c.ironWanted), 1e-9, 'run'); assert.ok(c.smithRun < 1, 'one Mine cannot run a Blacksmith at full');
   near(c.tiles[k].run, c.smithRun, 1e-12); near(c.tiles[k].out.gold, c.tiles[k].full * c.fed * c.smithRun, 1e-9, 'gold'); near(c.ironUsed, sim.SMITH_SHARE * c.ironMade, 1e-9, 'the forges take their share of the income');
   near(c.base.iron, c.ironMade - c.ironUsed, 1e-9, 'iron income is net'); assert.ok(c.base.iron >= (1 - sim.SMITH_SHARE) * c.ironMade - 1e-9);
-  delete sim.state.run.tiles['3,0']; sim.setState(sim.state); c = sim.calc;
+  delete sim.state.run.tiles['4,1']; sim.setState(sim.state); c = sim.calc;
   assert.strictEqual(c.smithRun, 0); assert.strictEqual(c.tiles[k].out.gold, 0); assert.strictEqual(c.base.iron, 0, 'no Mine: no gold, and the forge never draws on the stock');
   for (let i = 0; i < 11; i++) sim.state.run.tiles[i + ',9'] = { kind: 'building', id: 'mine' };
   c = manyFarms(sim, 4);
@@ -812,7 +874,7 @@ test('Blacksmiths: run = min(1, SMITH_SHARE × iron made / iron wanted), gold = 
 });
 
 test('the iron stock never falls because of the forges, open or away, even while starving', sim => {
-  trades(sim, [['0,0', 'smith'], ['2,0', 'smith'], ['4,0', 'smith'], ['6,0', 'mine']], 0);
+  trades(sim, [['1,1', 'smith'], ['3,1', 'smith'], ['5,1', 'smith'], ['7,1', 'mine']], 0);
   const run = sim.state.run; run.res.iron = 1000;
   let last = run.res.iron;
   for (let i = 0; i < 40; i++) { sim.advance(30); assert.ok(run.res.iron >= last - 1e-9, 'iron fell'); last = run.res.iron; }
@@ -822,18 +884,18 @@ test('the iron stock never falls because of the forges, open or away, even while
 
 test('the Guildhall makes nothing itself, eats food, and boosts each Market and Blacksmith beside it by its adjacency × √level', sim => {
   assert.ok(!sim.BUILDINGS.guild.out, 'no output of its own');
-  trades(sim, [['1,1', 'guild'], ['0,1', 'market'], ['1,0', 'smith'], ['3,1', 'market']]);
-  const c = sim.calc; assert.strictEqual(c.tiles['1,1'].out.gold, undefined); assert.strictEqual(c.tiles['1,1'].mult, 0);
-  near(c.tiles['1,1'].need, sim.TRADES.guild.food * c.mult, 1e-9, 'a level-1 Guildhall eats TRADES.guild.food × the realm bonus');
-  near(c.tiles['0,1'].adj, sim.BUILDINGS.market.adj.building.guild, 1e-9, 'Market beside it'); near(c.tiles['1,0'].adj, sim.BUILDINGS.smith.adj.building.guild, 1e-9, 'Blacksmith beside it');
-  assert.strictEqual(c.tiles['3,1'].adj, 0, 'a Market two plots away gets nothing');
-  sim.state.run.levels.guild = 4; sim.setState(sim.state); near(sim.calc.tiles['0,1'].adj, 2 * sim.BUILDINGS.market.adj.building.guild, 1e-9, '√4 = 2');
+  trades(sim, [['2,2', 'guild'], ['1,2', 'market'], ['2,1', 'smith'], ['4,2', 'market']]);
+  const c = sim.calc; assert.strictEqual(c.tiles['2,2'].out.gold, undefined); assert.strictEqual(c.tiles['2,2'].mult, 0);
+  near(c.tiles['2,2'].need, sim.TRADES.guild.food * c.mult, 1e-9, 'a level-1 Guildhall eats TRADES.guild.food × the realm bonus');
+  near(c.tiles['1,2'].adj, sim.BUILDINGS.market.adj.building.guild, 1e-9, 'Market beside it'); near(c.tiles['2,1'].adj, sim.BUILDINGS.smith.adj.building.guild, 1e-9, 'Blacksmith beside it');
+  assert.strictEqual(c.tiles['4,2'].adj, 0, 'a Market two plots away gets nothing');
+  sim.state.run.levels.guild = 4; sim.setState(sim.state); near(sim.calc.tiles['1,2'].adj, 2 * sim.BUILDINGS.market.adj.building.guild, 1e-9, '√4 = 2');
   // The boost raises the price, not what the trade eats: the Market's own need is the same with or without it.
-  const w = restaff(sim).tiles['0,1'].need; delete sim.state.run.tiles['1,1']; restaff(sim); near(sim.calc.tiles['0,1'].need, w, 1e-9, 'need');
+  const w = restaff(sim).tiles['1,2'].need; delete sim.state.run.tiles['2,2']; restaff(sim); near(sim.calc.tiles['1,2'].need, w, 1e-9, 'need');
 });
 
 test('edge cases: no trades, no Blacksmiths, no Mines, no Farms beyond need: finite numbers and the old rules', sim => {
-  for (const layout of [[], [['0,0', 'farm']], [['0,0', 'market']], [['0,0', 'smith']], [['0,0', 'guild']], [['0,0', 'tavern']], [['0,0', 'mine'], ['2,0', 'farm']]]) {
+  for (const layout of [[], [['1,1', 'farm']], [['1,1', 'market']], [['1,1', 'smith']], [['1,1', 'guild']], [['1,1', 'tavern']], [['1,1', 'mine'], ['3,1', 'farm']]]) {
     for (const food of [0, 1e9]) { trades(sim, layout, food); const c = sim.calc;
       assert.ok(finite(c), JSON.stringify(layout) + ' food ' + food);
       if (!layout.some(l => sim.TRADES[l[1]])) { assert.strictEqual(c.foodUsed, 0); assert.strictEqual(c.supply, 0); near(c.base.food, c.foodMade - c.eaten, 1e-9); }
@@ -841,15 +903,15 @@ test('edge cases: no trades, no Blacksmiths, no Mines, no Farms beyond need: fin
       sim.advance(60); sim.creditAway(3600); assert.ok(finite(sim.compute()), 'after time passes'); }
   }
   // A town whose farms make exactly its upkeep: no surplus, the Market earns its floor and nobody goes hungry for it.
-  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]); const run = sim.state.run; run.pop = sim.sustainablePop(1, 1e4, sim.calc.foodMade); sim.setState(sim.state);
-  assert.ok(sim.calc.foodUsed <= 1e-6 && !run.starving); near(sim.calc.tiles['0,0'].out.gold, sim.calc.tiles['0,0'].full * sim.TRADE_FLOOR, 1e-3 * sim.calc.tiles['0,0'].full);
+  trades(sim, [['1,1', 'market'], ['3,1', 'farm']]); const run = sim.state.run; run.pop = sim.sustainablePop(1, 1e4, sim.calc.foodMade); sim.setState(sim.state);
+  assert.ok(sim.calc.foodUsed <= 1e-6 && !run.starving); near(sim.calc.tiles['1,1'].out.gold, sim.calc.tiles['1,1'].full * sim.TRADE_FLOOR, 1e-3 * sim.calc.tiles['1,1'].full);
 });
 
 test('previews: afterBuild of a Farm or Tavern next to a short Market shows gold, and leaves the town as it was', sim => {
-  trades(sim, [['0,0', 'market'], ['2,0', 'farm']]);
+  trades(sim, [['1,1', 'market'], ['3,1', 'farm']]);
   const before = JSON.stringify(plain(sim.state.run.tiles)), c0 = sim.compute(), after = sim.afterBuild('farm');
   assert.ok(after.base.gold > c0.base.gold, 'a Farm brings gold through the Market'); assert.strictEqual(JSON.stringify(plain(sim.state.run.tiles)), before);
-  assert.ok(sim.afterBuild('tavern', '1,0').base.gold > c0.base.gold, 'a Tavern beside it does too'); assert.strictEqual(sim.afterBuild('tavern').base.gold, c0.base.gold, 'a Tavern alone does nothing');
+  assert.ok(sim.afterBuild('tavern', '2,1').base.gold > c0.base.gold, 'a Tavern beside it does too'); assert.strictEqual(sim.afterBuild('tavern').base.gold, c0.base.gold, 'a Tavern alone does nothing');
   const smith = sim.afterBuild('smith'); assert.ok(smith.base.gold === c0.base.gold || smith.smithRun === 0, 'a Blacksmith with no Mine adds no gold');
 });
 
