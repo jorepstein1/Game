@@ -83,6 +83,11 @@ runAll(jobs).then(out => {
     'buildings standing when the Palace is raised, per map: ' + first.map(r => r.seed + ': ' + (r.buildingsAt.Palace || '-')).join(', ')));
   gap('target: the third expansion within a day of the Palace', () => { const late = first.map(r => r.expansions[2] === null ? Infinity : r.expansions[2] - r.palace);
     assert.ok(late.every(x => x <= 24), 'hours from the Palace to the third expansion, per map: ' + late.map(x => isFinite(x) ? x.toFixed(1) : 'not in 72h').join(', ')); });
+  // The Frontier (the fourth expansion) is late land: a first reign reaches it only once 20 Crowns are on offer.
+  check('the Frontier is out of reach before 20 Crowns are on offer in a first reign, on every map', () => { for (const r of first12) if (r.expansions[3] !== null) assert.ok(r.crowns20 !== null && r.expansions[3] >= r.crowns20,
+    `map ${r.seed}: Frontier at ${r.expansions[3].toFixed(1)}h, 20 Crowns at ${r.crowns20 === null ? '-' : r.crowns20.toFixed(1) + 'h'}`); });
+  console.log('     Frontier in the first reign (72h): ' + first12.map(r => r.seed + ': ' + (r.expansions[3] === null ? 'not bought' : r.expansions[3].toFixed(1) + 'h, ' + r.frontierCrowns + ' Crowns on offer')).join(', '));
+  { const fn = rows.filter(r => r.kind === 'fortnight'); console.log('     Frontier in a fortnight at 20 Crowns (reign: hours into it): ' + fn.map(r => r.seed + ': ' + ((r.frontier || []).map(f => f.reign + 1 + ':' + f.hours).join(' ') || 'never')).join(', ')); }
 
   // ── The jobs of the buildings (see data.js, TRADES): gold by kind, food and iron at the Palace and at 20 Crowns ──
   const pc = x => x === null || x === undefined ? '-' : Math.round(100 * x) + '%', share = (e, k) => (e && e.shares[k]) || 0;
