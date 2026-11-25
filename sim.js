@@ -3,8 +3,8 @@
    No DOM and no timers, so it runs in Node as well as the browser (load data.js first).
    Actions return { ok, msg, icon } (icon names a sprite for the message) and leave it to the caller to show anything. */
 
-const SAVE_VERSION = 7;
-const TERRAIN_GEN = 2; // run.gen: which generator made the map (2 = genTerrain, features; 1 or missing = genTerrainLegacy)
+const SAVE_VERSION = 8;
+const TERRAIN_GEN = 3; // run.gen: which generator made the map (3 = genTerrain with the Frontier ring; 2 = the same inner map without it; 1 or missing = genTerrainLegacy)
 const HALL_KEY = MAP_MID + ',' + MAP_MID;
 
 // state = { v, last, meta, run }
@@ -67,25 +67,30 @@ const sumOf = o => Object.values(o).reduce((a, b) => a + b, 0);
 // Features, not single tiles: groves, hill ranges and a lake or river, placed by the seeded RNG. The value of a
 // feature is in the open plots on its edges, so none is left solid: a grove's inner tiles become clearings, ranges
 // jog and fork, rivers bend. The hall's tile and its four neighbours stay open.
+// The map is drawn in two passes: the inner 11×11 (everything inside the Frontier, drawn exactly as before the Frontier
+// existed, so a seed keeps its map) and then the Frontier ring around it (frontierRing).
 let terrainAttempts = 0; // maps drawn by the last genTerrain call (1 = the first draw passed); read by the tests
-function genTerrain(seed) {
-  const rnd = mulberry(seed), pick = a => a[(rnd() * a.length) | 0];
+const INNER_R = 5; // the inner map's radius: the land of the first three expansions
+const inInner = (x, y) => onMap(x, y) && ringOf(x, y) <= INNER_R;
+function genTerrain(seed) { return frontierRing(genInner(seed), seed); }
+function genInner(seed) {
+  const rnd = mulberry(seed), pick = a => a[(rnd() * a.length) | 0], side = 2 * INNER_R + 1, at = () => MAP_MID - INNER_R + ((rnd() * side) | 0);
   const fixed = (x, y) => Math.abs(x - MAP_MID) + Math.abs(y - MAP_MID) <= 1;
   let g;
   for (let attempt = 0; attempt < 30; attempt++) { // a map the repair pass cannot fix is drawn again from the same RNG
     terrainAttempts = attempt + 1;
     g = []; for (let x = 0; x < MAP_SIZE; x++) g.push(Array(MAP_SIZE).fill('plain'));
     const have = { forest: 0, hill: 0, water: 0 }; // tiles of each so far; the last feature of a kind may be cut short
-    const put = (x, y, t) => { if (onMap(x, y) && !fixed(x, y) && g[x][y] === 'plain' && have[t] < BIOME_TILES[t]) { g[x][y] = t; have[t]++; return true; } return false; };
+    const put = (x, y, t) => { if (inInner(x, y) && !fixed(x, y) && g[x][y] === 'plain' && have[t] < BIOME_TILES[t]) { g[x][y] = t; have[t]++; return true; } return false; };
     const blob = (t, size) => { // grown from a seed tile by orthogonal steps; a grove's inner tiles are then cleared
-      const cells = [[(rnd() * MAP_SIZE) | 0, (rnd() * MAP_SIZE) | 0]];
+      const cells = [[at(), at()]];
       for (let guard = 0; cells.length < size && guard < 40; guard++) { const [x, y] = pick(cells), [dx, dy] = pick(STEPS4), a = x + dx, b = y + dy;
-        if (onMap(a, b) && !fixed(a, b) && !cells.some(([p, q]) => p === a && q === b)) cells.push([a, b]); }
+        if (inInner(a, b) && !fixed(a, b) && !cells.some(([p, q]) => p === a && q === b)) cells.push([a, b]); }
       const inSet = (a, b) => cells.some(([p, q]) => p === a && q === b);
       for (const [x, y] of cells) if (t === 'water' || !STEPS4.every(([dx, dy]) => inSet(x + dx, y + dy))) put(x, y, t); // a lake stays whole: a cleared middle could cut it into pieces
     };
     const line = (t, len, wiggle, thick) => { // a range or river: walks one way, now and then stepping aside (a bend is an L, never a diagonal)
-      let x = (rnd() * MAP_SIZE) | 0, y = (rnd() * MAP_SIZE) | 0; const [dx, dy] = pick(STEPS4), side = rnd() < 0.5 ? 1 : -1;
+      let x = at(), y = at(); const [dx, dy] = pick(STEPS4), side = rnd() < 0.5 ? 1 : -1;
       for (let i = 0; i < len; i++) {
         put(x, y, t); if (rnd() < thick) put(x + dy * side, y + dx * side, t);
         if (rnd() < wiggle) { x += dy * side; y += dx * side; put(x, y, t); }
@@ -113,7 +118,7 @@ function genTerrain(seed) {
 // Each failure is fixed by turning the fewest open tiles around one plot into that terrain, then everything is
 // checked again, since a fix can spoil an earlier ring. Returns false if the map cannot be fixed this way.
 function repairTerrain(g, rnd, fixed) {
-  const R = MAP_RADIUS, T = ['forest', 'hill', 'water'];
+  const R = MAP_RADIUS.filter(r => r <= INNER_R), T = ['forest', 'hill', 'water'];
   // Make a new k-site (better than it was at radius `prev`) within radius r, of terrain `want` or any.
   const pocket = (r, k, want, prev) => {
     let best = null, bestCost = Infinity;
@@ -148,7 +153,7 @@ function repairTerrain(g, rnd, fixed) {
     if (!ok) continue;
     if (lonelyWater(g).length) { // join it to the water beside it diagonally if there is some, else give it a partner tile
       const [x, y] = lonelyWater(g)[0], inner = ringOf(x, y) <= R[0];
-      const opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => onMap(a, b) && g[a][b] === 'plain' && !fixed(a, b) && (!inner || ringOf(a, b) <= R[0]));
+      const opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => inInner(a, b) && g[a][b] === 'plain' && !fixed(a, b) && (!inner || ringOf(a, b) <= R[0]));
       if (!opts.length) { g[x][y] = 'plain'; continue; }
       const joins = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && !(a + dx === x && b + dy === y) && g[a + dx][b + dy] === 'water');
       const best = opts.filter(joins); const [a, b] = (best.length ? best : opts)[(rnd() * (best.length || opts.length)) | 0];
@@ -176,12 +181,60 @@ function lonelyWater(g) {
     !STEPS4.some(([dx, dy]) => { const a = x + dx, b = y + dy; return onMap(a, b) && g[a][b] === 'water' && (ringOf(x, y) > r0 || ringOf(a, b) <= r0); })) o.push([x, y]);
   return o;
 }
-// The original generator, one roll per tile. Only version-1 saves use it: they stored no grid, just the seed.
+// The Frontier: the ring of new land around the inner map. Nothing inside it changes (a saved town keeps every tile), so
+// the ring can be drawn for a migrated save as well as a new map. Terrain on the old edge runs on outward, then the
+// ring is repaired until each terrain gains FRONTIER_TRIPLES triple and FRONTIER_DOUBLES double sites, with no lone
+// water. Its own RNG stream, so the inner map's draw is untouched.
+function frontierRing(g, seed) {
+  const rnd = mulberry((seed ^ 0x2545F491) | 0), R = MAP_RADIUS[MAP_RADIUS.length - 1], T = ['forest', 'hill', 'water'];
+  const ring = []; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) if (ringOf(x, y) === R) ring.push([x, y]);
+  for (const [x, y] of ring) g[x][y] = 'plain';
+  for (const [x, y] of ring) { // the inward neighbour (corners have none)
+    const a = x === 0 ? 1 : x === MAP_SIZE - 1 ? x - 1 : x, b = y === 0 ? 1 : y === MAP_SIZE - 1 ? y - 1 : y;
+    if ((a === x) !== (b === y) && T.includes(g[a][b]) && rnd() < FRONTIER_RUN) g[x][y] = g[a][b]; }
+  const isRing = (a, b) => onMap(a, b) && ringOf(a, b) === R, stuck = [];
+  const gained = () => { const s0 = siteCounts(g, R - 1), s1 = siteCounts(g, R), o = {};
+    for (const t of T) o[t] = { triple: s1.triple[t] - s0.triple[t], double: s1.double[t] - s0.double[t] }; return o; };
+  for (let fix = 0; fix < 80; fix++) {
+    const lone = lonelyWater(g).filter(([x, y]) => isRing(x, y));
+    if (lone.length) { const [x, y] = lone[0], opts = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => isRing(a, b) && g[a][b] === 'plain');
+      if (opts.length) { const [a, b] = opts[(rnd() * opts.length) | 0]; g[a][b] = 'water'; } else g[x][y] = 'plain';
+      continue; }
+    const gain = gained(), want = T.map(t => [t, 3]).filter(([t]) => gain[t].triple < FRONTIER_TRIPLES).concat(T.map(t => [t, 2]).filter(([t]) => gain[t].double < FRONTIER_DOUBLES)).filter(w => !stuck.includes(w.join()));
+    if (!want.length || ring.filter(([x, y]) => g[x][y] !== 'plain').length >= FRONTIER_MAX) break;
+    const [t, k] = want[0];
+    // The cheapest plot to make a new k-site of t: an open plot on the old edge or in the ring, by turning ring tiles beside it.
+    let best = null, bestCost = Infinity;
+    for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) {
+      if (ringOf(x, y) < R - 1 || g[x][y] !== 'plain' || (x === MAP_MID && y === MAP_MID)) continue;
+      const have = sameAround(g, x, y, R, t);
+      if (have >= k || (ringOf(x, y) < R && sameAround(g, x, y, R - 1, t) >= k)) continue;
+      const open = STEPS4.map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => isRing(a, b) && g[a][b] === 'plain'), need = k - have;
+      if (open.length < need) continue;
+      for (let i = open.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [open[i], open[j]] = [open[j], open[i]]; }
+      const use = open.slice(0, need);
+      const wet = ([a, b]) => STEPS4.some(([dx, dy]) => onMap(a + dx, b + dy) && (g[a + dx][b + dy] === 'water' || use.some(([p, q]) => p === a + dx && q === b + dy)));
+      const cost = need + (t === 'water' ? use.filter(u => !wet(u)).length : 0) + rnd() * 0.4;
+      if (cost < bestCost) { bestCost = cost; best = use; }
+    }
+    if (!best) { stuck.push(t + ',' + k); continue; } // none can be made (a triple needs the terrain on the old edge): the tests hold how often
+    for (const [a, b] of best) g[a][b] = t;
+  }
+  for (let n = 0; n < 2; n++) for (const [x, y] of lonelyWater(g)) if (isRing(x, y)) g[x][y] = 'plain'; // left over if the budget ran out
+  return g;
+}
+// An 11×11 grid (a save from before the Frontier, or the legacy generator) set inside the 13×13 map, the ring left open.
+function embedInner(g11) {
+  const g = []; for (let x = 0; x < MAP_SIZE; x++) { g.push([]); for (let y = 0; y < MAP_SIZE; y++) g[x].push(ringOf(x, y) <= INNER_R ? g11[x - MAP_MID + INNER_R][y - MAP_MID + INNER_R] : 'plain'); }
+  return g;
+}
+// The original generator, one roll per tile, on the 11×11 map it was made for. Only version-1 saves use it: they
+// stored no grid, just the seed. The caller sets it in the 13×13 map (embedInner) and draws the Frontier.
 function genTerrainLegacy(seed) {
-  const rnd = mulberry(seed), g = [];
-  for (let x = 0; x < MAP_SIZE; x++) { g.push([]); for (let y = 0; y < MAP_SIZE; y++) {
+  const rnd = mulberry(seed), g = [], N = 2 * INNER_R + 1, M = INNER_R;
+  for (let x = 0; x < N; x++) { g.push([]); for (let y = 0; y < N; y++) {
     const r = rnd(); g[x].push(r < 0.14 ? 'forest' : r < 0.23 ? 'hill' : r < 0.29 ? 'water' : 'plain'); } }
-  g[MAP_MID][MAP_MID] = 'plain';
+  g[M][M] = 'plain';
   // The starting 5×5 always has something of everything to play with.
   const want = { forest: 3, hill: 2, water: 2 };
   for (const k in want) {
@@ -189,7 +242,7 @@ function genTerrainLegacy(seed) {
     for (let x = 3; x <= 7; x++) for (let y = 3; y <= 7; y++) if (g[x][y] === k) have++;
     while (have < want[k] && guard++ < 200) {
       const x = 3 + ((rnd() * 5) | 0), y = 3 + ((rnd() * 5) | 0);
-      if (g[x][y] === 'plain' && !(x === MAP_MID && y === MAP_MID)) { g[x][y] = k; have++; }
+      if (g[x][y] === 'plain' && !(x === M && y === M)) { g[x][y] = k; have++; }
     }
   }
   return g;
@@ -585,10 +638,17 @@ function buyRepeatable(id) {
   state.run.repeatables[id] = repLevel(id) + 1;
   return { ok: true };
 }
+// What the next expansion holds, for its card: the open plots it adds and the terrains it gives new triple sites.
+function landAhead() {
+  const run = state.run; if (run.exp >= EXPAND_COST.length) return null;
+  const r0 = MAP_RADIUS[run.exp], r1 = MAP_RADIUS[run.exp + 1], g = run.terrain, s0 = siteCounts(g, r0), s1 = siteCounts(g, r1);
+  let plots = 0; for (let x = 0; x < MAP_SIZE; x++) for (let y = 0; y < MAP_SIZE; y++) { const d = ringOf(x, y); if (d > r0 && d <= r1 && g[x][y] === 'plain' && !run.tiles[x + ',' + y]) plots++; }
+  return { plots, triples: ['forest', 'hill', 'water'].filter(t => s1.triple[t] > s0.triple[t]) };
+}
 function expand() {
   if (state.run.exp >= EXPAND_COST.length || !pay(EXPAND_COST[state.run.exp])) return fail();
   state.run.exp++;
-  return { ok: true, icon: 'map', msg: 'Your borders grow!' };
+  return { ok: true, icon: 'map', msg: state.run.exp === EXPAND_COST.length ? 'You claim the Frontier!' : 'Your borders grow!' };
 }
 // Turning forest, hills or water into an open plot: the way forward once the map is full.
 const clearCost = () => scaleCost(CLEAR_COST, Math.pow(CLEAR_GROWTH, state.run.cleared) * researchFx('clearCost'));
@@ -684,6 +744,7 @@ function upgradeLegacySave(o) {
 }
 
 const TRADE_KINDS = Object.keys(TRADES);
+const FRONTIER_NOTE = 'Your borders can grow once more: the Frontier, a ring of new land around your map, is at the bottom of the Build tab.';
 const TRADER_NOTE = `Research above the Village Hall is now sold as charters by a travelling trader, who comes once you hold a Keep and then every ${TRADER_HOURS} hours with ${TRADER_OFFERS} to choose from. You buy one per visit, and visits wait for you. Everything you already know is kept.`;
 const EAT_NOTE = 'The trades now eat. Markets, Blacksmiths and Guildhalls share the food your town does not eat, and slow down when there is too little, so Farms and Mills matter again. Taverns no longer make gold or boost Cottages: trades beside a Tavern need less food, so it may pay to move one. Your food store is untouched.';
 // Returns { state, notes }. Throws if the data is not a save at all (or is from a newer version).
@@ -715,10 +776,13 @@ function sanitizeSave(raw, now) {
   meta.stats.started = num(st.started, now, 0, now);
 
   run.seed = int(r.seed, run.seed, -(2 ** 31), 2 ** 31);
-  const grid = r.terrain;
-  const gridOk = Array.isArray(grid) && grid.length === MAP_SIZE && grid.every(col => Array.isArray(col) && col.length === MAP_SIZE && col.every(c => typeof c === 'string' && hasOwn(TERRAIN, c)));
+  // Before version 8 the map was 11×11: its grid is set inside the 13×13 map, every tile moves out by one, and the
+  // Frontier ring is drawn around it from the seed. Nothing a town owned changes.
+  const grid = r.terrain, old = v < 8, size = old ? 2 * INNER_R + 1 : MAP_SIZE, shift = old ? MAP_MID - INNER_R : 0;
+  const gridOk = Array.isArray(grid) && grid.length === size && grid.every(col => Array.isArray(col) && col.length === size && col.every(c => typeof c === 'string' && hasOwn(TERRAIN, c)));
   run.gen = int(r.gen, 1, 1, TERRAIN_GEN); // saves from before the marker had their map from the old generator
-  run.terrain = gridOk ? grid.map(col => col.slice()) : run.gen === 2 ? genTerrain(run.seed) : genTerrainLegacy(run.seed); // a missing grid (version 1) is regrown from the seed by the generator that made it
+  run.terrain = gridOk ? (old ? frontierRing(embedInner(grid), run.seed) : grid.map(col => col.slice()))
+    : run.gen === 1 ? frontierRing(embedInner(genTerrainLegacy(run.seed)), run.seed) : genTerrain(run.seed); // a missing grid (version 1) is regrown from the seed by the generator that made it
   run.terrain[MAP_MID][MAP_MID] = 'plain';
   run.exp = int(r.exp, 0, 0, EXPAND_COST.length);
   run.cleared = int(r.cleared, 0, 0, MAP_SIZE * MAP_SIZE);
@@ -736,8 +800,8 @@ function sanitizeSave(raw, now) {
   for (const k in tiles) {
     const t = tiles[k], mt = /^(\d{1,2}),(\d{1,2})$/.exec(k);
     if (!mt || !isObj(t)) { dropped++; continue; }
-    const x = +mt[1], y = +mt[2], level = int(t.level, 1, 1, MAX_LEVEL);
-    if (k === HALL_KEY) { run.tiles[k].level = Math.min(level, HALL_MAX); continue; } // the centre is always the hall. A hall the Crowns held would not open is kept: loading never takes one away
+    const x = +mt[1] + shift, y = +mt[2] + shift, level = int(t.level, 1, 1, MAX_LEVEL);
+    if (x === MAP_MID && y === MAP_MID) { run.tiles[HALL_KEY].level = Math.min(level, HALL_MAX); continue; } // the centre is always the hall. A hall the Crowns held would not open is kept: loading never takes one away
     if (Math.abs(x - MAP_MID) > radius || Math.abs(y - MAP_MID) > radius || typeof t.id !== 'string' || !hasOwn(BUILDINGS, t.id)) { dropped++; continue; }
     run.tiles[x + ',' + y] = { kind: 'building', id: t.id };
     if (v < 4) { if (hasOwn(seen, t.id) && seen[t.id] !== level) mixed = true; seen[t.id] = hasOwn(seen, t.id) ? Math.min(seen[t.id], level) : level; } // version 3 kept a level per building
@@ -750,6 +814,7 @@ function sanitizeSave(raw, now) {
   // Version 5 gave the trades their jobs and version 6 made them eat spare food, with the Tavern feeding them: a town
   // that already has one is told once why its income changed (one note, the latest rules, covers both).
   if (v < 6 && Object.keys(run.tiles).some(k => TRADE_KINDS.includes(run.tiles[k].id) || run.tiles[k].id === 'tavern')) notes.push(EAT_NOTE);
+  if (old && run.exp >= 3) notes.push(FRONTIER_NOTE);
   if (dropped) notes.push(dropped + (dropped === 1 ? ' building in this save was not recognised and was removed.' : ' buildings in this save were not recognised and were removed.'));
   const research = isObj(r.research) ? r.research : {};
   for (const item of RESEARCH) if (research[item.id]) run.research[item.id] = 1;

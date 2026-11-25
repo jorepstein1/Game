@@ -35,9 +35,11 @@ const HALL_FORAGE = 0.5;         // food per second per hall level
 const HALL_BONUS = 0.25;         // all production per hall level above 1
 const PRESTIGE_HALL = 4;         // hall level needed to abdicate
 
-const MAP_SIZE = 11, MAP_MID = 5;
-const MAP_RADIUS = [2, 3, 4, 5]; // unlocked radius around the centre per expansion
-const EXPAND_COST = [{ gold: 1.2e4, wood: 5000 }, { gold: 5e5, stone: 1e5 }, { gold: 4e6, iron: 4e4 }];
+const MAP_SIZE = 13, MAP_MID = 6;
+const MAP_RADIUS = [2, 3, 4, 5, 6]; // unlocked radius around the centre per expansion
+// The fourth expansion, the Frontier, is late land: 30M gold is 15 to 32 hours of income at the Palace, so a first reign
+// reaches it only after 20 Crowns are on offer. It is for towns that stay on, and for long Royal and Imperial reigns.
+const EXPAND_COST = [{ gold: 1.2e4, wood: 5000 }, { gold: 5e5, stone: 1e5 }, { gold: 4e6, iron: 4e4 }, { gold: 3e7, iron: 3e5 }];
 // Terrain comes in features (groves, hill ranges, a lake or river) rather than single tiles, so that plots touching
 // two or three tiles of one kind exist on every map. BIOME_TILES is how many tiles of each the features cover before
 // the repair pass (about 28% of the map, as the old per-tile rolls did: more terrain would mean fewer plots and a slower game).
@@ -48,6 +50,15 @@ const BIOME_START = { forest: 3, hill: 2, water: 2 }; // the starting 5×5 alway
 const BIOME_START_OPEN = 12;      // ...and at least this many open plots
 const BIOME_ALL_DOUBLE = 3;      // within this radius (the first expansion) every terrain has a double site: no map starves stone or food
 const BIOME_DOUBLES = 3, BIOME_TRIPLES = 1; // each expansion adds at least this many plots with 2+ / 3+ neighbours of one terrain
+// The Frontier (the outer ring of the 13×13 map) is drawn after the rest, so the 11×11 map for a seed is the same as
+// before it existed. Good sites are what a late town runs short of, so the ring promises more of them: per terrain,
+// FRONTIER_DOUBLES more double sites (triples included) than the old edge had, and FRONTIER_TRIPLES more triple sites
+// wherever the map allows one (a triple in the ring needs that terrain on the old edge beside it). Terrain on the old
+// edge runs on into the ring with FRONTIER_RUN chance per tile, and the repair stops at FRONTIER_MAX terrain tiles of
+// the ring's 48, so it stays mostly open plots.
+const FRONTIER_TRIPLES = 1, FRONTIER_DOUBLES = 2;
+const FRONTIER_RUN = 0.3;
+const FRONTIER_MAX = 20;
 const CLEAR_COST = { gold: 500 }; // clearing forest/hills/water into an open plot
 const CLEAR_GROWTH = 2;           // each clearing costs this many times the last
 
@@ -222,6 +233,7 @@ const DECREES = [
   { id: 'riches', title: 'Overflowing Coffers', desc: 'Earn 20,000 gold per second.', progress: () => [calc.base.gold, 20000], reward: { gold: 3e7 } },
   { id: 'palace', title: 'Crown Jewel', desc: 'Raise a Palace.', done: () => hallLevel() >= 5, reward: { gold: 1e7 } },
   { id: 'dynasty', title: 'A New Dynasty', desc: 'Found a new kingdom from the Realm tab. It opens at ' + CROWN_MIN + ' Crowns on offer, about when a Palace stands; ' + CROWN_GOAL + ' or more pays best.', done: () => state.meta.stats.prestiges >= 1, reward: { gold: 1000, wood: 500 } },
+  { id: 'frontier', title: 'The Frontier', desc: 'Expand your borders a fourth time, into the Frontier.', done: () => state.run.exp >= 4, reward: { gold: 5e7 } },
   { id: 'metropolis', title: 'Metropolis', desc: 'Reach a population of 2,000.', progress: () => [state.run.pop, 2000], reward: { gold: 1e8 } },
   { id: 'golden', title: 'Golden Age', desc: 'Earn 1M gold per second.', progress: () => [calc.base.gold, 1e6], reward: { gold: 1e9 } },
   { id: 'legend', title: 'Legend', desc: 'Hold 100 Crowns.', progress: () => [state.meta.crowns, 100], reward: { gold: 1e9 } },

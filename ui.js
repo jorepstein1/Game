@@ -397,8 +397,10 @@ function renderPanel() {
         <div class="ic">${d.icon}</div><div class="bd"><div class="nm">${d.name} <span>×${count(id)}${L > 1 ? ' · level ' + L : ''}</span></div><div class="muted">${d.desc}</div>${L > 1 ? `<div class="muted lvnote">New ones are built at level ${L}.</div>` : ''}${costHTML(c)}${addsHTML(buildAdds(id))}${tradeWarning(id)}${hallDelay(c, buildAdds(id), d.work * L)}${d.house ? housingWarning(Math.floor(d.house * levelMultAt(id, L) * repBonus('housing'))) : ''}</div></button>`;
     }
     if (!hallFirst) h += '<hr>' + hallHint();
-    if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1;
-      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">Expand borders</div><div class="muted">Claim the surrounding land (${n}×${n}).</div>${costHTML(c)}</div></button>`; }
+    if (run.exp < EXPAND_COST.length) { const c = EXPAND_COST[run.exp], n = MAP_RADIUS[run.exp + 1] * 2 + 1, land = landAhead(), last = run.exp === EXPAND_COST.length - 1;
+      const TN = { forest: 'forest', hill: 'hills', water: 'water' }, tri = land.triples.map(t => TN[t]), list = tri.length > 1 ? tri.slice(0, -1).join(', ') + ' and ' + tri[tri.length - 1] : tri[0];
+      const holds = `${land.plots} open plot${land.plots === 1 ? '' : 's'}${tri.length ? ', with triple sites for ' + list : ''}.`;
+      h += `<hr><button class="card${canAfford(c) ? '' : ' cant'}" data-act="expand"><div class="ic">${sprite('map')}</div><div class="bd"><div class="nm">${last ? 'Claim the Frontier' : 'Expand borders'}</div><div class="muted">${last ? 'The last ring of land around your map' : 'Claim the surrounding land'} (${n}×${n}): ${holds}</div>${costHTML(c)}</div></button>`; }
     else h += '<hr><p class="muted">Your borders are as wide as they go. Tap forest, hills or water to clear it for more room.</p>';
   } else if (ui.tab === 'research') {
     const avail = RESEARCH.filter(r => !isCharter(r) && !hasResearch(r.id) && r.hall <= hall), owned = RESEARCH.filter(r => hasResearch(r.id));
