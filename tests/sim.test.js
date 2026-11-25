@@ -363,6 +363,7 @@ test('a save holding research that no longer exists (Royal Seal, Caravan Routes)
 test('Royal Surveyors halve the price of clearing land', sim => {
   const before = sim.clearCost().gold; sim.state.run.tiles[sim.HALL_KEY].level = 2;
   sim.state.run.res.gold = 1e9; sim.state.run.res.wood = 1e9;
+  sim.state.run.trader.offers = ['survey']; // a charter: bought from the trader
   assert.ok(sim.buyResearch('survey').ok); assert.strictEqual(sim.clearCost().gold, before / 2);
 });
 
@@ -458,15 +459,15 @@ test('the next hall: hallWait, and the hall is raised by hand one level at a tim
   run.tiles[sim.HALL_KEY].level = sim.HALL_MAX; assert.strictEqual(sim.hallWait(), null, 'no next hall: no wait at all');
 });
 
-test('past the Palace: two named halls that open with Crowns held, at HALL_GROWTH (4) times the last price each, and none after them', sim => {
-  assert.strictEqual(sim.HALL_MAX, 7); assert.strictEqual(sim.HALL_GROWTH, 4); assert.deepStrictEqual(plain(sim.HALL_CROWNS), { 6: 30, 7: 75 });
+test('past the Palace: two named halls that open with Crowns held, at HALL_GROWTH (3.75) times the last price each, and none after them', sim => {
+  assert.strictEqual(sim.HALL_MAX, 7); assert.strictEqual(sim.HALL_GROWTH, 3.75); assert.deepStrictEqual(plain(sim.HALL_CROWNS), { 6: 30, 7: 75 });
   assert.deepStrictEqual([1, 2, 3, 4, 5, 6, 7].map(sim.hallName), ['Village Hall', 'Manor', 'Keep', 'Castle', 'Palace', 'Royal Palace', 'Imperial Palace']);
   for (let l = 1; l <= sim.MAX_LEVEL; l++) assert.ok(!/\+/.test(sim.hallName(l)), 'no "+N" hall names: ' + sim.hallName(l));
   field(sim); const run = sim.state.run, hall = run.tiles[sim.HALL_KEY], meta = sim.state.meta;
-  // the cost ladder: the Palace's price times 4, then times 4 again
+  // the cost ladder: the Palace's price times HALL_GROWTH, then times HALL_GROWTH again (each material rounded up)
   const at = l => { hall.level = l; return plain(sim.upgradeCost(hall)); };
   const castle = at(4), palace = at(5), royal = at(6);
-  for (const r in castle) { assert.strictEqual(palace[r], castle[r] * 4, 'Royal Palace ' + r); assert.strictEqual(royal[r], castle[r] * 16, 'Imperial Palace ' + r); }
+  const G = sim.HALL_GROWTH; for (const r in castle) { assert.strictEqual(palace[r], Math.ceil(castle[r] * G), 'Royal Palace ' + r); assert.strictEqual(royal[r], Math.ceil(castle[r] * G * G), 'Imperial Palace ' + r); }
   // Crowns held open them, not Crowns on offer
   hall.level = 5; run.gold = sim.goldForCrowns(80, 0) * 2; meta.crowns = 29; sim.setState(sim.state);
   assert.ok(sim.pendingCrowns() >= 80, 'plenty on offer');
@@ -515,7 +516,7 @@ test('version-3 saves migrate: each kind takes the lowest level among its buildi
   for (const k of ['5,4', '4,5', '6,5', '5,6', '4,4']) assert.strictEqual(s.run.tiles[k].level, undefined, k + ' has no level of its own');
   assert.ok(notes.some(n => /level of the lowest/.test(n)), 'farms at different levels: the player is told ' + notes.join('|'));
   const even = JSON.parse(JSON.stringify(v3)); even.run.tiles['5,4'].level = even.run.tiles['6,5'].level = 5;
-  assert.strictEqual(sim.sanitizeSave(even, 1000).notes.length, 0, 'nothing to say when no level changed');
+  assert.strictEqual(sim.sanitizeSave(even, 1000).notes.filter(n => !/travelling trader/.test(n)).length, 0, 'nothing to say when no level changed (a Keep is told about the trader)');
   sim.setState(s); assert.strictEqual(sim.count('farm'), 3); near(sim.calc.tiles['5,4'].levelMult, 2, 1e-9, 'every farm works at level 2:');
   const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000); assert.strictEqual(JSON.stringify(back.state), sim.serialize(), 'and round-trips as the current version'); assert.strictEqual(back.notes.length, 0);
 });
@@ -525,16 +526,96 @@ test('saves from before the trades ate say once what changed; new games never do
     tiles: { '5,5': { kind: 'hall', id: 'hall', level: 4 }, '5,4': { kind: 'building', id: 'farm' }, '6,6': { kind: 'building', id: 'guild' } } } };
   const jobs = n => /The trades now eat/.test(n) && /Markets, Blacksmiths and Guildhalls share the food/.test(n) && /Taverns no longer make gold/.test(n) && /food store is untouched/.test(n);
   const out = sim.sanitizeSave(v4, 1000);
-  assert.strictEqual(out.state.v, 6); assert.strictEqual(out.notes.filter(jobs).length, 1, 'a version-4 town with a Guildhall is told, once: ' + out.notes.join('|'));
+  assert.strictEqual(out.state.v, sim.SAVE_VERSION); assert.strictEqual(out.notes.filter(jobs).length, 1, 'a version-4 town with a Guildhall is told, once: ' + out.notes.join('|'));
   assert.strictEqual(out.state.run.levels.guild, 2, 'its levels are kept');
   for (const v of [4, 5]) for (const id of ['market', 'smith', 'tavern']) { const o = JSON.parse(JSON.stringify(v4)); o.v = v; o.run.tiles['6,6'].id = id; assert.strictEqual(sim.sanitizeSave(o, 1000).notes.filter(jobs).length, 1, 'and a version-' + v + ' one with a ' + id); }
   const noTrade = JSON.parse(JSON.stringify(v4)); delete noTrade.run.tiles['6,6'];
-  assert.strictEqual(sim.sanitizeSave(noTrade, 1000).notes.length, 0, 'a town with no trade or Tavern has nothing to be told');
+  assert.strictEqual(sim.sanitizeSave(noTrade, 1000).notes.filter(jobs).length, 0, 'a town with no trade or Tavern has nothing to be told about them');
   sim.setState(out.state); const again = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000);
-  assert.strictEqual(again.notes.length, 0, 'saved again, it loads as version 6 without the note');
+  assert.strictEqual(again.notes.length, 0, 'saved again, it loads as the current version without the note');
   sim.startNewGame(0); assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'a fresh game never shows it');
   const s = town(sim, 4); for (const id of ['market', 'guild']) assert.ok(sim.build(s.shift(), id).ok, 'build ' + id);
   assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'nor does a new town with a Market and a Guildhall');
+});
+
+// ── The charter trader ──
+const keepTown = sim => { const free = town(sim, 3); assert.strictEqual(sim.hallLevel(), 3); return free; };
+test('trader: comes when the Keep is raised with three charters the town can use; none before', sim => {
+  const s = sim.newState(0); s.run = sim.newRun(12345); sim.setState(s); sim.state.run.res = { gold: 1e9, food: 1e6, wood: 1e9, stone: 1e9, iron: 1e9 };
+  sim.creditAway(5 * 86400); assert.strictEqual(sim.state.run.trader.started, false); assert.strictEqual(sim.traderOffers().length, 0, 'no trader at a Village Hall, however long away');
+  sim.state.run.tiles[sim.HALL_KEY].level = 2;
+  sim.state.run.res.gold = 1e9; assert.strictEqual(sim.buyResearch('plough').ok, false, 'a charter is not for sale in the Research tab'); assert.ok(!sim.hasResearch('plough'));
+  assert.ok(sim.buyResearch('axes').ok, 'Village Hall research still is');
+  keepTown(sim); const offers = plain(sim.traderOffers());
+  assert.strictEqual(offers.length, sim.TRADER_OFFERS, 'the Keep brings the trader at once: ' + offers);
+  for (const id of offers) { const r = sim.RESEARCH.find(r => r.id === id); assert.ok(r.hall >= 2 && r.hall <= 3, id + ' is a charter the Keep allows'); assert.ok(!r.mult || Object.keys(r.mult).some(k => sim.count(k) > 0), id + ' is of use: ' + JSON.stringify(r.mult)); }
+  assert.strictEqual(new Set(offers).size, offers.length, 'three different charters');
+});
+test('trader: the timer runs on real time away, not on the rested bonus, and on the live game', sim => {
+  keepTown(sim); const tr = sim.state.run.trader; assert.strictEqual(tr.queued, 0);
+  const r = sim.creditAway(11 * 3600); assert.ok(r.credited + r.rested > 12 * 3600, 'the rested town is credited more than 12 hours'); assert.strictEqual(tr.queued, 0, 'but 11 real hours bring no visit');
+  near(sim.traderNext(), 3600, 1e-6, 'an hour to go:');
+  sim.traderTick(3599); assert.strictEqual(tr.queued, 0); sim.traderTick(1); assert.strictEqual(tr.queued, 1, 'the twelfth hour, played with the game open, brings the next');
+  assert.ok(sim.researchFx('offlineHours') < 20, 'without Stewardship time away is capped...');
+  sim.creditAway(12 * 3600); assert.strictEqual(tr.queued, 2, '...but not for the trader: 12 more hours, one more visit');
+});
+test('trader: visits wait, never expire, and queue to TRADER_BANK behind the open one', sim => {
+  keepTown(sim); const first = plain(sim.traderOffers()), tr = sim.state.run.trader;
+  sim.creditAway(30 * 86400);
+  assert.deepStrictEqual(plain(sim.traderOffers()), first, 'the open visit is still there after a month');
+  assert.strictEqual(tr.queued, sim.TRADER_BANK); assert.strictEqual(sim.traderWaiting(), 1 + sim.TRADER_BANK); assert.strictEqual(sim.traderNext(), null, 'the queue is full: the timer waits');
+  assert.ok(sim.dismissTrader().ok); assert.strictEqual(sim.traderOffers().length, 3, 'sending the trader away opens the next visit'); assert.strictEqual(tr.queued, sim.TRADER_BANK - 1);
+  near(sim.traderNext(), 12 * 3600, 1e-6, 'and the timer starts again from the full twelve hours:');
+  assert.ok(sim.buyResearch(sim.traderOffers()[0]).ok); assert.ok(sim.buyResearch(sim.traderOffers()[0]).ok); assert.strictEqual(sim.traderOffers().length, 0, 'three visits, then none');
+  assert.strictEqual(tr.bought, 2); assert.strictEqual(sim.dismissTrader().ok, false, 'nothing to send away');
+});
+test('trader: one purchase closes the visit; the other offers cannot be bought; only an offer can', sim => {
+  keepTown(sim); const [a, b, c] = plain(sim.traderOffers()), tr = sim.state.run.trader;
+  const off = sim.CHARTERS.find(r => r.hall <= 3 && ![a, b, c].includes(r.id) && !sim.hasResearch(r.id));
+  assert.strictEqual(sim.buyResearch(off.id).ok, false, 'a charter that is not on offer');
+  sim.state.run.res.gold = 0; assert.strictEqual(sim.buyResearch(a).ok, false, 'one it cannot afford'); assert.strictEqual(sim.traderOffers().length, 3, 'leaves the visit open');
+  sim.state.run.res.gold = 1e9; const res = sim.buyResearch(a); assert.ok(res.ok && /charter/.test(res.msg)); assert.ok(sim.hasResearch(a));
+  assert.strictEqual(sim.traderOffers().length, 0); assert.strictEqual(sim.buyResearch(b).ok, false); assert.strictEqual(sim.buyResearch(c).ok, false, 'the others went back in the pack');
+  for (let i = 0; i < 12; i++) { sim.creditAway(12 * 3600); assert.ok(!sim.traderOffers().includes(a), 'what is owned is never offered again'); sim.dismissTrader(); }
+});
+test('trader: only charters the town can use are offered; with none, the visit waits', sim => {
+  keepTown(sim); const seen = new Set();
+  for (let i = 0; i < 40; i++) { for (const id of sim.traderOffers()) seen.add(id); sim.dismissTrader(); sim.creditAway(12 * 3600); }
+  for (const id of ['charter', 'shafts', 'bellows']) assert.ok(!seen.has(id), id + ': no Market, Mine or Blacksmith stands');
+  for (const id of ['plough', 'saws', 'survey', 'ale', 'masonry']) assert.ok(seen.has(id), id + ' turns up in 40 visits');
+  // A town with nothing left to buy: the visit stays queued until something is.
+  const s = sim.state.run, tr = s.trader; for (const r of sim.CHARTERS) if (r.hall <= 3) s.research[r.id] = 1; tr.offers = []; tr.queued = 1; sim.traderTick(0);
+  assert.strictEqual(sim.traderOffers().length, 0); const q = tr.queued; assert.strictEqual(q, 1, 'the visit waits in the queue');
+  s.tiles[sim.HALL_KEY].level = 4; sim.traderTick(0); assert.ok(sim.traderOffers().length >= 1, 'a Castle opens it with what it allows: ' + plain(sim.traderOffers())); assert.strictEqual(tr.queued, q - 1);
+  for (const id of sim.traderOffers()) assert.strictEqual(sim.RESEARCH.find(r => r.id === id).hall, 4);
+});
+test('trader: offers are drawn from the seed and survive a save and load; the timer and queue reset with the reign', sim => {
+  keepTown(sim); sim.creditAway(30 * 3600); const tr = plain(sim.state.run.trader);
+  const back = sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).state.run.trader; assert.deepStrictEqual(plain(back), tr, 'the trader round-trips');
+  const again = loadSim(); again.startNewGame(0); keepTown(again); assert.deepStrictEqual(plain(again.traderOffers()), plain(sim.state.run.trader.offers.length ? tr.offers : []), 'the same town draws the same offers');
+  const bad = JSON.parse(sim.serialize()); bad.run.trader = { started: true, wait: -5, queued: 99, visit: 'x', offers: ['axes', 'nope', '<b>', tr.offers[0], tr.offers[0], 'plough', 'saws', 'ale', 'survey'], bought: -1 };
+  const t2 = sim.sanitizeSave(bad, 1000).state.run.trader;
+  assert.ok(t2.offers.length <= sim.TRADER_OFFERS && t2.offers.every(id => sim.CHARTERS.some(c => c.id === id)) && new Set(t2.offers).size === t2.offers.length, 'offers: known charters, no repeats, at most three: ' + t2.offers);
+  assert.ok(t2.queued <= sim.TRADER_BANK && t2.wait === 0 && t2.visit === 0 && t2.bought === 0);
+  sim.state.run.tiles[sim.HALL_KEY].level = 4; sim.state.run.gold = sim.goldForCrowns(sim.CROWN_MIN, 0) * 1.01; assert.ok(sim.prestige().ok);
+  assert.deepStrictEqual(plain(sim.state.run.trader), plain(sim.newTrader()), 'a new reign: no trader until its Keep');
+});
+test('trader: A Seat of Learning asks for three purchases from the trader in one reign', sim => {
+  const d = sim.DECREES.find(d => d.id === 'scholars'); keepTown(sim);
+  for (let i = 0; i < 3; i++) { assert.deepStrictEqual(plain(d.progress()), [i, 3]); sim.creditAway(12 * 3600); assert.ok(sim.buyResearch(sim.traderOffers()[0]).ok); }
+  assert.deepStrictEqual(plain(d.progress()), [3, 3]);
+});
+test('version-6 saves: research already known is kept; a town at a Keep has one visit waiting and is told once', sim => {
+  keepTown(sim); const s6 = JSON.parse(sim.serialize()); s6.v = 6; delete s6.run.trader; s6.run.research = { plough: 1, masonry: 1, axes: 1 };
+  const notes = sim.adoptSave(s6, 1000), tr = sim.state.run.trader;
+  assert.ok(sim.hasResearch('plough') && sim.hasResearch('masonry') && sim.hasResearch('axes'), 'known research kept');
+  assert.strictEqual(notes.filter(n => /travelling trader/.test(n)).length, 1, 'told once: ' + notes.join('|'));
+  assert.ok(tr.started); assert.strictEqual(sim.traderOffers().length, 3, 'a visit is waiting'); assert.ok(!sim.traderOffers().includes('plough') && !sim.traderOffers().includes('masonry'));
+  assert.strictEqual(sim.sanitizeSave(JSON.parse(sim.serialize()), 1000).notes.length, 0, 'saved again, nothing more to say');
+  const v1 = JSON.parse(JSON.stringify(s6)); v1.run.tiles[sim.HALL_KEY].level = 1; v1.run.research = { axes: 1 };
+  const o = sim.sanitizeSave(v1, 1000); assert.strictEqual(o.notes.filter(n => /travelling trader/.test(n)).length, 0, 'a Village Hall has nothing to be told'); assert.strictEqual(o.state.run.trader.started, false);
+  const v2 = JSON.parse(JSON.stringify(v1)); v2.run.tiles[sim.HALL_KEY].level = 2;
+  const o2 = sim.sanitizeSave(v2, 1000); assert.strictEqual(o2.notes.filter(n => /travelling trader/.test(n)).length, 1, 'a Manor is told (its charters left the Research tab)'); assert.strictEqual(o2.state.run.trader.started, false, 'but waits for its Keep');
 });
 
 // ── Terrain ──
@@ -603,7 +684,7 @@ test('terrain is deterministic per seed; version-1 saves keep the old generator'
 });
 
 test('a missing grid is regrown by the generator that made the map (run.gen)', sim => {
-  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 6);
+  const run = sim.newRun(4242); assert.strictEqual(run.gen, 2, 'new maps are marked as features (gen 2)'); assert.strictEqual(sim.SAVE_VERSION, 7);
   const s = sim.newState(0); s.run = run; const raw = plain(s); delete raw.run.terrain;
   let got = sim.sanitizeSave(raw, 1000).state.run; assert.strictEqual(got.gen, 2); assert.deepStrictEqual(plain(got.terrain), plain(sim.genTerrain(4242)), 'gen 2: genTerrain');
   raw.run.terrain = [['<img>']]; assert.deepStrictEqual(plain(sim.sanitizeSave(raw, 1000).state.run.terrain), plain(sim.genTerrain(4242)), 'an invalid grid too');

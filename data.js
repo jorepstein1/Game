@@ -24,11 +24,12 @@ const HALL_CROWNS = { 6: 30, 7: 75 }; // hall level: Crowns held needed to raise
 // (five check-ins a day; see tests/balance.test.js). A night away earns roughly a fifth to a third of the Palace.
 // The Castle's stone was raised when food and iron became the trades' supplies. The Palace's gold and stone are set
 // so that its timing holds in a first reign and, through HALL_GROWTH, the Royal Palace's in a reign begun with 30 Crowns.
+// Its gold came down (1.65e7 to 1.15e7) when charters moved to the trader: fewer charters before it, so less income.
 const HALL_COST = [ // cost to leave level 1, 2, 3, 4; later levels multiply the last by HALL_GROWTH each
   { gold: 2500, wood: 1000, stone: 250 }, { gold: 1.1e5, wood: 8.4e4, stone: 5.04e4 },
-  { gold: 6.5e5, stone: 3.8e5 }, { gold: 1.65e7, stone: 1.3e6, iron: 1.12e5 },
+  { gold: 6.5e5, stone: 3.8e5 }, { gold: 1.15e7, stone: 1.3e6, iron: 1.12e5 },
 ];
-const HALL_GROWTH = 4;           // Royal Palace 4x the Palace, Imperial 16x: in a reign begun with 30 (75) Crowns held it is affordable about when 20 Crowns come on offer
+const HALL_GROWTH = 3.75;        // Royal Palace 3.75x the Palace, Imperial about 14x (4 before the trader): in a reign begun with 30 (75) Crowns held it is affordable about when 20 Crowns come on offer
 const HALL_HOUSING = 5;          // villagers housed per hall level
 const HALL_FORAGE = 0.5;         // food per second per hall level
 const HALL_BONUS = 0.25;         // all production per hall level above 1
@@ -95,7 +96,7 @@ const CROWN_BONUS = 0.05;        // production bonus per Crown
 // last, so starting over pays. CROWN_GOLD is set so that a first reign is offered 15 Crowns about when its Palace
 // stands (about 37 hours at five check-ins a day) and 20 about half a day later.
 const CROWN_RATE = 13;
-const CROWN_GOLD = 1.4e6;
+const CROWN_GOLD = 1e6;         // 1.4e6 before the trader: with fewer charters a reign earns less after the Palace
 const CROWN_STEEPEN = 0;
 const CROWN_DEAR_FROM = 30;      // past this many Crowns held the threshold also multiplies by (multiplier / multiplier at 30)^CROWN_DEAR,
 const CROWN_DEAR = 4;            // so later reigns must grow further, not just repeat the first reign faster
@@ -167,6 +168,17 @@ const RESEARCH = [
   { id: 'mint', name: 'Royal Mint', desc: 'All gold buildings ×2', hall: 5, cost: { gold: 2e8, stone: 2.5e7 }, mult: { cottage: 2, market: 2, smith: 2 } },
 ];
 
+// Charters: every piece of research above the Village Hall (hall 2 and up). The five Village Hall ones stay in the
+// Research tab as the tutorial; charters are sold only by a travelling trader (sim.js, "The charter trader"). The
+// trader first comes when the Keep is raised, then once every TRADER_HOURS of real time (the rested bonus does not
+// bring the trader sooner), with TRADER_OFFERS charters the town can use. The player buys one, at today's price, and
+// the others go back in the pack; or sends the trader away. A visit never expires: while one is open the timer keeps
+// running and up to TRADER_BANK more visits wait behind it, so a player away for a day and a half loses nothing.
+const TRADER_HALL = 3;            // the Keep
+const TRADER_HOURS = 12;
+const TRADER_OFFERS = 3;
+const TRADER_BANK = 2;
+
 // Repeatable upgrades: gold sinks with exponentially scaling costs. Levels reset on abdication.
 const REPEATABLES = [
   { id: 'food', name: 'Granaries', desc: 'Food production +25% per level', hall: 3, cost: { gold: 1.5e6 }, growth: 4, per: 0.25 },
@@ -205,7 +217,7 @@ const DECREES = [
   { id: 'marches', title: 'The Marches', desc: 'Expand your borders a second time.', done: () => state.run.exp >= 2, reward: { stone: 5e5 } },
   { id: 'city', title: 'A Thriving City', desc: 'Reach a population of 750. Villagers need housing, and bigger towns eat more per head.', progress: () => [state.run.pop, 750], reward: { gold: 2e6 } },
   { id: 'guild', title: 'Brotherhood of Trades', desc: 'Build a Guildhall where it touches Markets or Blacksmiths. It boosts them, not itself.', done: () => count('guild') >= 1, reward: { gold: 2e6 } },
-  { id: 'scholars', title: 'A Seat of Learning', desc: 'Hold twelve pieces of research at once.', progress: () => [Object.keys(state.run.research).length, 12], reward: { iron: 1e5 } },
+  { id: 'scholars', title: 'A Seat of Learning', desc: 'Buy from the travelling trader three times in one reign.', progress: () => [state.run.trader.bought, 3], reward: { iron: 1e5 } },
   { id: 'roads', title: 'All Roads Lead Here', desc: 'Build Royal Roads twice (Research tab, repeatable upgrades).', progress: () => [repLevel('prod'), 2], reward: { gold: 2e7 } },
   { id: 'riches', title: 'Overflowing Coffers', desc: 'Earn 20,000 gold per second.', progress: () => [calc.base.gold, 20000], reward: { gold: 3e7 } },
   { id: 'palace', title: 'Crown Jewel', desc: 'Raise a Palace.', done: () => hallLevel() >= 5, reward: { gold: 1e7 } },

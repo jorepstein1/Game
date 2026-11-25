@@ -22,6 +22,9 @@
 //      (land and a first building of each kind may cost up to a quarter of the wait, anything else 3%).
 //      It never lets a purchase run another hall material short, and it skips producers of a material it
 //      already holds far more of than anything it wants costs (noGlut: true turns that off: a careless buyer).
+// Charters (research above the Village Hall) come only from the trader: the bot weighs the ones on offer like
+// anything else, and sends a visit away only when it can afford none of it and another visit waits. It takes the visit's
+// catch-up offer (see traderLagging) while the trade it helps makes under 20% of the gold, unless it delays the hall.
 // A second, much simpler buyer (buyer: 'simple') cross-checks that the milestones belong to the game and not to
 // rule 4: it keeps rules 1 to 3, buys the hall when it can, and otherwise buys the cheapest thing on offer that
 // costs at most a tenth (share) of what the next hall costs. It estimates nothing. buyer: 'greedy' is the same with
@@ -53,7 +56,7 @@ function play(seed, opts) {
   const s = sim.newState(0); s.run = sim.newRun(seed, opts && opts.crowns); // with Crowns held, the head start a new kingdom gets
   if (opts && opts.crowns) s.meta.crowns = s.meta.bonusCrowns = opts.crowns; // what-if: start with Crowns already held
   sim.setState(s);
-  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], foodBuys: { hunger: 0, gold: 0 }, buys: 0, charters: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0 } };
+  const B = sim.BUILDINGS, out = { seed, marks: {}, stamps: {}, prestiges: [], visits: [], paybacks: [], firsts: [], felt: [], kinds: { build: 0, up: 0, other: 0 }, names: [], foodBuys: { hunger: 0, gold: 0 }, buys: 0, charters: 0, fresh: 0, starve: 0, peakGold: 0, spent: { build: 0, up: 0, research: 0, hall: 0, expand: 0, rep: 0, clear: 0, clearGuild: 0 } };
   const run = () => sim.state.run;
   const plots = () => { const r = sim.mapRadius(), o = [];
     for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] === 'plain') o.push([x, y]);
@@ -71,22 +74,38 @@ function play(seed, opts) {
     if (sim.nextHallOpen()) c.push({ k: 'hall', id: 'hall', key: sim.HALL_KEY, cost: sim.upgradeCost(run().tiles[sim.HALL_KEY]), go: () => sim.upgrade(sim.HALL_KEY) }); // none past the last hall, or while the next needs more Crowns held
     for (const id of sim.BUILD_ORDER) if (sim.count(id) > 0 && sim.kindLevel(id) < sim.MAX_LEVEL) // one upgrade raises every building of the kind
       c.push({ k: 'up', id, cost: sim.kindUpgradeCost(id), food: !!(B[id].out && B[id].out.food), house: !!B[id].house, go: () => sim.upgradeKind(id) });
-    for (const r of sim.RESEARCH) if (!sim.hasResearch(r.id) && r.hall <= hl) c.push({ k: 'research', id: r.id, mult: r.mult, cost: r.cost, food: !!(r.mult && (r.mult.farm || r.mult.mill)), go: () => sim.buyResearch(r.id) });
+    for (const r of sim.RESEARCH) if (!sim.hasResearch(r.id) && r.hall <= hl && (!sim.isCharter(r) || sim.traderOffers().includes(r.id))) c.push({ k: 'research', id: r.id, mult: r.mult, cost: r.cost, food: !!(r.mult && (r.mult.farm || r.mult.mill)), go: () => sim.buyResearch(r.id) });
     if (!ps.length && sim.BUILD_ORDER.some(id => B[id].hall <= hl && sim.count(id) === 0)) { // map full and a new building type is waiting: clear one tile for it
       const r = sim.mapRadius(); let spot = null;
       for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r && !spot; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) if (!run().tiles[x + ',' + y] && run().terrain[x][y] !== 'plain') { spot = x + ',' + y; break; }
       if (spot) c.push({ k: 'clear', cost: sim.clearCost(), go: () => sim.clearLand(spot) });
+    }
+    // A first Guildhall with no open plot beside a trade: clear the forest, hill or water tile that touches the most
+    // Markets and Blacksmiths (ties: the one whose neighbours lose least terrain bonus) and build it there, as a player would.
+    if (B.guild.hall <= hl && sim.count('guild') === 0 && !ps.some(([x, y]) => sim.neighbors(x, y).some(([a, b]) => trade(run().tiles[a + ',' + b])))) {
+      const r = sim.mapRadius(); let spot = null, best = 0, bestLoss = 0;
+      for (let x = sim.MAP_MID - r; x <= sim.MAP_MID + r; x++) for (let y = sim.MAP_MID - r; y <= sim.MAP_MID + r; y++) {
+        const k = x + ',' + y, terr = run().terrain[x][y]; if (run().tiles[k] || terr === 'plain') continue;
+        const nb = sim.neighbors(x, y).map(([a, b]) => run().tiles[a + ',' + b]).filter(Boolean), n = nb.filter(trade).length;
+        const loss = nb.filter(t => t.kind === 'building' && B[t.id].adj && B[t.id].adj.terrain && B[t.id].adj.terrain[terr]).length;
+        if (n > best || (n === best && n > 0 && loss < bestLoss)) { best = n; bestLoss = loss; spot = k; } }
+      if (spot) { const cost = Object.assign({}, sim.clearCost()); sim.addCost(cost, sim.buildCost('guild'));
+        c.push({ k: 'clearGuild', id: 'guild', cost, go: () => { sim.clearLand(spot); sim.build(spot, 'guild'); } }); }
     }
     if (run().exp < sim.EXPAND_COST.length) c.push({ k: 'expand', cost: sim.EXPAND_COST[run().exp], go: () => sim.expand() });
     for (const r of sim.REPEATABLES) if (r.hall <= hl) c.push({ k: 'rep', id: r.id, cost: sim.repCost(r), food: r.id === 'food', house: r.id === 'housing', go: () => sim.buyRepeatable(r.id) });
     return c;
   }
   let reignStart = 0, now = 0; const seen = {};
+  // A first Guildhall that touches one trade counts as a new kind once the Castle has stood three check-ins (about 12 hours).
+  let castleAt = null; const castleAged = () => { if (sim.hallLevel() < 4) { castleAt = null; return false; } if (castleAt === null) castleAt = now; return now - castleAt >= 12 * 3600; };
   function act() {
     let bought = 0;
     for (let i = 0; i < 20; i++) {
       sim.setState(sim.state); const C = sim.calc, goal = sim.nextHallOpen(); // goal: there is a next hall to save for
       while (sim.decreeDone()) sim.claimDecree();
+      // The trader: an offer it cannot afford is sent away only when another visit waits behind it.
+      while (sim.traderOffers().length && run().trader.queued > 0 && !sim.traderOffers().some(id => sim.canAfford(sim.RESEARCH.find(r => r.id === id).cost))) sim.dismissTrader();
       { const lv = sim.hallLevel(), key = 'hall' + (lv + 1) + 'affordable'; // when a hall past the Palace can first be paid for (at a check-in)
         if (out.prestiges.length === 0 && lv >= 5 && goal && !out.marks[key] && sim.canAfford(sim.upgradeCost(run().tiles[sim.HALL_KEY]))) out.marks[key] = { min: +(now / 60).toFixed(1) }; }
       let c = candidates();
@@ -143,6 +162,9 @@ function play(seed, opts) {
           if (a.k === 'rep' && (a.id === 'housing' || a.id === 'food')) best = Math.max(best, 0.1);
           if (def && def.house && C.cap > 0) best = Math.max(best, (a.k === 'build' ? def.house * sim.levelMultAt(a.id, sim.kindLevel(a.id)) : def.house * sim.count(a.id)) / C.cap * 0.5);
           return best > 0 ? cost / best : 1e9; };
+        // The trader's catch-up offer (a charter for the trade that is behind) is taken while that trade makes under 20%
+        // of the gold, if it leaves the hall no later.
+        const behind = run().trader.catchUp && sim.traderLagging() ? sim.goldShare(sim.traderLagging()) < 0.2 : false, catchUp = a => behind && a.k === 'research' && a.id === run().trader.catchUp;
         const steward = c.find(a => a.k === 'research' && a.id === 'steward'); // a full day away counts: the first thing a player who sleeps buys
         const full = plots().length <= 3;
         if (steward) pick = steward;
@@ -155,7 +177,7 @@ function play(seed, opts) {
           // soonest; nothing is held back for a hall.
           let best = 1 / 0; pick = null;
           for (const a of c) {
-            const first = (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod')) || (a.k === 'build' && sim.count(a.id) === 0) || (a.k === 'expand' && full);
+            const first = (a.k === 'rep' && (a.id === 'monument' || a.id === 'prod')) || (a.k === 'build' && sim.count(a.id) === 0) || a.k === 'clearGuild' || (a.k === 'expand' && full) || catchUp(a);
             const score = first ? -1 : own(a);
             if (score <= NO_GOAL_PAYBACK && score < best) { best = score; pick = a; }
           }
@@ -172,9 +194,10 @@ function play(seed, opts) {
           let best = 1 / 0; pick = null;
           for (const a of c) { // c is cheapest first, so ties go to the cheapest
             if (a.k === 'hall') continue;
-            const w = waitAfter(a), fresh = a.k === 'build' && sim.count(a.id) === 0 && (a.id !== 'guild' || touches(a) >= 2), slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
+            const w = waitAfter(a), fresh = (a.k === 'build' && sim.count(a.id) === 0 && (a.id !== 'guild' || touches(a) >= 2 || (touches(a) >= 1 && castleAged()))) || a.k === 'clearGuild', slack = a.k === 'expand' || a.k === 'clear' || fresh ? 1.25 : 1.03;
             let score = w < eta ? w / eta : w === eta || (eta === 1 / 0) || w <= eta * slack ? 1 + 1e-12 * Math.min(own(a), 1e9) : 1 / 0;
-            if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) score = -1; // a town out of plots expands first, as it would build a new kind first
+            if ((fresh || (a.k === 'expand' && full)) && score < 1 / 0) score = -1;
+            if (catchUp(a) && w <= eta) score = -2; // the catch-up charter, when it does not delay the hall
             if (score < best) { best = score; pick = a; }
           }
         }
@@ -183,16 +206,17 @@ function play(seed, opts) {
       out.spent[pick.k] += pick.cost.gold || 0;
       if (pick.food) out.foodBuys[hungry || foodBound ? 'hunger' : 'gold']++; // a Farm, Mill or food research bought because it pays, not because the town is short
       out.kinds[pick.k === 'build' ? 'build' : pick.k === 'up' ? 'up' : 'other']++;
-      out.names.push((pick.k === 'build' ? B[pick.id].name : pick.k === 'up' ? B[pick.id].name + ' L' + (sim.kindLevel(pick.id) + 1) : pick.k === 'hall' ? sim.hallName(sim.hallLevel() + 1) : pick.k === 'research' ? 'research ' + pick.id : pick.k === 'rep' ? pick.id + ' ' + (sim.repLevel(pick.id) + 1) : pick.k === 'expand' ? 'expansion ' + (run().exp + 1) : pick.k));
+      out.names.push((pick.k === 'build' ? B[pick.id].name : pick.k === 'up' ? B[pick.id].name + ' L' + (sim.kindLevel(pick.id) + 1) : pick.k === 'hall' ? sim.hallName(sim.hallLevel() + 1) : pick.k === 'research' ? 'research ' + pick.id : pick.k === 'rep' ? pick.id + ' ' + (sim.repLevel(pick.id) + 1) : pick.k === 'expand' ? 'expansion ' + (run().exp + 1) : pick.k === 'clearGuild' ? 'land cleared, Guildhall' : pick.k));
       if (pick.k === 'research' || pick.k === 'expand' || pick.k === 'hall' || (pick.k === 'build' && sim.count(pick.id) === 0)) out.fresh++;
-      out.buys++; if (pick.k === 'research' && sim.RESEARCH.find(r => r.id === pick.id).hall >= 2) out.charters++; // a charter: research above the Village Hall
+      out.buys++; if (pick.k === 'research' && sim.isCharter(sim.RESEARCH.find(r => r.id === pick.id))) out.charters++; // a charter: bought from the trader
       const what = pick.k === 'build' ? pick.id : pick.k === 'research' ? 'research' : pick.k === 'hall' ? 'hall' + (sim.hallLevel() + 1) : null;
       if (what && !seen[what]) { seen[what] = 1; out.firsts.push({ what, t: now < 3600 ? Math.round(now) + 's' : (now / 3600).toFixed(1) + 'h' }); }
       // Payback: the time the town needs to earn the price, divided by the share of gold income the purchase adds.
       const rb = {}; for (const r in pick.cost) rb[r] = C.base[r] + (r === 'food' ? C.eaten : 0);
       const g0 = C.base.gold, earn = Object.keys(pick.cost).reduce((t, r) => t + (C.base[r] > 0 ? pick.cost[r] / C.base[r] : Infinity), 0);
       if (pick.k === 'expand' && out.prestiges.length === 0) out.marks['exp' + (run().exp + 1)] = { min: +(now / 60).toFixed(1) };
-      pick.go(); bought++; sim.setState(sim.state); if (pick.k === 'hall') noteHall();
+      pick.go(); bought++; if (pick.k === 'clearGuild') { bought++; out.buys++; out.kinds.build++; } sim.setState(sim.state); // clearing and building: two purchases
+      if (pick.k === 'hall') noteHall();
       const dg = sim.calc.base.gold - g0;
       if (pick.k === 'build' || pick.k === 'up') { // target E: what it adds to the income of the material it makes, and its payback in hours
         const mk = B[pick.id].glob ? 'gold' : Object.keys(B[pick.id].out || { gold: 0 })[0], before = mk === 'food' ? C.base.food + C.eaten : C.base[mk], after = mk === 'food' ? sim.calc.base.food + sim.calc.eaten : sim.calc.base[mk];
@@ -218,11 +242,11 @@ function play(seed, opts) {
     const guilds = touching('guild', ['market', 'smith']), taverns = touching('tavern', ['market', 'smith', 'guild']);
     return { shares, gold: C.base.gold, fill: C.supply, run: C.smithRun, trades: sim.count('market') + sim.count('smith') + sim.count('guild'), markets: sim.count('market'), smiths: sim.count('smith'), taverns, store: C.eaten > 0 ? R.res.food / C.eaten : 0, foodMade: C.foodMade, eaten: C.eaten,
       sold: C.foodUsed, wanted: C.foodWanted, ironMade: C.ironMade, ironUsed: C.ironUsed, ironStock: R.res.iron, guilds }; };
-  let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0;
+  let t = 0, si = 0, hall = 1, runStart = 0, tapDebt = 0, econDue = null; // econDue: a hall whose economy is taken again at the end of the check-in that raised it
   // A new hall level, noted the moment it is raised (the town as it stands then, before the rest of that check-in's purchases).
   function noteHall() {
     if (sim.hallLevel() > hall) { hall = sim.hallLevel(); const name = sim.hallName(hall);
-      if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), buildings: Object.values(run().tiles).filter(x => x.kind === 'building').length, kindsBuilt: sim.BUILD_ORDER.filter(id => sim.count(id) > 0).length, levels: Object.assign({}, run().levels), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold, econ: econ() }; }
+      if (out.prestiges.length === 0 && !out.marks[name]) out.marks[name] = { min: +(t / 60).toFixed(1), buildings: Object.values(run().tiles).filter(x => x.kind === 'building').length, kindsBuilt: sim.BUILD_ORDER.filter(id => sim.count(id) > 0).length, levels: Object.assign({}, run().levels), pending: sim.pendingCrowns(), lifetimeGold: sim.fmt(sim.state.meta.stats.totalGold), goldRate: sim.calc.base.gold, econ: econ() }; if (CHECKINS && name === 'Palace' && out.prestiges.length === 0) econDue = name; }
   }
   // After any stretch of time: note new hall levels, abdicate if the policy says so, take the periodic snapshots.
   function afterStep() {
@@ -244,7 +268,7 @@ function play(seed, opts) {
   let buying = true; // buyEvery: N makes the bot buy at every Nth check-in only and just look in (and claim decrees) at the others
   const liveUntil = end => { // played second by second, as with the game open
     while (t < end) {
-      if (TICK > 0.5 && t >= SESSION * 60) { sim.stepCity(TICK); t += TICK; } else { sim.advance(0.5); t += 0.5; } now = t; // tick: a coarser step for long never-closed runs, after the opening
+      if (TICK > 0.5 && t >= SESSION * 60) { sim.stepCity(TICK); sim.traderTick(TICK); t += TICK; } else { sim.advance(0.5); sim.traderTick(0.5); t += 0.5; } now = t; // the trader's timer runs on real time, as in the game // tick: a coarser step for long never-closed runs, after the opening
       if (run().starving) out.starve += 0.5;
       if (t % 1 === 0) { tapDebt += TAPS; while (tapDebt >= 1 && sim.canCollect()) { sim.collectTaxes(); tapDebt--; } if (!sim.canCollect()) tapDebt = 0; if (buying) act(); else while (sim.decreeDone()) sim.claimDecree(); out.peakGold = Math.max(out.peakGold, sim.calc.base.gold); }
       afterStep();
@@ -265,6 +289,9 @@ function play(seed, opts) {
       if (run().starving) out.starve += r.credited;
       buying = !opts.buyEvery || i % opts.buyEvery === opts.buyEvery - 1; // with five check-ins a day and buyEvery 5: the one after the night
       const b0 = out.buys, c0 = out.charters, n0 = out.prestiges.length, f0 = out.fresh, k0 = Object.assign({}, out.kinds), nm0 = out.names.length; liveUntil(t + VISIT * 60);
+      // The town's economy at the Palace is taken when the check-in that raised it ends (the building count stays at the
+      // moment of raising): a player does not leave the game between raising the hall and the purchases that follow it.
+      if (econDue && out.prestiges.length === n0) { out.marks[econDue].econ = econ(); econDue = null; }
       if (out.prestiges.length > n0) { buying = true; liveUntil(runStart + SESSION * 60); } // having abdicated, the player stays to found the new town, as at the very start
       visit.bought = out.buys - b0; visit.charters = out.charters - c0; visit.fresh = out.fresh - f0; visit.names = out.names.slice(nm0); visit.abdicated = out.prestiges.length > n0;
       visit.builds = out.kinds.build - k0.build; visit.ups = out.kinds.up - k0.up; visit.other = out.kinds.other - k0.other;
