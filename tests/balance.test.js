@@ -48,13 +48,13 @@ runAll(jobs).then(out => {
   for (const r of first12) console.log(`     ${String(r.seed).padStart(3)}  ${(r.manorMin.toFixed(1) + 'm').padStart(6)} ${hrs([r.keep]).padStart(6)} ${hrs([r.castle]).padStart(7)} ${hrs([r.palace]).padStart(7)} ${hrs([r.crowns15]).padStart(10)} ${hrs([r.crowns20]).padStart(10)} ${String(r.buildingsAt.Palace || '-').padStart(27)} ${String(r.palaceKinds).padStart(6)}  ${hrs(r.expansions).padEnd(24)}  ${r.opening.bought} purchases`);
   // The Palace: the trader makes reigns differ, and a map a few hours of gold short at the last check-in of day 2 can only
   // raise it after the night. So the median map must be on the evening of day 2 and no map later than the morning of day 3.
-  // (Was 34-42 h on every map: changed with the trader, pending Jordan's answer.)
+  // (Was 34-42 h on every map: widened with the trader, approved by Jordan on 25 Nov 2026.)
   { const p = first12.map(r => r.palace), ok = p.filter(x => x !== null);
     console.log(`     Palace over twelve maps: median ${median(p) === null ? '-' : median(p).toFixed(1)}h, earliest ${ok.length ? Math.min(...ok).toFixed(1) : '-'}h, latest ${p.includes(null) ? 'not in 72h' : Math.max(...ok).toFixed(1) + 'h'}`);
     for (const r of first12) check(`map ${r.seed}, first reign, five check-ins a day: Keep at 3-5h, Castle at 10-14h, Palace at 32-49h`, () => { within(r.keep, 3, 5, 'Keep (h)'); within(r.castle, 10, 14, 'Castle (h)'); within(r.palace, 32, 49, 'Palace (h)'); });
     check('first reign, median of twelve maps: the Palace at 34-42h', () => within(median(p), 34, 42, 'median Palace (h), maps ' + hrs(p)));
     // 15 Crowns about when the Palace stands, in the same shape: the typical map within a check-in of it (counted in
-    // check-ins, since the night makes one check-in 8 hours), and every map inside the Palace window. (Pending Jordan, as above.)
+    // check-ins, since the night makes one check-in 8 hours), and every map inside the Palace window. (Approved with it.)
     const at = (r, h) => h === null ? null : r.visits.filter(v => v.hour <= h + 0.01).length, apart = first12.map(r => at(r, r.crowns15) === null || at(r, r.palace) === null ? Infinity : Math.abs(at(r, r.crowns15) - at(r, r.palace)));
     check('first reign, median of twelve maps: 15 Crowns on offer at the Palace\'s check-in or one either side', () => assert.ok(median(apart) <= 1, 'check-ins apart per map: ' + first12.map((r, i) => r.seed + ': ' + apart[i]).join(', ')));
     for (const r of first12) check(`map ${r.seed}, first reign: 15 Crowns on offer within the Palace window (32-49h)`, () => within(r.crowns15, 32, 49, '15 Crowns (h)')); }
